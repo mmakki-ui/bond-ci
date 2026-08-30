@@ -1,0 +1,1102 @@
+#!/bin/sh
+# /usr/sbin/bond-xctl — P5 stateless DAG executor (de-daemonized operational
+# core, extracted from bondctl v2.8). The ONLY code that walks a lifecycle
+# edge. It is a small INTERPRETER over deploy/p5/bond.dag: it reads the row
+# for the requested intent, then runs the named guard -> action -> verify ->
+# onfail leaf functions. It holds no state and no memory: every invocation
+# re-derives the current node from live probes (level-triggered reconciler,
+# K8s/Airflow lineage), so a lost or racing action is simply re-applied by
+# the next converge. All lifecycle entry points (bondctl CLI, 97-bond
+# hotplug, bond-ecod, bond-watchdog) funnel through here under ONE lock.
+#
+#   bond-xctl reconcile [refresh]   THE single level-triggered verb: observe node()
+#                           -> desired() -> walk ONE bond.dag edge (engage|disengage|
+#                           switch|agg chosen by desired(), never by the caller --
+#                           this is what dissolves the MF-1/MF-2 wrong-intent class).
+#                           `refresh` = a config-only live switch (tunnel intact ->
+#                           `switch`, no re-verify); default = re-establish (`engage`).
+#   bond-xctl node          print the current derived node (probe truth)
+#   bond-xctl selfcheck     parse+validate bond.dag, print the edge table
+#
+# The lifecycle intents themselves (engage/disengage/switch/agg/suspend/agg_revert)
+# are bond.dag rows walked INTERNALLY by reconcile(); they are no longer CLI verbs.
+#
+# BUSYBOX-SAFE POSIX sh: no bashisms, no [[ ]], no arrays, no fractional
+# sleep, no paste. Proven equivalent to the deployed bondctl wiring in
+# orchestration/bond_model.py (the CANDIDATE machine runs THIS SAME
+# bond.dag through the same guard/action/verify names).
+
+BOND_DIR="${BOND_DIR:-/etc/bond}"
+RUN_DIR="${RUN_DIR:-/var/run/bond}"        # tmpfs: lock+suspended self-clear on boot (D4)
+DAG="${DAG:-/etc/bond/bond.dag}"
+ENGARDE_PORT="59401"
+AGG_PORT="59402"
+LOCAL_EP="127.0.0.1:${ENGARDE_PORT}"
+LOCAL_AGG="127.0.0.1:${AGG_PORT}"
+WG_DEV="${WG_DEV:-wgclient1}"
+SVC="${SVC:-/etc/init.d/engarde-client}"
+AGG_SVC="${AGG_SVC:-/etc/init.d/bond-agg}"
+ENGARDE_BIN="${ENGARDE_BIN:-/usr/sbin/engarde-client}"   # overridable for the harness
+AGG_BIN="${AGG_BIN:-/usr/sbin/bond-agg}"
+STATIC_EXCLUDES="wgclient1 ifb4wgclient1 br-lan lo"
+TAG="bond-xctl"
+# MIN_AGG_SOURCES is the ARITY OF AGGREGATION, not a WAN count and not a "two
+# WANs" assumption. Aggregation means distributing ONE flow across MORE THAN ONE
+# source; with a single source there is nothing to distribute across and the
+# "aggregate" IS that source -- which is `eco`. The floor follows from the
+# DEFINITION of the operation, not from a measurement and not from a pick, it has
+# no upper bound, and it never rises with N. == bond_model.py MIN_AGG_SOURCES.
+MIN_AGG_SOURCES=2
+# AGG_W_NEUTRAL is bond-agg's OWN per-path CapEst prior, not a number picked here:
+# p4-bondagg/daemon/main.go:540-553 `parseW` builds N weights and substitutes
+# exactly this value for any entry that is missing or unparseable. Emitting N
+# copies of it states "no prior" for every path, symmetrically. See agg_weights().
+AGG_W_NEUTRAL=10000
+
+log()  { echo "$TAG: $*"; logger -t "$TAG" "$*" 2>/dev/null; }
+fail() { echo "$TAG: FATAL: $*" >&2; logger -t "$TAG" "FATAL: $*" 2>/dev/null; exit 1; }
+
+mkrun() { [ -d "$RUN_DIR" ] || mkdir -p "$RUN_DIR" 2>/dev/null; }
+
+# ---- serialization lock (tmpfs; holder-pid + age breakstale = D4 fix) ------
+LOCK="$RUN_DIR/lock"
+take_lock() {
+    mkrun
+    if ! mkdir "$LOCK" 2>/dev/null; then
+        # break a stale lock: holder pid gone, or age > 120s (power-loss crumb)
+        # MF-3: STALE must respect HOLDER LIVENESS. A live holder's legit engage
+        # hold can run ~6-8 min (5 retries x verify_local ~20s), so age alone must
+        # NOT break it. STALE iff (pid present AND holder DEAD) OR (pid absent AND
+        # aged) OR age>900 (PID-reuse backstop, above the worst legit hold).
+        HP=$(cat "$LOCK/pid" 2>/dev/null)
+        # AGE via `stat -c %Y`, but PROBE the capability first: some busybox builds ship
+        # a stat without GNU `-c`. Without it we cannot measure age, so DISABLE the
+        # age-gate (AGE=0) and fall back to holder-liveness ONLY. Reading a failed stat
+        # as mtime 0 would make AGE huge and break EVERY live lock as "aged" (a silent
+        # MF-3 regression: serialization gone). kill -0 still reaps a genuinely dead holder.
+        NOW=$(date +%s 2>/dev/null || echo 0)
+        if stat -c %Y "$LOCK" >/dev/null 2>&1; then
+            AGE=$(( NOW - $(stat -c %Y "$LOCK" 2>/dev/null || echo "$NOW") ))
+        else
+            AGE=0
+        fi
+        STALE=0
+        if [ -n "$HP" ]; then
+            kill -0 "$HP" 2>/dev/null || STALE=1              # holder recorded but DEAD
+        else
+            [ "$AGE" -gt 120 ] 2>/dev/null && STALE=1         # no holder recorded + aged
+        fi
+        [ "$AGE" -gt 900 ] 2>/dev/null && STALE=1             # PID-reuse backstop
+        if [ "$STALE" = 1 ]; then
+            log "breaking stale lock (holder=$HP)"; rm -rf "$LOCK" 2>/dev/null
+            # DIRTY (MED): our reconcile request would be LOST if we cannot take the
+            # lock. Leave a crumb so the holder re-reconciles once more after it finishes
+            # (the last request is eventually honored). reconcile() is level-triggered, so
+            # one extra pass off the LATEST facts honors whatever request(s) we coalesced.
+            mkdir "$LOCK" 2>/dev/null || { touch "$RUN_DIR/reconcile_dirty" 2>/dev/null; log "lock busy; skipping"; exit 0; }
+        else
+            touch "$RUN_DIR/reconcile_dirty" 2>/dev/null
+            log "another bond-xctl operation in progress; skipping"; exit 0
+        fi
+    fi
+    echo "$$" > "$LOCK/pid" 2>/dev/null
+    # MF-3/MF-4: release is OWNERSHIP-CHECKED (only remove the lock if WE still own
+    # it -- never delete a thief's lock after our own breakstale race), and INT/TERM
+    # must actually EXIT (busybox ash resumes after a handled signal otherwise, and
+    # would keep mutating wg/services unserialized). `exit 143` fires the EXIT trap.
+    trap 'unblock 2>/dev/null; [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$LOCK" 2>/dev/null' EXIT
+    trap 'exit 143' INT TERM
+}
+
+# ================= reality-faithful probe registry (one owner each) =========
+live_peer()    { wg show "$WG_DEV" peers 2>/dev/null | head -1; }
+live_section() {
+    P=$(live_peer); [ -n "$P" ] || return 1
+    uci show wireguard 2>/dev/null | grep -F "$P" | grep "\.public_key=" | head -1 | cut -d. -f1-2
+}
+live_direct()  { uci -q get "$(live_section).end_point" 2>/dev/null; }
+live_server_host() { D=$(live_direct); case "$D" in *:*) echo "${D%:*}";; *) return 1;; esac; }
+ep_now()       { wg show "$WG_DEV" endpoints 2>/dev/null | awk '{print $2}' | head -1; }
+
+# ============ GL/ubus SOURCE DISCOVERY (OBJ-A, Mo 2026-08-29) ==============
+# "Source status comes FROM GL, not from inference."
+#
+# CONTRACT -- this whole block is a PROBE, i.e. a FACT PRODUCER. It reads the
+# box's own declaration and prints facts. It takes NO action: nothing here
+# restarts a service, mutates wg/uci, writes a fact file, or walks a bond.dag
+# edge. That is the discovery-side reading of the reconciler rule at the head of
+# this file ("the caller writes facts, reconcile() derives the ONE edge"): a
+# discovery layer may only change what reconcile SEES, never what it DOES.
+# (Deliberate: the facts are re-derived per invocation and never cached to disk.
+# A cached source table would be STATE the level-triggered reconciler must not
+# trust, and a stale cache is exactly the failure this design forbids.)
+#
+# WHAT ROUTE-PARSING COULD NOT SEE. The previous implementation derived the
+# source list from `ip route show default`, so it could only ever see a source
+# that is ROUTED. Measured on the client (docs/INTENT.md OBJ-A/OBJ-H): netifd
+# declares FOUR WAN interfaces -- wan(eth1) metric 1, tethering(usb0) metric 2,
+# secondwan metric 3, wwan metric 4 -- and only TWO carry a default route. So
+# route-parsing saw two of the four, and `secondwan` is precisely the
+# configured-but-unrouted source it cannot see, by construction.
+# It also GUESSED metered-ness from the interface NAME ('^(usb|wwan|rmnet)').
+# Both are replaced below by what the box itself declares over ubus:
+# `available` (device present) vs `up` (L3 connected) vs routed (carries a
+# default route), the interface->l3_device mapping, and the metric.
+#
+# N-GENERIC: no interface NAME is ever tested anywhere below. The source set is
+# whatever `ubus list` declares, in whatever number and order; there is no
+# privileged source, no first/second, no 2-source assumption.
+#
+# NEVER SHRINK: every step is written so that a missing or unexpected ubus
+# field can only fail to ADD a source, never remove one the route table shows.
+# The routed set is therefore a SUPERSET of the legacy answer on any box.
+
+# _json_pick: stdin = ONE JSON object; stdout = ONE line carrying the DEPTH-1
+# SCALAR values of the requested keys, in the order asked, '|'-separated with
+# a trailing '.' sentinel so a trailing EMPTY field survives word-splitting.
+# Nested objects/arrays are skipped WHOLE, so a nested key -- e.g. the
+# per-route "metric"/"up" inside netifd's "route" array -- can never be
+# mistaken for the interface's own. Handles ubus pretty output AND compact.
+# Pure text: no jsonfilter/jshn presence assumed on the box.
+# ONE awk per interface, not one per field: this runs on every probe of a
+# ~10s-tick reconciler on a busybox router, so the process count is part of
+# the design, not an afterthought. Prints NOTHING when the input is not a
+# JSON object (a failed ubus call), so a caller can tell "no answer" from
+# "an empty answer".
+_json_pick() {   # $@ = the keys to emit, in order
+    awk -v keys="$*" '
+      function rdstr(s, i,   j, ch, t) {
+        j = i + 1; t = ""
+        while (j <= length(s)) {
+          ch = substr(s, j, 1)
+          if (ch == "\\") { t = t substr(s, j+1, 1); j += 2; continue }
+          if (ch == "\"") break
+          t = t ch; j++
+        }
+        VAL = t; return j + 1
+      }
+      function skipc(s, i,   dd, ch, n) {
+        n = length(s); dd = 0
+        while (i <= n) {
+          ch = substr(s, i, 1)
+          if (ch == "\"") { i = rdstr(s, i); continue }
+          if (ch == "{" || ch == "[") dd++
+          else if (ch == "}" || ch == "]") { dd--; if (dd == 0) return i + 1 }
+          i++
+        }
+        return i
+      }
+      { buf = buf $0 "\n" }
+      END {
+        n = length(buf); i = 1; d = 0; seen = 0; expect = "key"; key = ""
+        while (i <= n) {
+          c = substr(buf, i, 1)
+          if (c == " " || c == "\t" || c == "\n" || c == "\r") { i++; continue }
+          if (d == 0) { if (c == "{") { d = 1; seen = 1 } ; i++; continue }
+          if (c == "}") { d = 0; i++; continue }
+          if (c == ",") { expect = "key"; i++; continue }
+          if (c == ":") { expect = "value"; i++; continue }
+          if (c == "\"") {
+            i = rdstr(buf, i)
+            if (expect == "key") key = VAL
+            else { V[key] = VAL; key = ""; expect = "key" }
+            continue
+          }
+          if (c == "{" || c == "[") { i = skipc(buf, i); key = ""; expect = "key"; continue }
+          t = ""
+          while (i <= n) { c = substr(buf, i, 1)
+            if (c == "," || c == "}" || c == " " || c == "\t" || c == "\n" || c == "\r") break
+            t = t c; i++ }
+          if (expect == "value") { V[key] = t; key = ""; expect = "key" }
+        }
+        if (!seen) exit 0
+        m = split(keys, K, " "); out = ""
+        for (q = 1; q <= m; q++) out = out (K[q] in V ? V[K[q]] : "") "|"
+        print out "."
+      }'
+}
+
+gl_ok()     { command -v ubus >/dev/null 2>&1; }
+# the netifd interface namespace, as the box declares it (no name is assumed)
+gl_ifaces() { ubus list 2>/dev/null | sed -n 's/^network\.interface\.//p' | sort -u; }
+
+# _route_defaults: dev<TAB>metric for every default route that NAMES a device.
+# BLACKHOLE GUARD (required, docs/INTENT.md OBJ-H): GL's VPN kill-switch
+# configures `network.wgclient1_blackhole.metric=254`, a blackhole default
+# route. It can never be read as a source here, for TWO independent reasons,
+# either sufficient on its own:
+#   (1) iproute2 prints a blackhole route with `blackhole` as the FIRST field
+#       ("blackhole default ... metric 254"), so `$1=="default"` is FALSE; and
+#   (2) a blackhole route names no output device, so `d` stays empty and the
+#       pair is dropped by `if (d!="")`.
+# The ubus side is guarded independently: a source is accepted only with a
+# NON-EMPTY l3_device (a blackhole has none), and the kill-switch section is a
+# route, not an interface, so it is not expected in `ubus list` at all. The
+# harness asserts the ADVERSARIAL case where it IS listed as an interface.
+# Emitted as space-separated `dev=metric` pairs so every later lookup is a
+# shell `case` match instead of another awk process.
+_route_defaults() {
+    ip route show default 2>/dev/null | awk '
+        $1=="default" { d=""; m=""
+            for (i=1;i<NF;i++) { if($i=="dev") d=$(i+1); if($i=="metric") m=$(i+1) }
+            if (d!="") printf "%s=%s ", d, m }'
+}
+
+_excluded_dev() {   # TRUE (0) if $1 must never be treated as a WAN source
+    [ -z "$1" ] && return 0
+    [ "$1" = "$WG_DEV" ] && return 0
+    for _x in $STATIC_EXCLUDES; do [ "$1" = "$_x" ] && return 0; done
+    return 1
+}
+
+# METERED -- replaces the '^(usb|wwan|rmnet)' NAME GUESS.
+# Metered-ness is a BILLING property, not a network property, so it is not
+# universally observable. Two truthful sources, in precedence order:
+#   1. OPERATOR FACT `$BOND_DIR/metered` (one interface OR device name per
+#      line). This is the ONLY truthful source for a USB TETHER: INTENT OBJ-H
+#      records that a tethered phone presents as a plain DHCP netdev, so the
+#      router cannot observe its radio -- or its billing -- by construction.
+#      The old regex "happened" to classify usb0 correctly; that was luck, and
+#      luck is not a classification.
+#   2. netifd PROTO in the cellular set -> metered by construction (an internal
+#      modem). Config-derived, not name-derived. On the client this fires only
+#      for a future box: this one has NO internal modem (wwan available:false).
+# NOT invented: nothing here reads the `cellular.*` tree, because INTENT
+# records that `cellular.status` exposes no status method and the rest is
+# unchecked -- that is an open question, not a guessed field name.
+GL_CELL_PROTOS="qmi ncm mbim modemmanager 3g"
+_metered() {   # $1=iface $2=device $3=proto
+    if [ -r "$BOND_DIR/metered" ]; then
+        grep -qx -e "$1" -e "$2" "$BOND_DIR/metered" 2>/dev/null && return 0
+    fi
+    for _cp in $GL_CELL_PROTOS; do [ "$3" = "$_cp" ] && return 0; done
+    return 1
+}
+
+# gl_sources: THE source table, one line per declared source:
+#     <iface> <l3_device> <state> <metric|-> <metered|->
+# state (a property of the l3_device, not of the name):
+#   routed  the device carries a default route -> usable NOW
+#   up      available AND connected AND has an l3_device, but NOT routed
+#           -- the DARK source route-parsing cannot see
+#   idle    declared uplink, present, not connected
+#   absent  declared uplink, device not present (ubus available:false -- e.g.
+#           `wwan` on a box with no internal modem)
+# UPLINK CRITERION for a NON-routed interface: it must carry a netifd `metric`.
+# netifd metrics exist to ORDER DEFAULT ROUTES, so a configured metric is the
+# box declaring "this interface is an uplink". Measured support (INTENT OBJ-H,
+# `uci show network | grep -i metric`): exactly wan=1, tethering=2,
+# secondwan=3, wwan=4 -- the four WANs and nothing else (`lan` has none).
+# This is why `lan`/`guest`/any other up-with-an-address interface can never
+# leak into the source set, WITHOUT testing a single interface name.
+gl_sources() {
+    gl_ok || return 1
+    _RTS=" $(_route_defaults)"      # " eth1=1 usb0=2 " -- one ip+awk, once
+    _CLAIMED=" "
+    for _if in $(gl_ifaces); do
+        # ONE ubus + ONE awk per interface. The '.' sentinel proves the reply
+        # was a JSON object at all (a failed call prints nothing).
+        _F=$(ubus call "network.interface.$_if" status 2>/dev/null \
+             | _json_pick l3_device device available up proto metric)
+        [ -n "$_F" ] || continue
+        _oi=$IFS; IFS='|'; set -f
+        # shellcheck disable=SC2086
+        set -- $_F
+        set +f; IFS=$_oi
+        _dev="$1"; [ -n "$_dev" ] || _dev="$2"      # l3_device, else device
+        _av="$3"; _up="$4"; _pr="$5"; _mt="$6"
+        _excluded_dev "$_dev" && continue
+        # ROUTED? a pure shell lookup against the route pairs -- no process.
+        _rt=0; _rm=""
+        case "$_RTS" in
+            *" $_dev="*) _rt=1; _rm=${_RTS#*" $_dev="}; _rm=${_rm%% *} ;;
+        esac
+        # metric precedence: ubus -> uci (netifd OWNS the metrics, OBJ-H) ->
+        # the live route metric. Each is a measured source; none is invented.
+        [ -n "$_mt" ] || _mt=$(uci -q get "network.$_if.metric" 2>/dev/null)
+        [ -n "$_mt" ] || _mt="$_rm"
+        if   [ "$_rt" = 1 ];     then _state=routed
+        elif [ -z "$_mt" ];      then continue        # not declared an uplink
+        elif [ "$_av" = false ]; then _state=absent
+        elif [ "$_up" = true ];  then _state=up       # the DARK source
+        else                          _state=idle
+        fi
+        _md=-; _metered "$_if" "$_dev" "$_pr" && _md=metered
+        echo "$_if $_dev $_state ${_mt:--} $_md"
+        [ "$_rt" = 1 ] && _CLAIMED="$_CLAIMED$_dev "
+    done
+    # NEVER SHRINK: a device that carries a default route but that no ubus
+    # interface claimed (a route added out of band, or an unexpected status
+    # shape) is still a live source. Emitting it here makes the routed set a
+    # SUPERSET of the legacy route-parse answer on every box, so this change
+    # can only add sources, never take one away.
+    for _p in $_RTS; do
+        _d=${_p%%=*}; _m=${_p#*=}
+        [ -n "$_d" ] || continue
+        _excluded_dev "$_d" && continue
+        case "$_CLAIMED" in *" $_d "*) continue ;; esac
+        _md=-; _metered "-" "$_d" "" && _md=metered
+        echo "- $_d routed ${_m:--} $_md"
+    done
+}
+
+# ONE OBSERVATION PER INVOCATION. gl_sources is a pure probe, but a reconcile
+# pass reads the source list from several places (converged(), genconf, the
+# guards, the builders). Re-probing at each call is not MORE level-triggered,
+# it is LESS CONSISTENT: two calls in one pass can disagree if a WAN comes up
+# mid-pass, and then converged() compares the live config against one built
+# from a different world -- a torn read that shows up as a needless datapath
+# bounce or a missed one. So: probe ONCE per process, in the MAIN shell (every
+# probe below runs inside a command substitution, i.e. a subshell, and
+# subshells INHERIT this but can never write back), and let the next trigger
+# re-observe. This is not stored state: it lives only in this process, dies
+# with it, and no invocation ever starts from a remembered world.
+_SRC_SNAP=""
+
+# live_wans: the sources usable NOW = the ROUTED subset, as device names.
+# DELIBERATELY NOT WIDENED to the dark (`up`) sources: whether engarde can bind
+# and egress on an interface that is up but carries no default route is NOT
+# derivable from the record and cannot be tested without the box -- it is an
+# open question. Widening it here would put a guess in the datapath, so the
+# dark sources are PUBLISHED (`bond-xctl _sources`) and not yet CONSUMED.
+live_wans() {
+    _S="$_SRC_SNAP"
+    if [ -n "$_S" ]; then
+        printf '%s\n' "$_S" | awk '$3=="routed" {print $2}' | sort -u | grep -v "^$WG_DEV$"
+        return 0
+    fi
+    # FALLBACK (ubus absent or unusable): the legacy route parse, so a box
+    # without ubus is never left with NO underlays.
+    ip route show 2>/dev/null | awk '/^default/ {for(i=1;i<NF;i++) if($i=="dev") print $(i+1)}' \
+        | sort -u | grep -v "^$WG_DEV$"
+}
+# primary_wan: lowest netifd metric among the ROUTED sources. Metric ownership
+# is netifd's (OBJ-H), which is exactly what `eco` is defined to follow. Ties
+# break lexically by device -- a DETERMINISM rule, not a preference: no source
+# is privileged, and the answer must not depend on `ubus list` ordering.
+primary_wan() {
+    _S="$_SRC_SNAP"
+    if [ -n "$_S" ]; then
+        _P=$(printf '%s\n' "$_S" \
+            | awk -v wg="$WG_DEV" '$3=="routed" && $2!=wg && $4 ~ /^[0-9]+$/ {print $4" "$2}' \
+            | sort -k1,1n -k2,2 | awk 'NR==1 {print $2}')
+        # a routed source with NO metric anywhere must still be electable
+        [ -n "$_P" ] || _P=$(printf '%s\n' "$_S" \
+            | awk -v wg="$WG_DEV" '$3=="routed" && $2!=wg {print $2}' | sort | head -1)
+        [ -n "$_P" ] && { echo "$_P"; return 0; }
+    fi
+    ip route show 2>/dev/null | awk '$1=="default"{m=0;d="";for(i=1;i<NF;i++){if($i=="dev")d=$(i+1);if($i=="metric")m=$(i+1)} if(d!="")print m" "d}' \
+        | sort -n | awk '{print $2}' | grep -v "^$WG_DEV$" | head -1
+}
+# ordered_wans: live_wans as an ORDERED list -- lowest netifd metric first, ties
+# broken lexically by device (primary_wan's DETERMINISM rule, not a preference),
+# and any routed source whose metric is unknown last (still electable, same
+# lexical tie-break). Two properties hold BY CONSTRUCTION, not by luck:
+#   (a) `ordered_wans | head -1` == `primary_wan` (same ranking, same fallbacks);
+#   (b) `ordered_wans` is `live_wans` as a SET -- this is an ORDERING, never a
+#       filter. No head/tail cut, no branch on the count: N-generic.
+# It is the box-side twin of Layer-1's `sources` tuple (bond_model.py: ordered by
+# route metric so sources[0] IS the primary), so the artifact and the model
+# enroll the same sources in the same order against the same bond.dag.
+ordered_wans() {
+    _S="$_SRC_SNAP"
+    if [ -n "$_S" ]; then
+        _L=$(printf '%s\n' "$_S" | awk -v wg="$WG_DEV" '$3=="routed" && $2!=wg {print $4" "$2}')
+    else
+        # FALLBACK (ubus absent or unusable): the legacy route parse. A default
+        # route printed with NO `metric` keyword is metric 0 in the kernel, which
+        # is what primary_wan's own fallback already assumes -- keep them identical.
+        _L=$(ip route show 2>/dev/null | awk -v wg="$WG_DEV" '$1=="default"{m=0;d="";for(i=1;i<NF;i++){if($i=="dev")d=$(i+1);if($i=="metric")m=$(i+1)} if(d!="" && d!=wg) print m" "d}')
+    fi
+    [ -n "$_L" ] || return 0
+    # numeric metrics first (ascending, lexical tie-break), then the metric-less;
+    # the final awk de-dupes a device that carries two default routes, KEEPING its
+    # best (first) rank -- so the set never shrinks and never gains a duplicate.
+    { printf '%s\n' "$_L" | awk '$1 ~ /^[0-9]+$/' | sort -k1,1n -k2,2
+      printf '%s\n' "$_L" | awk '$1 !~ /^[0-9]+$/' | sort -k2,2
+    } | awk '$2!="" && !seen[$2]++ {print $2}'
+}
+mode_of()      { cat "$BOND_DIR/mode" 2>/dev/null || echo lightning; }
+# mode_wans: the sources this MODE enrolls -- eco = the primary only, every other
+# mode = ALL live sources, however many. N-generic by construction: no branch on
+# the count, no truncation. Ordered via ordered_wans so applied_wans and AGG_PATHS
+# share ONE ordering rule (eco is exactly its head, == primary_wan).
+# BOTH aggregate modes fall in the `*` arm on purpose. `speed` means "use the
+# fewest/fastest sources the offered load needs" (ADR-003), and that selection is
+# the DATAPATH's, made per frame at ms timescale from live capacity -- not the
+# reconciler's, which reconverges at ~10s and cannot see offered load. So `speed`
+# ENROLLS every live source and NOMINATES fewer; the reconciler must not prune the
+# set, or the daemon could never promote a source it was never given.
+# == bond_model.py mode_sources().
+mode_wans() {
+    W=$(ordered_wans); [ -n "$W" ] || return 1
+    case "$(mode_of)" in
+        eco)  R=$(printf '%s\n' "$W" | head -1) ;;
+        *)    R="$W" ;;
+    esac
+    [ -n "$R" ] || return 1; echo "$R"
+}
+
+# feeder liveness via ubus service list (NOT pgrep — D5). Falls back to pgrep
+# only if ubus is unavailable, so the probe still works off-box in the harness.
+svc_running() {   # $1 = service name (engarde-client|bond-agg)
+    if command -v ubus >/dev/null 2>&1; then
+        ubus call service list 2>/dev/null | grep -q "\"$1\"" && return 0
+        # ubus present but service not listed: treat pgrep as the tiebreak
+    fi
+    pgrep -f "/usr/sbin/$1" >/dev/null 2>&1
+}
+svc_enabled() { "$1" enabled 2>/dev/null; }   # $1 = init.d path
+
+# AGG_SCHED_TABLE -- the ONE place a MODE is mapped to an AGGREGATE SCHEDULER.
+# ADR-003 splits the aggregate mode in two: `max` (stripe every usable source)
+# and `speed` (deliver the offered load over the fewest/fastest sources). At
+# THIS layer the two are the SAME lifecycle: same feeder (bond-agg), same
+# listener (:$AGG_PORT), same arity guard, same enrolled source set. They differ
+# by exactly one emitted fact -- AGG_SCHED -- which the datapath reads. So the
+# reconciler carries ONE `agg` intent and ONE `engaged_agg` target, and a mode is
+# a COMPOSITION (mode -> sched) rather than a branch.
+#
+# The table is DATA, one `<mode>:<scheduler>` word per aggregate mode, because
+# the "a third scheduler is ONE row" claim has to be EXECUTABLE, not asserted.
+# It was measured false once: with the table written as a `case` and the mode
+# list ALSO written out in bondctl, adding `turbo` here left `bondctl mode
+# turbo` refused by the parser. Everything downstream now DERIVES from this
+# word list -- bondctl's accepted modes AND its usage string (`_sched_modes`),
+# bond-ecod's stand-down test (`_sched`), and bond_model.py's AGG_SCHED, which
+# PARSES this line rather than restating it. Layer-2 AGG-L12 adds a row to a
+# copy of this tree and asserts the diff is one line in one file and that
+# `bondctl mode <new>` then engages.
+AGG_SCHED_TABLE="max:max speed:speed"
+
+agg_sched_of() {   # $1 = mode (default: the stored mode). Prints the scheduler
+    _asm="${1:-$(mode_of)}"          # and exits 0; exits 3 when the mode is not
+    for _ase in $AGG_SCHED_TABLE; do # an aggregate mode. 3, not 1, so a caller
+        case "$_ase" in              # can tell "the table ANSWERED no" from
+            "$_asm":*) echo "${_ase#*:}"; return 0 ;;   # "I could not ASK"
+        esac                         # (an older bond-xctl exits 1 on the
+    done                             # unknown verb) -- see bond-ecod.
+    return 3
+}
+# agg_modes: the aggregate mode NAMES from the same table, `|`-separated, for
+# callers that must render or validate the mode set without copying it.
+agg_modes() {
+    _amo=""
+    for _ase in $AGG_SCHED_TABLE; do _amo="${_amo}${_amo:+|}${_ase%%:*}"; done
+    echo "$_amo"
+}
+# is_agg: "the stored mode is an aggregate mode" -- membership in the table
+# above, never a comparison against a privileged mode name.
+is_agg()   { agg_sched_of >/dev/null 2>&1; }
+susp_state() {
+    if [ -f "$RUN_DIR/suspended-degraded" ]; then echo suspended_degraded
+    elif [ -f "$RUN_DIR/suspended" ];        then echo suspended
+    else echo none; fi
+}
+# NODE = {off, engaged, suspended, suspended_degraded}. rc = engarde enabled
+# (persistent engagement); susp overrides; speed is a MODE reported as engaged.
+node() {
+    S=$(susp_state)
+    [ "$S" = suspended ]          && { echo suspended;          return; }
+    [ "$S" = suspended_degraded ] && { echo suspended_degraded; return; }
+    if svc_enabled "$SVC" || { is_agg && svc_enabled "$AGG_SVC"; }; then
+        echo engaged
+    else
+        echo off
+    fi
+}
+# DESIRED lifecycle target = pure fn of the stored facts (rc=engarde-enabled, mode).
+# NOT susp (an outcome). rc-precedence; speed engages only when the box is on. This
+# is the reconciler's core: the caller writes facts, reconcile() derives the ONE edge
+# from (observed node -> desired) -- no caller ever picks an edge (MF-1/MF-2 gone).
+# == bond_model.py desired().
+desired() {
+    svc_enabled "$SVC" || { echo off; return; }
+    is_agg && { echo engaged_agg; return; }
+    echo engaged
+}
+
+# ================= leaf ACTIONS (real side effects) =========================
+# build_engarde_conf: emit the DESIRED engarde.yml for the live facts to $1. A PURE
+# generator (its only side effect is writing $1) so BOTH genconf (write-idempotency)
+# and converged() (cmp a fresh build against the live file) share ONE builder -- the
+# config short-circuit compares apples to apples. == bond_model.py config builder.
+build_engarde_conf() {   # $1 = output path
+    [ -x "$ENGARDE_BIN" ] || fail "engarde-client not installed"
+    WANS=$(mode_wans) || fail "no live WAN underlays for mode $(mode_of)"
+    SRV="$(live_server_host):$ENGARDE_PORT" || fail "no server host from live peer"
+    PAT=""; for _w in $WANS; do PAT="${PAT}${_w}|"; done; PAT="${PAT%|}"
+    [ -n "$PAT" ] || fail "empty WAN pattern — refusing open exclude filter"
+    {
+        echo "client:"
+        echo "  description: \"bond-xctl $(mode_of)\""
+        echo "  listenAddr: \"$LOCAL_EP\""
+        echo "  dstAddr: \"$SRV\""
+        echo "  writeTimeout: 10"
+        echo "  excludedInterfaces:"
+        { ls /sys/class/net 2>/dev/null; printf '%s\n' $STATIC_EXCLUDES; } \
+            | sort -u | grep -vE "^(${PAT})$" | sed 's/^/    - "/; s/$/"/'
+    } > "$1"
+}
+genconf() {
+    # EFFECT-IDEMPOTENT (BLOCKER-1): build the config into a temp and swap engarde.yml /
+    # applied_wans ONLY when the bytes actually change (WRITE-idempotency, no file churn).
+    # On a REAL change drop the `genconf_changed` crumb so act_eng_restart bounces the
+    # datapath EXACTLY when the config moved. This is the per-leaf partner of converged():
+    # converged() no-ops a steady-state tick before ANY edge is walked; this crumb keeps
+    # a DELTA that DOES walk the engage/switch edge no-bounce when the CONFIG did not move
+    # (e.g. an ep-drift heal -> only ep_local re-pins, engarde is not restarted).
+    mkrun
+    _TMP="$BOND_DIR/.engarde.yml.new"
+    build_engarde_conf "$_TMP"
+    if cmp -s "$_TMP" "$BOND_DIR/engarde.yml" 2>/dev/null; then
+        rm -f "$_TMP" 2>/dev/null
+    else
+        mv "$_TMP" "$BOND_DIR/engarde.yml"; touch "$RUN_DIR/genconf_changed"
+    fi
+    _AW="$(echo $(mode_wans))"
+    if [ "$_AW" != "$(cat "$BOND_DIR/applied_wans" 2>/dev/null)" ]; then
+        printf '%s' "$_AW" > "$BOND_DIR/applied_wans"; touch "$RUN_DIR/genconf_changed"
+    fi
+}
+apply_endpoint() {   # $1 target endpoint (RUNTIME only; GL uci untouched)
+    _i=1
+    while [ "$_i" -le 8 ]; do
+        PUB=$(live_peer); [ -n "$PUB" ] && break; sleep 1; _i=$((_i+1))
+    done
+    [ -n "$PUB" ] || { log "WARN: no live peer after 8s"; return 1; }
+    wg set "$WG_DEV" peer "$PUB" endpoint "$1" || { log "WARN: wg set failed"; return 1; }
+}
+act_aggdown_if_agg() {
+    # on the aggregate feeder? tear it down + restore the engarde feeder (T6 tail)
+    if is_agg || svc_running bond-agg; then
+        "$AGG_SVC" stop 2>/dev/null; "$AGG_SVC" disable 2>/dev/null
+        ip link set "$WG_DEV" mtu 1420 2>/dev/null
+        act_restore_feeder
+    fi
+}
+act_restore_feeder() {
+    if svc_enabled "$SVC"; then
+        "$SVC" start 2>/dev/null
+        # MF-1: `engage_verify` was undefined (exit 127 -> always pinned DIRECT,
+        # silently unbonding on every speed exit). Pin LOCAL, fall back to DIRECT.
+        # (No full verify_local dance here -- that would add a ~20s silence to a
+        # teardown tail; the next reconcile re-verifies if needed.)
+        #
+        # CAPABLE-FIDELITY vs oracle a_restore_feeder (which pins ep='local' if capable
+        # else 'direct'): we pin LOCAL UNCONDITIONALLY here (fall back to DIRECT only when
+        # apply_endpoint finds NO live peer), and this is SAFE by construction, not luck:
+        #   1. We ALWAYS start engarde first, so ep=local NEVER lacks a listener --
+        #      INV2 (no local endpoint without a listener) holds even if the server is
+        #      engarde-incapable. It is a recoverable degraded state, never a dead state.
+        #   2. This is a teardown TAIL. Probing capability here would need the full
+        #      verify_local silence-window (~20s) on the tail of every speed exit; the
+        #      design deliberately defers that to the NEXT reconcile, whose verify_local
+        #      DOES gate LOCAL -- if the endpoint will not hold, engage's onfail reverts
+        #      to DIRECT + suspends (I9). So an incapable server self-heals one tick later.
+        #   3. The only terminal that differs from the model is a COMPOUND failure (speed
+        #      AND engarde both incapable during a speed-revert): model=direct, shell=
+        #      local-then-self-heal. The exhaustive sweep excludes mode_speed, so this
+        #      corner is untested there; the optimistic-restore + next-tick re-verify is
+        #      strictly recoverable, so unconditional-local is the faithful shell realization.
+        apply_endpoint "$LOCAL_EP" || apply_endpoint "$(live_direct)"
+    else
+        apply_endpoint "$(live_direct)"
+    fi
+}
+act_rc_on()      { "$SVC" enable 2>/dev/null; }
+act_rc_off()     { "$SVC" disable 2>/dev/null; }
+act_genconf()    { genconf; }
+act_eng_enable() { "$SVC" enable 2>/dev/null; }
+act_eng_restart(){
+    # EFFECT-IDEMPOTENT (BLOCKER-1): ensure-running, not restart-always. Bounce the
+    # datapath ONLY when genconf actually changed the config (genconf_changed crumb) OR
+    # the feeder is absent. A DELTA that walks the engage edge without a real config move
+    # (e.g. an ep-drift heal) is a NO-OP here -- no restart, no datapath silence -- while
+    # converged() no-ops the steady-state tick before any edge is walked.
+    if [ -f "$RUN_DIR/genconf_changed" ] || ! svc_running engarde-client; then
+        "$SVC" restart || fail "engarde-client restart failed"
+    fi
+    rm -f "$RUN_DIR/genconf_changed" 2>/dev/null
+}
+act_eng_stop()   { "$SVC" stop 2>/dev/null; }
+act_eng_disable(){ "$SVC" disable 2>/dev/null; }
+act_ep_local()   { apply_endpoint "$LOCAL_EP"; }
+act_ep_direct()  { apply_endpoint "$(live_direct)"; }
+act_ep_agg()   { apply_endpoint "$LOCAL_AGG"; }
+act_clear_susp() { rm -f "$RUN_DIR/suspended" "$RUN_DIR/suspended-degraded" 2>/dev/null; }
+act_genconf_if_enabled()     { svc_enabled "$SVC" && genconf; }
+act_eng_restart_if_enabled() {
+    # switch leaf (live mode change): same EFFECT-IDEMPOTENT guard as act_eng_restart.
+    # Restart ONLY on a real config change (genconf_changed) or an absent feeder, so a
+    # no-op `switch` (mode unchanged) does not bounce a healthy datapath.
+    svc_enabled "$SVC" || { rm -f "$RUN_DIR/genconf_changed" 2>/dev/null; return 0; }
+    if [ -f "$RUN_DIR/genconf_changed" ] || ! svc_running engarde-client; then
+        "$SVC" restart || log "WARN: restart failed"
+    fi
+    rm -f "$RUN_DIR/genconf_changed" 2>/dev/null
+}
+# build_agg_env: emit the DESIRED speed agg_env for the live facts to $1. A PURE
+# generator shared by act_env_gen (write-idempotency) and converged() (cmp a fresh
+# build against the live agg_env) -- the speed short-circuit compares apples to apples.
+# agg_weights: the AGG_W vector for $1 paths, POSITIONALLY aligned with AGG_PATHS.
+# Prints the vector on stdout; any complaint goes to stderr (build_agg_env captures
+# this, so a warning must never land inside agg_env).
+#
+# NOT DERIVED, and deliberately NOT INVENTED. The shipped value was `20000,15000`:
+# two numbers with no measurement behind them, AND 2-shaped -- so on the box's own
+# 4-WAN hardware paths 1 and 2 were PRIVILEGED by constants nobody measured while
+# paths 3..N silently fell through to bond-agg's parseW default.
+#   - $BOND_DIR/agg_w (operator/measured) is USED, but only when it carries exactly
+#     N positive integers. A stale 2-entry file on a 4-source box would bind weights
+#     to the WRONG paths -- silently, positionally. Refusing that is this unit.
+#   - Otherwise: N copies of AGG_W_NEUTRAL, bond-agg's own per-path prior. Equal
+#     weights == NO prior, the honest statement when nothing has been measured.
+#     Emitting an EMPTY AGG_W would NOT achieve this: bond-agg's env() default
+#     (main.go:66,308) then re-applies the 2-shaped 20000,15000.
+# OPEN QUESTION (reported, not guessed): what a MEASURED per-source weight should
+# be. bond-agg's CapEst converges per path on-path; whether an a-priori weight
+# speeds that convergence or biases it is untested, and the box exposes no
+# measurement this generator could read at config-build time.
+agg_weights() {   # $1 = N
+    _wn=$1
+    # FIRST LINE ONLY: agg_env is sourced by the procd unit, so a multi-line
+    # agg_w must never be able to inject extra lines into it.
+    _wf=$(head -1 "$BOND_DIR/agg_w" 2>/dev/null)
+    if [ -n "$_wf" ]; then
+        _wt=$(printf '%s' "$_wf" | tr ',' '\n' | grep -c .)
+        _wg=$(printf '%s' "$_wf" | tr ',' '\n' | grep -c '^[1-9][0-9]*$')
+        if [ "$_wt" = "$_wn" ] && [ "$_wg" = "$_wn" ]; then
+            printf '%s\n' "$_wf"; return 0
+        fi
+        echo "$TAG: WARN: $BOND_DIR/agg_w has $_wt entr(ies) for $_wn paths (need $_wn positive integers) - using the neutral prior" >&2
+        logger -t "$TAG" "WARN: agg_w arity $_wt != paths $_wn - neutral prior" 2>/dev/null
+    fi
+    _wo=""; _wi=1
+    while [ "$_wi" -le "$_wn" ]; do _wo="${_wo}${AGG_W_NEUTRAL},"; _wi=$((_wi+1)); done
+    printf '%s\n' "${_wo%,}"
+}
+build_agg_env() {   # $1 = output path
+    # N-GENERIC (Layer-1 NG-2). Enroll EVERY live source, in ordered_wans order
+    # (primary first, then by metric) -- the SAME order Layer-1's `sources` tuple
+    # carries, since the artifact and the model are checked against one bond.dag.
+    #
+    # WAS: `P=$(primary_wan); O=$(live_wans | grep -v "^$P$" | head -1)` and
+    # `AGG_PATHS=$P,$O` -- exactly two paths. A third live source was discarded
+    # SILENTLY: no error, no log, no reduction in the guard's count. The client box
+    # already declares FOUR WAN interfaces (docs/INTENT.md:193), so that was lost
+    # capacity on current hardware, not a future case.
+    _WL=$(ordered_wans)
+    _WN=$(printf '%s\n' "$_WL" | grep -c .)
+    [ "$_WN" -ge "$MIN_AGG_SOURCES" ] || fail "aggregate ($(mode_of)) needs >= $MIN_AGG_SOURCES live sources (have $_WN)"
+    _WP=""; for _w in $_WL; do _WP="${_WP}${_w},"; done; _WP="${_WP%,}"
+    _WV=$(agg_weights "$_WN")
+    {
+        echo "AGG_LISTEN=$LOCAL_AGG"
+        echo "AGG_SERVER=$(live_server_host):$AGG_PORT"
+        echo "AGG_PATHS=$_WP"
+        echo "AGG_W=$_WV"
+        # AGG_SCHED is the WHOLE of the max-vs-speed difference at this layer.
+        # It rides agg_env, so a max<->speed flip is a byte change in agg_env ->
+        # act_env_gen drops the existing `agg_env_changed` crumb -> act_agg_restart
+        # bounces the datapath EXACTLY once. No new edge, no new node, no new crumb.
+        # agg_sched_of cannot fail here: build_agg_env is only reached on the `agg`
+        # edge and from converged()'s engaged_agg arm, both gated on is_agg.
+        echo "AGG_SCHED=$(agg_sched_of)"
+    } > "$1"
+}
+act_env_gen() {
+    # EFFECT-IDEMPOTENT (speed analogue of genconf): build agg_env into a temp and swap
+    # ONLY on a byte change (WRITE-idempotency, no file churn). On a REAL change drop the
+    # `agg_env_changed` crumb so act_agg_restart bounces the EIF datapath EXACTLY when the
+    # env moved. A DELTA that walks the speed edge without a real env move (e.g. a speed
+    # ep-drift heal) leaves no crumb -> act_agg_restart is a no-op and only ep_agg
+    # re-pins; converged() no-ops the steady-state speed tick before any edge is walked.
+    mkrun
+    _TMP="$BOND_DIR/.agg_env.new"
+    build_agg_env "$_TMP"
+    if cmp -s "$_TMP" "$BOND_DIR/agg_env" 2>/dev/null; then
+        rm -f "$_TMP" 2>/dev/null
+    else
+        mv "$_TMP" "$BOND_DIR/agg_env"; touch "$RUN_DIR/agg_env_changed"
+    fi
+}
+act_agg_install() {
+    # On-demand FALLBACK only: the shipped canonical copy is deploy/p5/init.d/bond-agg
+    # (installed at package time). This stanza MUST stay byte-for-byte equivalent to it
+    # so a fallback-generated unit never drifts from the canonical (LOW: was missing
+    # STOP=11 and used a bare `respawn` instead of the canonical `respawn 3600 5 5`).
+    [ -x "$AGG_SVC" ] && return 0
+    cat > "$AGG_SVC" <<'SVCEOF'
+#!/bin/sh /etc/rc.common
+# procd service: bond-agg (the AGGREGATE feeder). START order 94 — first feeder.
+START=94
+STOP=11
+USE_PROCD=1
+start_service() {
+    [ -r /etc/bond/agg_env ] || return 1
+    . /etc/bond/agg_env
+    procd_open_instance
+    procd_set_param command /usr/sbin/bond-agg
+    procd_set_param env AGG_MODE=client AGG_LISTEN=$AGG_LISTEN AGG_SERVER=$AGG_SERVER AGG_PATHS=$AGG_PATHS AGG_W=$AGG_W AGG_SCHED=$AGG_SCHED
+    procd_set_param respawn 3600 5 5
+    procd_set_param stderr 1
+    procd_close_instance
+}
+SVCEOF
+    chmod 755 "$AGG_SVC"
+}
+act_agg_enable() { "$AGG_SVC" enable 2>/dev/null; }
+act_agg_restart(){
+    # EFFECT-IDEMPOTENT (speed analogue of act_eng_restart): ensure-running, not restart-
+    # always. Bounce the EIF datapath ONLY when act_env_gen actually changed agg_env
+    # (agg_env_changed crumb) OR bond-agg is absent. A speed ep-drift heal (env unchanged,
+    # agg up) is a NO-OP here -- no restart, no EIF silence -- while converged() no-ops the
+    # steady-state speed tick before any edge is walked.
+    if [ -f "$RUN_DIR/agg_env_changed" ] || ! svc_running bond-agg; then
+        "$AGG_SVC" restart || fail "bond-agg start failed"
+    fi
+    rm -f "$RUN_DIR/agg_env_changed" 2>/dev/null
+}
+act_agg_stop()   { "$AGG_SVC" stop 2>/dev/null; }
+act_agg_disable(){ "$AGG_SVC" disable 2>/dev/null; }
+act_mtu_1408()   { ip link set "$WG_DEV" mtu 1408 2>/dev/null; }
+act_mtu_1420()   { ip link set "$WG_DEV" mtu 1420 2>/dev/null; }
+act_revert() {
+    # I9 revert-then-suspend: try DIRECT, confirm readback != local, THEN stop.
+    REVOK=0; _i=1
+    while [ "$_i" -le 8 ]; do
+        if apply_endpoint "$(live_direct)"; then
+            [ "$(ep_now)" != "$LOCAL_EP" ] && { REVOK=1; break; }
+        fi
+        sleep 1; _i=$((_i+1))
+    done
+    mkrun
+    if [ "$REVOK" = 1 ]; then
+        touch "$RUN_DIR/suspended"; rm -f "$RUN_DIR/suspended-degraded"
+        "$SVC" stop 2>/dev/null
+        log "SUSPENDED: engagement unverified; reverted to DIRECT (confirmed). Retry on next wg up."
+    else
+        touch "$RUN_DIR/suspended-degraded"; rm -f "$RUN_DIR/suspended"
+        log "SUSPENDED-DEGRADED: revert unconfirmed — keeping engarde RUNNING so the local endpoint stays valid."
+    fi
+    ping -c 2 -W 3 76.76.2.0 >/dev/null 2>&1 && log "direct path verified OK" \
+        || log "WARN: direct path also failing — check the tunnel itself"
+}
+
+# ================= leaf GUARDS ==============================================
+guard_installed()     { [ -x "$ENGARDE_BIN" ] && [ -d "$BOND_DIR" ]; }
+guard_manual()        { [ "${XCTL_AUTO_CTX:-0}" != 1 ]; }   # auto policy never picks an agg mode
+guard_agg_installed() { [ -x "$AGG_BIN" ]; }
+# guard_enough_sources: an ARITY requirement (>= MIN_AGG_SOURCES live sources),
+# NOT a "two WANs" assumption -- `>=` has no upper bound, so N=3,4,...,k all pass
+# identically. Counts the SAME list build_agg_env enrolls (one source of truth).
+# The legacy `two_wans` spelling meant this all along; both DAG spellings resolve
+# here (see run_guard), exactly as bond_model.py registers both names onto the one
+# predicate (Layer-1 NG-0 asserts they are identical).
+guard_enough_sources() { [ "$(ordered_wans | grep -c .)" -ge "$MIN_AGG_SOURCES" ]; }
+
+# ================= leaf VERIFY (silence-window engage_verify) ================
+BLK=0
+unblock() { [ "$BLK" = 1 ] && iptables -D INPUT -p udp --sport "$WGPORT" -j DROP 2>/dev/null; BLK=0; }
+verify_local() {  # engage_verify(59401): endpoint HOLDS local against live traffic
+    # FAST-PATH (BLOCKER-1): an already-pinned, healthy endpoint is a no-op. Skip the
+    # iptables silence-window + re-pin dance entirely when ep is already LOCAL and the
+    # tunnel pings. converged() no-ops a steady-state tick before any edge is walked; this
+    # fast-path is the per-leaf partner for a DELTA that DOES walk the engage edge but is
+    # already re-pinned (an ep-drift heal: ep_local runs immediately before this verify),
+    # so the heal installs NO iptables. The full dance runs ONLY when ep != LOCAL still
+    # fails to hold (a genuine re-establishment).
+    if [ "$(ep_now)" = "$LOCAL_EP" ]; then
+        ping -c 1 -W 2 76.76.2.0 >/dev/null 2>&1 && return 0
+    fi
+    DIRECT_EP=$(live_direct); WGPORT=${DIRECT_EP##*:}; TGT="$LOCAL_EP"
+    ATT=1
+    while [ "$ATT" -le 3 ]; do
+        log "engaging $TGT: attempt $ATT/3 (~20s)..."
+        command -v iptables >/dev/null 2>&1 && \
+            iptables -I INPUT 1 -p udp --sport "$WGPORT" -j DROP 2>/dev/null && BLK=1
+        apply_endpoint "$TGT" || { unblock; ATT=$((ATT+1)); continue; }
+        j=1
+        while [ "$j" -le 12 ]; do
+            wg set "$WG_DEV" peer "$(live_peer)" endpoint "$TGT" 2>/dev/null
+            [ $((j % 3)) -eq 0 ] && ping -c 1 -W 1 76.76.2.0 >/dev/null 2>&1 &
+            sleep 1; j=$((j+1))
+        done
+        wait 2>/dev/null; unblock
+        GOOD=1; k=1
+        while [ "$k" -le 3 ]; do
+            [ "$(ep_now)" = "$TGT" ] || { GOOD=0; break; }
+            ping -c 2 -W 3 76.76.2.0 >/dev/null 2>&1 || { GOOD=0; break; }
+            [ "$k" -lt 3 ] && sleep 3; k=$((k+1))
+        done
+        [ "$GOOD" = 1 ] && return 0
+        ATT=$((ATT+1))
+    done
+    return 1
+}
+verify_agg() {  # engage_verify(59402)
+    # FAST-PATH (symmetric to verify_local): an already-pinned speed endpoint is a no-op.
+    # A speed ep-drift heal re-pins ep_agg immediately before this verify, so ep is
+    # already LOCAL_AGG and one ping confirms it -- no re-pin loop, no EIF churn. The
+    # full apply+ping loop runs ONLY when ep != LOCAL_AGG (a genuine re-establishment).
+    if [ "$(ep_now)" = "$LOCAL_AGG" ]; then
+        ping -c 1 -W 2 76.76.2.0 >/dev/null 2>&1 && return 0
+    fi
+    DIRECT_EP=$(live_direct); WGPORT=${DIRECT_EP##*:}; TGT="$LOCAL_AGG"
+    apply_endpoint "$TGT" || return 1
+    k=1
+    while [ "$k" -le 3 ]; do
+        [ "$(ep_now)" = "$TGT" ] || return 1
+        ping -c 2 -W 3 76.76.2.0 >/dev/null 2>&1 || return 1
+        [ "$k" -lt 3 ] && sleep 3; k=$((k+1))
+    done
+    return 0
+}
+
+# ================= dispatchers (name -> function) ===========================
+run_guard() { case "$1" in
+    installed) guard_installed;; manual) guard_manual;;
+    agg_installed) guard_agg_installed;;
+    # `two_wans` is the LEGACY spelling (pre-U6 bond.dag). Kept as an alias onto
+    # the same predicate so a half-upgraded box (new bond-xctl, old bond.dag on
+    # disk) still resolves the guard instead of refusing every speed edge.
+    enough_sources|two_wans) guard_enough_sources;;
+    *) log "unknown guard $1"; return 1;; esac; }
+# LEGACY SPELLINGS (pre-U17 bond.dag on disk): the aggregate leaf names were
+# `speeddown_if_speed` / `ep_speed` / `verify_speed`, back when `speed` was the
+# only aggregate mode. Aliased onto the same functions for the same reason
+# run_guard aliases `two_wans` (U6): a half-upgraded box resolves the table it
+# has rather than refusing every aggregate edge. New tables must not use them.
+run_action() { case "$1" in
+    aggdown_if_agg|speeddown_if_speed) act_aggdown_if_agg;; restore_feeder) act_restore_feeder;;
+    rc_on) act_rc_on;; rc_off) act_rc_off;; genconf) act_genconf;;
+    eng_enable) act_eng_enable;; eng_restart) act_eng_restart;;
+    eng_stop) act_eng_stop;; eng_disable) act_eng_disable;;
+    ep_local) act_ep_local;; ep_direct) act_ep_direct;; ep_agg|ep_speed) act_ep_agg;;
+    clear_susp) act_clear_susp;;
+    genconf_if_enabled) act_genconf_if_enabled;; eng_restart_if_enabled) act_eng_restart_if_enabled;;
+    env_gen) act_env_gen;; agg_install) act_agg_install;; agg_enable) act_agg_enable;;
+    agg_restart) act_agg_restart;; agg_stop) act_agg_stop;; agg_disable) act_agg_disable;;
+    mtu_1408) act_mtu_1408;; mtu_1420) act_mtu_1420;; revert) act_revert;;
+    *) fail "unknown action $1";; esac; }
+run_verify() { case "$1" in
+    verify_local) verify_local;; verify_agg|verify_speed) verify_agg;;
+    *) log "unknown verify $1"; return 1;; esac; }
+
+# ================= the DAG interpreter (== bond_model.py converge) ===========
+# reads the row for $1 from bond.dag; runs guards -> actions -> verify(retries)
+# -> onfail. $2 (optional) recursion-depth guard for onfail chaining.
+_dag_row_raw() { grep -v '^[[:space:]]*#' "$DAG" 2>/dev/null | awk -F'|' -v i="$1" 'NF==8 && $1==i {print; exit}'; }
+# dag_row: look the intent up, then fall back to its LEGACY spelling. U17 renamed
+# the aggregate intents `speed`->`agg` and `speed_revert`->`agg_revert`; a box
+# running a new bond-xctl against a pre-U17 bond.dag would otherwise `fail "no
+# edge 'agg'"` on every aggregate reconcile. Same fail-forward reasoning as the
+# run_guard `two_wans` alias. Falls back ONLY when the modern row is absent, so a
+# table carrying both is unambiguous.
+dag_row() {
+    _r=$(_dag_row_raw "$1")
+    if [ -z "$_r" ]; then
+        case "$1" in
+            agg)        _r=$(_dag_row_raw speed) ;;
+            agg_revert) _r=$(_dag_row_raw speed_revert) ;;
+        esac
+    fi
+    printf '%s' "$_r"
+}
+
+converge() {
+    intent="$1"; depth="${2:-0}"
+    [ "$depth" -gt 4 ] && { log "onfail recursion cap hit at $intent"; return 1; }
+    ROW=$(dag_row "$intent")
+    [ -n "$ROW" ] || fail "no edge '$intent' in $DAG"
+    # HIGH: split the DAG row with GLOBBING DISABLED. `set -- $ROW` word-splits on
+    # IFS='|', but with globbing active a field holding a glob char (e.g. from='*',
+    # the any-node wildcard) would be expanded against the cwd -- the bond.dag '*'
+    # bug. `set -f` around the split keeps every field literal; restore noglob after.
+    OLDIFS=$IFS; IFS='|'; set -f
+    # shellcheck disable=SC2086
+    set -- $ROW
+    set +f; IFS=$OLDIFS
+    e_from="$2"; e_guards="$4"; e_actions="$5"; e_verify="$6"; e_retries="$7"; e_onfail="$8"
+    cur=$(node)
+    case ",$e_from," in
+        *",$cur,"*) : ;;
+        *",*,"*)    : ;;
+        *) log "$intent: does not apply from node '$cur' (from=$e_from)"; return 1;;
+    esac
+    if [ "$e_guards" != "-" ]; then
+        OLDIFS=$IFS; IFS=,
+        for g in $e_guards; do
+            if ! run_guard "$g"; then IFS=$OLDIFS; log "$intent: guard '$g' refused"; return 1; fi
+        done
+        IFS=$OLDIFS
+    fi
+    if [ "$e_actions" != "-" ]; then
+        OLDIFS=$IFS; IFS=,
+        for a in $e_actions; do IFS=$OLDIFS; run_action "$a"; OLDIFS=$IFS; IFS=,; done
+        IFS=$OLDIFS
+    fi
+    [ "$e_verify" = "-" ] && return 0
+    OKV=1; n=1; RET=${e_retries:-1}; [ "$RET" -lt 1 ] && RET=1
+    while [ "$n" -le "$RET" ]; do
+        if run_verify "$e_verify"; then OKV=0; break; fi
+        n=$((n+1))
+    done
+    if [ "$OKV" = 0 ]; then act_clear_susp; return 0; fi
+    if [ "$e_onfail" != "-" ]; then converge "$e_onfail" $((depth+1)); fi
+    return 1
+}
+
+# ================= converged(): the stateless steady-state short-circuit =====
+# `converged "$d"` returns 0 (TRUE = already at desired -> do NOTHING) ONLY when the
+# box is FULLY at the desired target. This is the idiomatic level-triggered no-op that
+# fixes the watchdog restart-storm UNIFORMLY for engage AND speed: a healthy box walks
+# NO edge (no restart, no verify/iptables dance, no genconf/env rewrite), so the ~10s
+# reconcile tick stops bouncing the datapath. converge then runs ONLY on a real delta.
+#
+# It is a FULL-signature check, not node()-only: node() alone misses (a) an endpoint
+# drift that node() still reports as `engaged` -- checking node only would break I2
+# self-heal; and (b) a mode switch, which moves the CONFIG but not node/ep/feeders --
+# so the live config MUST be compared against a fresh desired build. Any suspend crumb
+# present => NOT converged (re-walk the edge so verify re-confirms and clears it).
+_conf_matches() {   # $1 = builder fn name, $2 = live file. TRUE iff fresh build == live.
+    _t="$RUN_DIR/.desired.cmp.$$"
+    # Build in a SUBSHELL so a builder `fail` (missing probe/underlay) is contained and
+    # simply reads as "cannot build desired" -> NOT converged (fall through to converge).
+    if ( "$1" "$_t" ) >/dev/null 2>&1; then
+        cmp -s "$_t" "$2" 2>/dev/null; _cr=$?
+    else
+        _cr=1
+    fi
+    rm -f "$_t" 2>/dev/null
+    return "$_cr"
+}
+converged() {
+    mkrun
+    [ "$(susp_state)" = none ] || return 1        # any suspend crumb -> re-verify/clear
+    case "$1" in
+        off)
+            svc_running engarde-client && return 1
+            svc_running bond-agg       && return 1
+            [ "$(ep_now)" = "$(live_direct)" ] || return 1
+            return 0 ;;
+        engaged)
+            svc_enabled "$SVC"         || return 1
+            svc_running engarde-client || return 1
+            svc_running bond-agg       && return 1
+            [ "$(ep_now)" = "$LOCAL_EP" ] || return 1
+            _conf_matches build_engarde_conf "$BOND_DIR/engarde.yml" || return 1
+            return 0 ;;
+        engaged_agg)
+            is_agg                   || return 1
+            svc_running bond-agg       || return 1
+            svc_running engarde-client && return 1
+            [ "$(ep_now)" = "$LOCAL_AGG" ] || return 1
+            _conf_matches build_agg_env "$BOND_DIR/agg_env" || return 1
+            return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# ================= THE reconciler (== bond_model.py reconcile) ===============
+# observe node() -> desired() -> walk ONE bond.dag edge. The lifecycle target is
+# chosen by desired(), never by the caller. One edge per invocation; the next
+# trigger/tick reconverges (no loop-to-fixpoint). $1="refresh" for a live config
+# switch (a mode change): the tunnel is intact, re-apply config via `switch` (no
+# re-verify, ep untouched); otherwise (on/wg-ifup/reboot/watchdog) re-establish via
+# `engage`. Serialized by the single take_lock (the caller takes it before calling).
+reconcile() {
+    d=$(desired)
+    # STATELESS SHORT-CIRCUIT: a box already fully at its desired target does NOTHING.
+    # This supersedes the per-leaf idempotency crumbs/fast-paths: converge is reached
+    # ONLY on a genuine delta (engage AND speed), so a healthy tick never restarts a
+    # feeder or runs the verify dance.
+    if converged "$d"; then return 0; fi
+    case "$d" in
+        off)           converge disengage ;;
+        engaged_agg) converge agg ;;
+        engaged)
+            if [ "$1" = refresh ] && svc_enabled "$SVC"; then converge switch
+            else converge engage; fi ;;
+        *) log "reconcile: unknown desired '$d'"; return 1 ;;
+    esac
+}
+
+# ================= selfcheck (validate the shipped table) ===================
+selfcheck() {
+    [ -r "$DAG" ] || fail "cannot read $DAG"
+    bad=0
+    # LOW: two coupled defects fixed here --
+    #  (1) SUBSHELL: the old `grep ... | while` ran the loop in a subshell, so `bad=1`
+    #      was lost on exit and selfcheck could never report a bad row. Feed the loop via
+    #      a here-doc REDIRECT instead, keeping it in THIS shell.
+    #  (2) DETECTOR: the old field count rebuilt "$nm|..|$on", which ALWAYS has 7
+    #      delimiters == 8 fields, so the NF!=8 test could never fire (a 7-field row
+    #      passed). Count fields on the RAW line via awk, which also prints the row.
+    while IFS= read -r _row; do
+        [ -n "$_row" ] || continue
+        printf '%s\n' "$_row" | awk -F'|' '
+            NF!=8 { printf "BAD ROW (fields=%d): %s\n", NF, $0; exit 3 }
+                  { printf "edge %s: %s -> %s  guards=[%s] verify=%s retries=%s onfail=%s\n", $1,$2,$3,$4,$6,$7,$8 }'
+        [ $? = 3 ] && bad=1
+    done <<EOF
+$(grep -v '^[[:space:]]*#' "$DAG" | grep -v '^[[:space:]]*$')
+EOF
+    if [ "$bad" != 0 ]; then echo "selfcheck: $DAG has malformed rows" >&2; return 1; fi
+    echo "selfcheck: $DAG parsed"
+}
+
+# ================= entry point =============================================
+case "${1:-}" in
+    reconcile)
+        take_lock
+        # ONE OBSERVATION for this whole pass (see _SRC_SNAP above): probe the
+        # sources once, under the lock, and reconcile off that single view.
+        _SRC_SNAP=$(gl_sources 2>/dev/null)
+        reconcile "${2:-}"; _rc=$?
+        # DIRTY re-run (MED): a concurrent trigger that skipped on our lock left a
+        # `reconcile_dirty` crumb. Honor the LAST request with ONE more level-triggered
+        # pass off the CURRENT facts (reconcile re-derives desired from live probes, so a
+        # single extra pass reflects whatever we coalesced -- the request is never lost).
+        # Still inside our lock hold (EXIT trap not yet fired), so it stays serialized.
+        # CRITICAL: PRESERVE the primary reconcile's exit status ($_rc). The caller keys on
+        # it -- bondctl restores the prior mode iff `bond-xctl reconcile` (speed) FAILS --
+        # so the best-effort re-run must NEVER mask a real engage failure (and a bare
+        # trailing `if` with no else would reset $? to 0, hiding it).
+        if [ -f "$RUN_DIR/reconcile_dirty" ]; then
+            rm -f "$RUN_DIR/reconcile_dirty" 2>/dev/null
+            # RE-OBSERVE first: the dirty re-run exists to honor the LATEST
+            # facts, so it must not reuse this pass's snapshot.
+            _SRC_SNAP=$(gl_sources 2>/dev/null)
+            reconcile || true
+        fi
+        exit "$_rc"
+        ;;
+    node)      node ;;
+    # _sched: READ-ONLY query of the AGG_SCHED_TABLE. Prints the aggregate
+    # scheduler for $2 (default: the stored mode) and exits 0; exits 3 when the
+    # mode is not an aggregate mode. This is how bondctl (M5) and bond-ecod (M6)
+    # test "is this an aggregate mode" WITHOUT keeping a second copy of the mode
+    # class -- one table, one owner. Takes no action.
+    _sched)    agg_sched_of "${2:-}" ;;
+    # _sched_modes: READ-ONLY list of the aggregate mode NAMES, `|`-separated,
+    # from that same table. bondctl builds its accepted-mode test and its usage
+    # string from this, so adding an aggregate scheduler stays ONE row.
+    _sched_modes) agg_modes ;;
+    _primary)  _SRC_SNAP=$(gl_sources 2>/dev/null); primary_wan ;;
+    # _sources: the GL/ubus source table (OBJ-A). READ-ONLY fact surface for
+    # the portal (OBJ-E), the datapath's D-hat-min re-anchoring (OBJ-A) and the
+    # operator. Prints "<iface> <l3_device> <state> <metric|-> <metered|->";
+    # state = routed|up|idle|absent, where `up` is a configured-but-unrouted
+    # (DARK) source that route-parsing could not see. Takes no action.
+    # Exits 1 when ubus cannot answer, so a caller can tell "no sources" from
+    # "cannot ask" (live_wans falls back to route parsing; this does not).
+    _sources)  gl_ok || exit 1; gl_sources ;;
+    # _server: bond server in-tunnel HOST ONLY (no :port). Deliberate -- the
+    # consumer (bond-ecod TPROBE) pings it, and `ping host:port` fails.
+    # live_server_host already strips the port and returns 1 when unknown.
+    _server)   live_server_host ;;
+    selfcheck) selfcheck ;;
+    *) echo "usage: bond-xctl reconcile [refresh]|node|_primary|_server|_sources|_sched [mode]|selfcheck" >&2; exit 1 ;;
+esac
