@@ -1,0 +1,274 @@
+#!/bin/sh
+# /usr/sbin/bond-aggctl — M3 agg-controller. The aggregate (speed) feeder's
+# LIFECYCLE, and nothing else. Extracted from bond-xctl by U18.
+#
+# WHY IT EXISTS (module-architecture.md:23, :57)
+#   M3 = "agg-controller · deploy/p5/ (to be EXTRACTED) · aggregate feeder
+#   lifecycle · interface: agg_env". The same file records the boundary that
+#   has already been violated once: "The aggregate datapath must NOT be fused
+#   into `bondctl`". P2's review (p123-simplification-review.md:41) found the
+#   fusion in the deployed controller — install_agg_client_service,
+#   speed_engage/disengage, a second feeder and the MTU strand all inside the
+#   field-proven P2 controller — and prescribed extraction. P5 did HALF of
+#   that: `bondctl` became a thin fact-writer (M5), but every line of the
+#   aggregate feeder's lifecycle moved sideways into `bond-xctl`, the
+#   RECONCILER (M4). The reconciler's job is to derive ONE edge from facts and
+#   walk it; owning one feeder's env format, weight vector, procd unit text,
+#   restart policy and MTU strand is not that job. This file is the other half.
+#
+# FACT-WRITER CONTRACT — where this controller sits (bond-xctl:161)
+#   "the caller writes facts, reconcile() derives the ONE edge". This
+#   controller is NOT a caller and does NOT reconcile: it is an ACTUATOR that
+#   only ever runs as a leaf of an edge the reconciler already chose. It reads
+#   no intent, observes no node, picks no target, and never calls bond-xctl.
+#   Every verb below is a single idempotent effect. That is why it can be
+#   extracted without becoming a fifth caller picking its own edge (the MF-1 /
+#   MF-2 class the reconciler dissolved).
+#
+#   The pre-extraction code did NOT violate the contract — the feeder lifecycle
+#   was already reached only through `run_action`, off a bond.dag row. So this
+#   extraction fixes a MODULE-BOUNDARY violation, not a contract violation.
+#   Stated explicitly because "the feeder issues actions directly" would have
+#   been the more serious finding, and it is not what was there.
+#
+# N-GENERIC. The source list is an INPUT, positional, of any length. There is
+# no primary, no [2], no head -1, no per-source constant, and no branch on the
+# count anywhere below; the only thing the count is compared against is the
+# ARITY FLOOR (>= MIN_AGG_SOURCES), which has no upper bound.
+#
+# INTERFACE (the whole of it; bond-xctl calls nothing else)
+#   env-build <out> <listen> <server> [src...]   PURE generator: write the
+#                                    DESIRED agg_env for these facts to <out>.
+#                                    Only side effect is <out>. Shared by
+#                                    env-apply and by the reconciler's
+#                                    converged() cmp, so both compare the same
+#                                    bytes.
+#   env-apply <listen> <server> [src...]         EFFECT-IDEMPOTENT swap of
+#                                    $BOND_DIR/agg_env; drops the
+#                                    `agg_env_changed` crumb iff bytes moved.
+#   arity-ok [src...]                TRUE iff the aggregate is DEFINED over
+#                                    this source set (>= MIN_AGG_SOURCES).
+#   install | enable | disable | restart | stop | running
+#   mtu speed | mtu normal
+#
+#   CONTEXT is passed by the caller, never discovered here: BOND_DIR, RUN_DIR,
+#   AGG_SVC, AGG_BIN, WG_DEV. Source DISCOVERY is not this module's job (it is
+#   the reconciler's probe registry / M8); this module is TOLD the ordered set.
+#   That is what keeps the reconciler's one-observation-per-pass property: a
+#   controller that re-probed would build against a different world than the
+#   one converged() compared, and NG7's order-stability bar would be a lie.
+#
+# BUSYBOX-SAFE POSIX sh: no bashisms, no [[ ]], no arrays, no fractional sleep.
+
+BOND_DIR="${BOND_DIR:-/etc/bond}"
+RUN_DIR="${RUN_DIR:-/var/run/bond}"
+AGG_SVC="${AGG_SVC:-/etc/init.d/bond-agg}"
+AGG_BIN="${AGG_BIN:-/usr/sbin/bond-agg}"
+WG_DEV="${WG_DEV:-wgclient1}"
+TAG="bond-aggctl"
+# MIN_AGG_SOURCES is the ARITY OF AGGREGATION, not a WAN count and not a "two
+# WANs" assumption. Aggregation means distributing ONE flow across MORE THAN ONE
+# source; with a single source there is nothing to distribute across and the
+# "aggregate" IS that source -- which is `eco`. The floor follows from the
+# DEFINITION of the operation, not from a measurement and not from a pick, it has
+# no upper bound, and it never rises with N. == bond_model.py MIN_AGG_SOURCES.
+MIN_AGG_SOURCES=2
+# AGG_W_NEUTRAL is bond-agg's OWN per-path CapEst prior, not a number picked here:
+# p4-bondagg/daemon/main.go:540-553 `parseW` builds N weights and substitutes
+# exactly this value for any entry that is missing or unparseable. Emitting N
+# copies of it states "no prior" for every path, symmetrically. See agg_weights().
+AGG_W_NEUTRAL=10000
+# MTU_SPEED / MTU_NORMAL: the wgclient1 MTU strand, moved here VERBATIM with the
+# aggregate feeder it belongs to (P2 review: the MTU juggling inside the
+# controller is part of what must be extracted; a crash between engage and
+# disengage strands wgclient1 at the speed MTU).
+# OPEN QUESTION, reported not guessed (no-arbitrary-constants): neither value is
+# derived anywhere in the repo, and the DELTA does not reconcile with the wire
+# format -- MTU_NORMAL - MTU_SPEED = 12, while the aggregate frame header is 16
+# bytes (p4-bondagg/daemon/frame.go:25 `HdrLen = 16`), so the reservation is 4
+# bytes short of the header it is presumably reserving for. U18 does NOT change
+# them: this is a refactor and a value change is a behaviour change. Owner is the
+# datapath/MTU work, and it needs the box (G1/G3) to settle, not a guess here.
+MTU_SPEED=1408
+MTU_NORMAL=1420
+
+# No log() here on purpose: this controller has nothing to narrate. Every verb is
+# a single effect whose outcome the reconciler already observes, so the only
+# things it writes are a `fail` (which aborts the edge) and the agg_w arity WARN.
+fail() { echo "$TAG: FATAL: $*" >&2; logger -t "$TAG" "FATAL: $*" 2>/dev/null; exit 1; }
+mkrun(){ [ -d "$RUN_DIR" ] || mkdir -p "$RUN_DIR" 2>/dev/null; }
+
+# ---- the aggregate feeder's OWN liveness probe -----------------------------
+# ONE implementation of "is the aggregate feeder running", owned by the module
+# that owns the feeder. Same shape as bond-xctl's generic svc_running (ubus
+# service list, pgrep only as the off-box/no-ubus fallback -- D5).
+agg_running() {
+    if command -v ubus >/dev/null 2>&1; then
+        ubus call service list 2>/dev/null | grep -q '"bond-agg"' && return 0
+    fi
+    pgrep -f "/usr/sbin/bond-agg" >/dev/null 2>&1
+}
+
+# ---- agg_env generation ----------------------------------------------------
+# agg_weights: the AGG_W vector for $1 paths, POSITIONALLY aligned with AGG_PATHS.
+# Prints the vector on stdout; any complaint goes to stderr (build_agg_env captures
+# this, so a warning must never land inside agg_env).
+#
+# NOT DERIVED, and deliberately NOT INVENTED. The shipped value was `20000,15000`:
+# two numbers with no measurement behind them, AND 2-shaped -- so on the box's own
+# 4-WAN hardware paths 1 and 2 were PRIVILEGED by constants nobody measured while
+# paths 3..N silently fell through to bond-agg's parseW default.
+#   - $BOND_DIR/agg_w (operator/measured) is USED, but only when it carries exactly
+#     N positive integers. A stale 2-entry file on a 4-source box would bind weights
+#     to the WRONG paths -- silently, positionally. Refusing that is this unit.
+#   - Otherwise: N copies of AGG_W_NEUTRAL, bond-agg's own per-path prior. Equal
+#     weights == NO prior, the honest statement when nothing has been measured.
+#     Emitting an EMPTY AGG_W would NOT achieve this: bond-agg's env() default
+#     (main.go:66,308) then re-applies the 2-shaped 20000,15000.
+# OPEN QUESTION (reported, not guessed): what a MEASURED per-source weight should
+# be. bond-agg's CapEst converges per path on-path; whether an a-priori weight
+# speeds that convergence or biases it is untested, and the box exposes no
+# measurement this generator could read at config-build time.
+agg_weights() {   # $1 = N
+    _wn=$1
+    # FIRST LINE ONLY: agg_env is sourced by the procd unit, so a multi-line
+    # agg_w must never be able to inject extra lines into it.
+    _wf=$(head -1 "$BOND_DIR/agg_w" 2>/dev/null)
+    if [ -n "$_wf" ]; then
+        _wt=$(printf '%s' "$_wf" | tr ',' '\n' | grep -c .)
+        _wg=$(printf '%s' "$_wf" | tr ',' '\n' | grep -c '^[1-9][0-9]*$')
+        if [ "$_wt" = "$_wn" ] && [ "$_wg" = "$_wn" ]; then
+            printf '%s\n' "$_wf"; return 0
+        fi
+        echo "$TAG: WARN: $BOND_DIR/agg_w has $_wt entr(ies) for $_wn paths (need $_wn positive integers) - using the neutral prior" >&2
+        logger -t "$TAG" "WARN: agg_w arity $_wt != paths $_wn - neutral prior" 2>/dev/null
+    fi
+    _wo=""; _wi=1
+    while [ "$_wi" -le "$_wn" ]; do _wo="${_wo}${AGG_W_NEUTRAL},"; _wi=$((_wi+1)); done
+    printf '%s\n' "${_wo%,}"
+}
+
+# build_agg_env: emit the DESIRED speed agg_env for the given facts to $1. A PURE
+# generator (its only side effect is writing $1) so BOTH env-apply
+# (write-idempotency) and the reconciler's converged() (cmp a fresh build against
+# the live agg_env) share ONE builder -- the speed short-circuit compares apples
+# to apples.
+#
+# N-GENERIC (Layer-1 NG-2). Enroll EVERY source it is handed, in the order it is
+# handed them -- the caller's ordered_wans order (primary first, then by metric),
+# the SAME order Layer-1's `sources` tuple carries, since the artifact and the
+# model are checked against one bond.dag.
+#
+# WAS (pre-U6): `P=$(primary_wan); O=$(live_wans | grep -v "^$P$" | head -1)` and
+# `AGG_PATHS=$P,$O` -- exactly two paths. A third live source was discarded
+# SILENTLY: no error, no log, no reduction in the guard's count. The client box
+# already declares FOUR WAN interfaces (docs/INTENT.md:193), so that was lost
+# capacity on current hardware, not a future case.
+build_agg_env() {   # $1 = output path, $2 = listen, $3 = server, $4.. = sources
+    _out="$1"; _listen="$2"; _server="$3"; shift 3
+    _WN=0; _WP=""
+    for _w in "$@"; do
+        [ -n "$_w" ] || continue
+        _WN=$((_WN+1)); _WP="${_WP}${_w},"
+    done
+    _WP="${_WP%,}"
+    [ "$_WN" -ge "$MIN_AGG_SOURCES" ] || fail "speed needs >= $MIN_AGG_SOURCES live sources (have $_WN)"
+    _WV=$(agg_weights "$_WN")
+    {
+        echo "AGG_LISTEN=$_listen"
+        echo "AGG_SERVER=$_server"
+        echo "AGG_PATHS=$_WP"
+        echo "AGG_W=$_WV"
+    } > "$_out"
+}
+
+env_apply() {   # $1 = listen, $2 = server, $3.. = sources
+    # EFFECT-IDEMPOTENT (speed analogue of genconf): build agg_env into a temp and swap
+    # ONLY on a byte change (WRITE-idempotency, no file churn). On a REAL change drop the
+    # `agg_env_changed` crumb so `restart` bounces the EIF datapath EXACTLY when the
+    # env moved. A DELTA that walks the speed edge without a real env move (e.g. a speed
+    # ep-drift heal) leaves no crumb -> `restart` is a no-op and only ep_speed
+    # re-pins; converged() no-ops the steady-state speed tick before any edge is walked.
+    mkrun
+    _TMP="$BOND_DIR/.agg_env.new"
+    build_agg_env "$_TMP" "$@"
+    if cmp -s "$_TMP" "$BOND_DIR/agg_env" 2>/dev/null; then
+        rm -f "$_TMP" 2>/dev/null
+    else
+        mv "$_TMP" "$BOND_DIR/agg_env"; touch "$RUN_DIR/agg_env_changed"
+    fi
+    # RETURN 0 ON EVERY NON-FATAL PATH, deliberately. bond-xctl's converge()
+    # IGNORES an action's exit status -- only a builder `fail` (which exits the
+    # process) aborts an edge. In-process that was automatic; across a process
+    # boundary it is not, so the caller keys on "non-zero == the controller
+    # FAILED", and a swallowed `rm`/`touch` status must not masquerade as that.
+    return 0
+}
+
+# ---- feeder lifecycle ------------------------------------------------------
+agg_install() {
+    # On-demand FALLBACK only: the shipped canonical copy is deploy/p5/init.d/bond-agg
+    # (installed at package time). This stanza MUST stay byte-for-byte equivalent to it
+    # so a fallback-generated unit never drifts from the canonical (LOW: was missing
+    # STOP=11 and used a bare `respawn` instead of the canonical `respawn 3600 5 5`).
+    [ -x "$AGG_SVC" ] && return 0
+    cat > "$AGG_SVC" <<'SVCEOF'
+#!/bin/sh /etc/rc.common
+# procd service: bond-agg (EIF speed feeder). START order 94 — first feeder.
+START=94
+STOP=11
+USE_PROCD=1
+start_service() {
+    [ -r /etc/bond/agg_env ] || return 1
+    . /etc/bond/agg_env
+    procd_open_instance
+    procd_set_param command /usr/sbin/bond-agg
+    procd_set_param env AGG_MODE=client AGG_LISTEN=$AGG_LISTEN AGG_SERVER=$AGG_SERVER AGG_PATHS=$AGG_PATHS AGG_W=$AGG_W
+    procd_set_param respawn 3600 5 5
+    procd_set_param stderr 1
+    procd_close_instance
+}
+SVCEOF
+    chmod 755 "$AGG_SVC"
+}
+
+agg_restart() {
+    # EFFECT-IDEMPOTENT (speed analogue of act_eng_restart): ensure-running, not restart-
+    # always. Bounce the EIF datapath ONLY when env-apply actually changed agg_env
+    # (agg_env_changed crumb) OR bond-agg is absent. A speed ep-drift heal (env unchanged,
+    # agg up) is a NO-OP here -- no restart, no EIF silence -- while converged() no-ops the
+    # steady-state speed tick before any edge is walked.
+    if [ -f "$RUN_DIR/agg_env_changed" ] || ! agg_running; then
+        "$AGG_SVC" restart || fail "bond-agg start failed"
+    fi
+    rm -f "$RUN_DIR/agg_env_changed" 2>/dev/null
+    return 0   # see env_apply: non-zero is reserved for `fail`
+}
+
+# ================= entry point =============================================
+case "${1:-}" in
+    env-build) shift; [ $# -ge 3 ] || fail "usage: env-build <out> <listen> <server> [src...]"
+               build_agg_env "$@" ;;
+    env-apply) shift; [ $# -ge 2 ] || fail "usage: env-apply <listen> <server> [src...]"
+               env_apply "$@" ;;
+    # arity-ok: the aggregate is DEFINED over this source set. `>=` has no upper
+    # bound, so N=3,4,...,k all pass identically -- this is an ARITY test, never a
+    # "two WANs" test. Counts the SAME list build_agg_env enrolls (one source of
+    # truth, now literally one function's input).
+    arity-ok)  shift
+               _n=0; for _s in "$@"; do [ -n "$_s" ] && _n=$((_n+1)); done
+               [ "$_n" -ge "$MIN_AGG_SOURCES" ] ;;
+    install)   agg_install ;;
+    enable)    "$AGG_SVC" enable 2>/dev/null ;;
+    disable)   "$AGG_SVC" disable 2>/dev/null ;;
+    restart)   agg_restart ;;
+    stop)      "$AGG_SVC" stop 2>/dev/null ;;
+    running)   agg_running ;;
+    installed) [ -x "$AGG_BIN" ] ;;
+    mtu)       case "${2:-}" in
+                 speed)  ip link set "$WG_DEV" mtu "$MTU_SPEED"  2>/dev/null ;;
+                 normal) ip link set "$WG_DEV" mtu "$MTU_NORMAL" 2>/dev/null ;;
+                 *) echo "usage: $TAG mtu speed|normal" >&2; exit 1 ;;
+               esac ;;
+    *) echo "usage: $TAG env-build <out> <listen> <server> [src...]|env-apply <listen> <server> [src...]|arity-ok [src...]|install|enable|disable|restart|stop|running|installed|mtu speed|normal" >&2; exit 1 ;;
+esac
