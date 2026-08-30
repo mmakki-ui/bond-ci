@@ -1,0 +1,5 @@
+#!/bin/sh
+# fake logger: append to the ledger (drop the -t TAG prefix noise).
+shift 2 2>/dev/null   # skip "-t <tag>"
+echo "LOG $*" >> "$ECOSIM_STATE/ledger"
+exit 0

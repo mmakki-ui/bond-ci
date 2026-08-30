@@ -1,0 +1,21 @@
+#!/bin/sh
+D="$STUBDIR"
+case "$1" in
+  _server)
+    # stub: bond server in-tunnel HOST ONLY (no :port) so ecod TPROBE can ping it.
+    echo "10.0.0.1"
+    ;;
+  _primary)
+    n=$(cat "$D/tick" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$D/tick"
+    L=$(sed -n "${n}p" "$D/plan"); [ -n "$L" ] || L=$(tail -1 "$D/plan")
+    set -- $L
+    echo "$1" > "$D/cur_primary"; echo "$2 ${3:-20} ${4:-OK} ${5:-141}" > "$D/cur_health"
+    echo "$1"
+    ;;
+  _mode_auto)
+    echo "$2" >> "$D/calls"
+    echo "$2" > "$BOND_DIR/mode"
+    if [ "$2" = "eco" ]; then cp "$D/cur_primary" "$BOND_DIR/applied_wans"
+    else printf 'eth1 usb0' > "$BOND_DIR/applied_wans"; fi
+    ;;
+esac
