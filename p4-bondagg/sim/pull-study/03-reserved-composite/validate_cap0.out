@@ -1,0 +1,33 @@
+==========================================================================
+CHECK 1 -- imports clean
+==========================================================================
+  reserved_cap0, ackclock_sim, nsched_model imported OK
+  scheds available in SimD: pull, D, Dp, redundant
+
+==========================================================================
+CHECK 2 -- SimD(pull) BYTE-MATCHES ackclock_sim.Sim(pull)  (per-seed exact)
+==========================================================================
+  load=0.65: SimD(pull) gp/loss=60578.072/12.790  Sim(pull) gp/loss=60578.072/12.790  PER-SEED-EXACT=True
+  load=0.8: SimD(pull) gp/loss=73954.884/13.495  Sim(pull) gp/loss=73954.884/13.495  PER-SEED-EXACT=True
+
+==========================================================================
+CHECK 3 -- Dp REPRINTS pull rows with armed_frac=0.00  (all-steady & all-spotty)
+==========================================================================
+  all-steady  N2 wifi+eth        load=0.65: Dp gp/loss=78540.3/1.64 pull gp/loss=78540.3/1.64  reprint=True  armed_frac(med/max)=0.00/0.00
+  all-steady  N2 wifi+eth        load=0.85: Dp gp/loss=101262.3/3.02 pull gp/loss=101262.3/3.02  reprint=True  armed_frac(med/max)=0.00/0.00
+  all-steady  N3 wifi+wifi2+eth  load=0.65: Dp gp/loss=102125.0/2.29 pull gp/loss=102125.0/2.29  reprint=True  armed_frac(med/max)=0.00/0.00
+  all-steady  N3 wifi+wifi2+eth  load=0.85: Dp gp/loss=123950.6/9.31 pull gp/loss=123950.6/9.31  reprint=True  armed_frac(med/max)=0.00/0.00
+  all-spotty  N3 correlated      load=0.65: Dp gp/loss=25097.9/43.15 pull gp/loss=25097.9/43.15  reprint=True  armed_frac(med/max)=0.00/0.00
+  all-spotty  N3 correlated      load=0.85: Dp gp/loss=29373.7/49.12 pull gp/loss=29373.7/49.12  reprint=True  armed_frac(med/max)=0.00/0.00
+  all-spotty  N3 independent     load=0.65: Dp gp/loss=27002.7/38.83 pull gp/loss=27002.7/38.83  reprint=True  armed_frac(med/max)=0.00/0.00
+  all-spotty  N3 independent     load=0.85: Dp gp/loss=32204.8/44.21 pull gp/loss=32204.8/44.21  reprint=True  armed_frac(med/max)=0.00/0.00
+
+==========================================================================
+CHECK 4 -- mid load 0.85: Dp DUPLICATE arms ~0 ticks  (mixed spotty+steady)
+==========================================================================
+  N2 1cell+1eth          load=0.85: armed_frac med=1.0000 max=1.0000  res_tx med=27810  Dp gp=51489 pull gp=78682
+  N3 2cell+1eth          load=0.85: armed_frac med=1.0000 max=1.0000  res_tx med=58500  Dp gp=47215 pull gp=88636
+  N3 1cell+1wifi+1eth    load=0.85: armed_frac med=1.0000 max=1.0000  res_tx med=25200  Dp gp=73848 pull gp=114493
+
+==========================================================================
+RESULT: FAIL -> ['C4 N2 1cell+1eth armed_frac=1.0000 not ~0', 'C4 N3 2cell+1eth armed_frac=1.0000 not ~0', 'C4 N3 1cell+1wifi+1eth armed_frac=1.0000 not ~0']
