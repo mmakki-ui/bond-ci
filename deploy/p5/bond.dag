@@ -1,0 +1,78 @@
+# bond.dag — P5 mode/lifecycle DAG (data, not code).
+#
+# The ONE source of truth for what the executor (bond-xctl) does. Parsed
+# IDENTICALLY by:
+#   - deploy/p5/bond-xctl        (busybox sh: IFS='|' read; runs the named
+#                                 guard/action/verify shell functions)
+#   - orchestration/bond_model.py (the P5 CANDIDATE machine: runs the named
+#                                 guard/action/verify Python functions)
+# so the equivalence proof drives the SAME table the box would run
+# (data-equivalence, not a re-implementation). Behaviour changes are
+# reviewable diffs to this file, validated in the emulator, shipped
+# read-only and atomically mv-swapped.
+#
+# FORMAT  (7 pipe-delimited fields; '#' comment lines and blanks ignored)
+#   intent | from | to | guards | actions | verify | retries | onfail
+#     intent   the trigger the CLI/hook/ecod funnels into bond-xctl:
+#              `bond-xctl <intent> [arg]`. Level-triggered: the executor
+#              derives the CURRENT node from probes every invocation and
+#              the action list is idempotent, so an already-satisfied
+#              intent is a verify-only no-op (I4 idempotency, I2 self-heal).
+#     from     comma-set of nodes this intent applies from (`*`=any).
+#     to       the desired node the intent converges toward.
+#     guards   comma-list of guard probes; ALL must pass or the edge is
+#              refused (logged, no state change). `-` = none.
+#     actions  comma-list of actions run in order. `-` = none.
+#     verify   post-condition probe (retried); `-` = none.
+#     retries  attempts for `verify` before taking `onfail`.
+#     onfail   intent to follow when `verify` still fails. `-` = none.
+#
+# NODES: off · engaged · agg · suspended · suspended_degraded
+#   engaged carries the mode fact (lightning|eco) as a side value;
+#   suspended / suspended_degraded are OUTCOME nodes (reached only via the
+#   `suspend` onfail of a failed engage), never desired targets.
+#
+# Maps to HANDOVER §2/§4 transitions T1..T11 (see the `# T#` tag per row).
+#
+# The CLI (bondctl) writes the DESIRED facts first (mode, auto) and, for a
+# failed `agg` engage, restores the prior mode — those are CLI duties, NOT edges.
+# The executor only walks these edges. `engage` retries=5 is the roaming
+# convergence budget (matches the historical 5-iteration engage loop:
+# <=4 in-flight roams still converge, >=5 -> suspend).
+#
+# NODES are {off, engaged, suspended, suspended_degraded}: `rc` (bond on/off)
+# is the engaged/off discriminator, `susp` overrides. AGGREGATION is a MODE, not
+# a node — an aggregating box is node `engaged` carrying mode ∈ {max, speed}
+# (feeder = bond-agg). Exactly one feeder runs, selected by mode:
+# `aggdown_if_agg` leads engage/switch/disengage so INV1 (single feeder) holds by
+# construction (this closes a latent two-feeder edge the deployed bondctl had on
+# the on-during-aggregate and reboot-during-aggregate sequences — a mandatory INV1
+# fix, backstopped by watchdog W3).
+#
+# ONE AGGREGATE INTENT (U17). ADR-003 splits the aggregate mode into `max`
+# (stripe everything) and `speed` (fewest/fastest for the offered load). They are
+# ONE lifecycle here — same feeder, same listener, same guards, same enrolled
+# source set — differing only in the AGG_SCHED fact `build_agg_env` emits into
+# agg_env. So there is ONE `agg` row, not one row per mode: a new aggregate
+# scheduler adds a row to bond-xctl's AGG_SCHED_TABLE and NOTHING to this file.
+# A max<->speed flip is an agg_env byte change -> the existing `agg_env_changed`
+# crumb -> `agg_restart`; it walks this same edge, so it needs no new one.
+#
+# GUARD SPELLING (U6): the aggregate guard is `enough_sources`, NOT the old
+# `two_wans`. It always MEANT ">= MIN_AGG_SOURCES live sources" -- an ARITY
+# requirement with no upper bound -- and the old spelling read as a 2-WAN
+# assumption that the box does not have (it declares FOUR WANs,
+# docs/INTENT.md:193). Both parsers resolve it to the one N-generic predicate:
+# bond_model.py registers `enough_sources` AND `two_wans` onto
+# g_enough_sources_to_aggregate (NG-0 asserts they are identical), and
+# bond-xctl run_guard accepts both spellings so a half-upgraded box (new
+# bond-xctl, old bond.dag still on disk) resolves the guard rather than
+# refusing every aggregate edge.
+#
+# intent|from|to|guards|actions|verify|retries|onfail
+engage|off,engaged,suspended,suspended_degraded|engaged|installed|aggdown_if_agg,rc_on,genconf,eng_enable,eng_restart,ep_local|verify_local|5|suspend
+suspend|off,engaged,suspended,suspended_degraded|suspended|-|revert|-|0|-
+disengage|off,engaged,suspended,suspended_degraded|off|installed|aggdown_if_agg,rc_off,eng_disable,eng_stop,ep_direct,clear_susp|-|0|-
+switch|off,engaged,suspended,suspended_degraded|engaged|installed|aggdown_if_agg,genconf_if_enabled,eng_restart_if_enabled|-|0|-
+agg|off,engaged|agg|installed,manual,agg_installed,enough_sources|env_gen,agg_install,eng_stop,agg_enable,agg_restart,mtu_1408,ep_agg|verify_agg|3|agg_revert
+agg_revert|off,engaged|engaged|-|agg_stop,agg_disable,mtu_1420,restore_feeder|-|0|-
