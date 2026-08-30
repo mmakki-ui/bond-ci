@@ -1,0 +1,171 @@
+################################################################################################################
+# rig_geometry.py -- U10 ITEM 3: the basis of ABSOLUTE loss
+# geometries=32  jitter seeds/geometry=3  canonical seeds=24  T=9.0s  rig=mid
+################################################################################################################
+  rig     C:\Users\mmakk\Claude Code\bond\.claude\worktrees\u10b\p4-bondagg\sim\pull-study\03-reserved-composite\reserved_composite.py
+  oracle  C:\Users\mmakk\Claude Code\bond\.claude\worktrees\u10b\p4-bondagg\sim\pull-study\03-reserved-composite\ackclock_sim.py
+  physics C:\Users\mmakk\Claude Code\bond\.claude\worktrees\u10b\p4-bondagg\sim\nsched_model.py
+################################################################################################################
+
+================================================================================================================
+G0  SAMPLER VALIDATION -- every property MEASURED on every draw, plus three
+    negative controls that must each FAIL the property they violate
+================================================================================================================
+  canonical schedules, and the sample space they define:
+    cellA   canonical k=3  outage=1.200s (13.3% of T)  count ceiling=120
+    cellB   canonical k=2  outage=0.800s (8.9% of T)  count ceiling=80
+    cellC   canonical k=3  outage=1.050s (11.7% of T)  count ceiling=105
+    cellA*  canonical k=2  outage=0.800s (8.9% of T)  count ceiling=80
+  corrected sampler, 32 geometries x 6 spotty sources:  cap0=0  count=0  dur=0  overlap=0  window=0  zero=0 -> ALL PROPERTIES HOLD
+  determinism (same geometry seed -> identical schedule): PASS
+  NEGATIVE CONTROL nc_dur      must fail dur      -> FIRED  (cap0=0  count=0  dur=192  overlap=0  window=0  zero=0)
+  NEGATIVE CONTROL nc_overlap  must fail overlap  -> FIRED  (cap0=0  count=0  dur=0  overlap=256  window=0  zero=0)
+  NEGATIVE CONTROL nc_zero     must fail zero     -> FIRED  (cap0=192  count=0  dur=0  overlap=0  window=0  zero=192)
+  -> negative controls: ALL FIRED (the validator can fail)
+  CORRELATION PRESERVED: N5-corr's three tethers draw the SAME arrangement on
+    32/32 geometries (must be 32 -- drawing them independently would delete the
+    scenario); the het mixes coincide on 0/32 (must be 0).
+
+  total scored runs: 4080  (deduplicated: every cell runs once)
+
+================================================================================================================
+G1  THE CAPACITY CONFOUND.  Total outage time is held EXACTLY; available capacity
+    is NOT, because cap_fn is a sinusoid outside the stalls.  Integral of
+    aggregate cap over the scored window [1.0, 9.0)s, as a % of the same mix
+    with no stalls at all.
+================================================================================================================
+  mix          canon%  geom min%  geom med%  geom max%  spread pt canon rank
+  N2-het       97.637     93.134     96.391     98.833      5.699      27/32
+  N3-het       97.488     92.160     95.034     98.771      6.610      30/32
+  N4-het       98.150     94.227     96.343     99.095      4.868      30/32
+  N5-het       97.311     93.542     95.673     97.742      4.200      29/32
+  N4-teth      96.461     91.502     94.307     97.029      5.526      29/32
+  N5-corr      96.306     95.210     96.412     99.056      3.847      13/32
+  READ THIS FIRST: the capacity spread bounds how much of the loss spread below
+  can be blamed on "the geometry removed more capacity" rather than on "the
+  geometry arranged the same outage more awkwardly".  G2 regresses the two.
+
+================================================================================================================
+G2  DECOMPOSITION -- loss(Dc) = loss(oracle) + (loss(Dc) - loss(oracle))
+    REFERENCE = what an admission policy with PERFECT knowledge of the true
+                instantaneous stage-2 cap loses on THIS geometry.  It is the
+                bar B3(loss) scores against.  It is NOT a lower bound: Dc comes
+                in UNDER it, which is what B3 asserts, so the RESIDUAL is signed
+                and negative is good.
+    cell: N4-teth @ 0.65   32 geometries x 3 jitter seeds; canonical arm 24 seeds
+================================================================================================================
+  --- canonical geometry (the basis every published number rests on) ---
+    Dc      loss med= 5.395%  min= 5.283 max= 5.464  JITTER SPREAD=0.181 pt   late-discard share of lost med= 84.3%
+    oracle  loss med= 6.077%  min= 6.001 max= 6.104  JITTER SPREAD=0.103 pt   late-discard share of lost med= 95.6%
+    ewma    loss med= 8.977%  min= 8.918 max= 9.056  JITTER SPREAD=0.138 pt   late-discard share of lost med= 61.2%
+    pull    loss med=19.433%  min=19.350 max=19.514  JITTER SPREAD=0.164 pt   late-discard share of lost med= 54.4%
+    canonical: reference 6.077 pt, Dc 5.395 pt, residual -0.682 pt (Dc beats the
+    reference by 0.682 pt -- record says -0.671, see G4)
+
+  --- geometry ensemble ---
+    Dc      loss  per-geometry mean: med= 5.323% min= 4.163 max= 7.786  GEOMETRY SPREAD=3.622 pt
+            sd(between geometries)=0.7536 pt   sd(within, jitter)=0.0415 pt   variance BETWEEN=99.7%
+    oracle  loss  per-geometry mean: med= 6.170% min= 5.812 max= 6.557  GEOMETRY SPREAD=0.745 pt
+            sd(between geometries)=0.1677 pt   sd(within, jitter)=0.0420 pt   variance BETWEEN=94.1%
+    ewma    loss  per-geometry mean: med= 9.593% min= 7.914 max=10.598  GEOMETRY SPREAD=2.683 pt
+            sd(between geometries)=0.7268 pt   sd(within, jitter)=0.0408 pt   variance BETWEEN=99.7%
+    pull    loss  per-geometry mean: med=21.689% min=19.368 max=22.978  GEOMETRY SPREAD=3.610 pt
+            sd(between geometries)=0.8491 pt   sd(within, jitter)=0.0368 pt   variance BETWEEN=99.8%
+
+    THE DECOMPOSITION, paired at every (geometry, seed):
+      Dc loss (total)          mean= +5.441 pt  per-geometry mean in [ +4.163,  +7.786] spread= 3.622 pt  var BETWEEN= 99.7%
+      reference loss(oracle)   mean= +6.157 pt  per-geometry mean in [ +5.812,  +6.557] spread= 0.745 pt  var BETWEEN= 94.1%
+      residual Dc - oracle     mean= -0.716 pt  per-geometry mean in [ -1.967,  +1.638] spread= 3.605 pt  var BETWEEN= 99.5%
+      -> ABSOLUTE Dc loss moves 3.622 pt across geometries and 0.181 pt across the
+         24 canonical jitter seeds: a geometry:jitter ratio of 20x.
+      -> the REFERENCE moves only 0.745 pt, so the two are NOT common-mode, and
+         the PAIRED residual still moves 3.605 pt -- 100% of the total's
+         movement.  Pairing cancels PHYSICS error (ADR-004's argument); it does
+         NOT cancel GEOMETRY unless both schedulers respond to it alike.
+      -> capacity confound: corr(available capacity %, Dc loss) = -0.432, r^2 = 0.187
+         so 19% of the between-geometry loss variance is capacity the
+         arrangement removed and 81% is the ARRANGEMENT itself.
+
+    U11 CROSS-CHECK -- share of LOST frames that are reorder-ring late-discards
+    (U11 measured 78-96% for Dc and 95-97% for the oracle, canonical only):
+      Dc      ensemble late-share  min= 57.1%  med= 86.4%  max= 93.7%
+      oracle  ensemble late-share  min= 84.2%  med= 93.9%  max= 97.7%
+
+================================================================================================================
+G3  THE COUNT AXIS.  Same source, same TOTAL outage time, split into k EQUAL
+    events placed uniformly.  k swept over the derived representable range.
+    Read as a SURFACE -- no prior over k is assumed, and none is needed.
+    cell: N4-teth @ 0.65   10 geometries x 3 jitter seeds per k
+================================================================================================================
+  representable range for this mix: k in [1, 80]
+  G3 draw validation: cap0=0  count=0  dur=0  overlap=0  window=0  zero=0 -> OK
+      k    Dc loss%     oracle%  residual pt       cap%   geom spread
+      1       5.376       6.065       -0.689     94.803         2.485
+      2       5.690       6.140       -0.450     94.585         2.808
+      3       5.216       6.133       -0.918     93.869         1.482
+      4       5.309       6.208       -0.898     94.768         2.074
+      6       5.547       6.140       -0.593     94.183         1.114
+      9       5.127       6.343       -1.216     94.402         1.315
+     12       5.138       6.253       -1.114     94.366         1.208
+     18       4.891       6.215       -1.324     95.046         0.806
+     24       4.984       6.265       -1.281     94.784         0.609
+     36       4.851       6.184       -1.333     94.705         0.765
+     54       4.776       6.181       -1.405     94.709         0.641
+     80       4.858       6.242       -1.384     94.688         0.718
+  -> Dc loss across the count axis: min=4.776 at k=54, max=5.690 at k=2, range=0.913 pt
+  -> the canonical counts are k=2 and k=3.  Where they sit on this axis is
+     printed above, not argued.
+
+================================================================================================================
+G4  THE LOSS BARS, RE-SCORED PER GEOMETRY
+================================================================================================================
+  B3(loss)  `median over seeds of (Dc loss - oracle loss) <= 0`.  Gated as PAIRED
+            (.github/scripts/rig_paired_gate.py:116).
+  B2        `Dc loss <= ewma loss + 0.5`.  The comparison is paired; the 0.5 pt
+            TOLERANCE is absolute.  Gated as PAIRED (same file:116).
+  B5(loss)  `adding a source reduces Dc loss`, Dc at N vs Dc at N+1.  DIFFERENT
+            RIGS -- nothing cancels, and the added source brings its own
+            hand-placed schedule.  Gated as RELATIVE (same file:117).
+
+  --- B3(loss), all six battery mixes, load 0.65 ---
+  mix       canon paired    record  verdict |   geom min   geom med   geom max    spread   PASS rate
+  N2-het          -2.134    -2.134     PASS |     -2.290     -1.956     -1.790     0.500      32/32 geom-stable
+  N3-het          -1.153    -1.153     PASS |     -1.983     -1.321     +0.383     2.366      31/32 GEOMETRY-DEPENDENT
+  N4-het          -1.049    -1.049     PASS |     -1.557     -1.275     -0.673     0.884      32/32 geom-stable
+  N5-het          -2.044    -2.044     PASS |     -2.283     -1.916     -0.806     1.476      32/32 geom-stable
+  N4-teth         -0.671    -0.671     PASS |     -1.972     -0.875     +1.678     3.650      25/32 GEOMETRY-DEPENDENT
+  N5-corr         -1.273    -1.273     PASS |     -2.289     -1.761     -0.527     1.762      32/32 geom-stable
+  REPRODUCTION vs highn_u11u12.txt:72-127 (canonical, SEEDS=24): MATCH on all 6 mixes
+
+  --- B2, five cells (four recorded FAILs + one thin PASS) ---
+  cell          canon paired    record  verdict |   geom min   geom med   geom max    spread   PASS rate
+  N2-het@0.85         +0.845    +0.845     FAIL |     -1.904     -0.057     +0.697     2.600      28/32 GEOMETRY-DEPENDENT
+  N2-het@0.95         +0.655    +0.655     FAIL |     -0.527     +0.405     +1.049     1.575      21/32 GEOMETRY-DEPENDENT
+  N3-het@0.85         +0.515    +0.515     FAIL |     -0.496     +0.327     +0.976     1.472      23/32 GEOMETRY-DEPENDENT
+  N4-het@0.95         +0.690    +0.690     FAIL |     -0.193     +0.472     +1.068     1.262      17/32 GEOMETRY-DEPENDENT
+  N5-het@0.95         +0.286    +0.286     PASS |     -0.797     +0.180     +0.859     1.656      28/32 GEOMETRY-DEPENDENT
+  REPRODUCTION vs highn_u11u12.txt:75-110 (canonical, SEEDS=24): MATCH on all 5 cells
+  The bar's tolerance is 0.5 pt.  Compare it to the spread column.
+
+  --- B5(loss), nested chain, one absolute offer = 0.95 x nominal(N5-het) = 181450
+  canonical chain Dc loss%: N2-het=50.212  N3-het=41.417  N4-het=18.174  N5-het=11.857
+  record  (highn_u11u12.txt:179-182): N2-het=50.21  N3-het=41.42  N4-het=18.17  N5-het=11.86 -> MATCH
+  step                   canon    geom min    geom med    geom max    PASS rate
+  N2-het->N3-het        -8.795     -10.767      -8.714      -7.304       32/32 geom-stable
+  N3-het->N4-het       -23.243     -24.791     -23.383     -22.670       32/32 geom-stable
+  N4-het->N5-het        -6.317      -6.996      -5.465      -3.594       32/32 geom-stable
+  whole chain monotone on 32/32 geometries (canonical: PASS)
+
+================================================================================================================
+VERDICT
+================================================================================================================
+  OPEN AND REPORTED, NOT GUESSED: nothing here measures the TRUE distribution of
+  stall count, duration and position on a real tether.  The ensemble prior is
+  uniform over what the rig can represent, which is a statement about the rig,
+  not about the world.  Only ADR-004 condition 2 -- a hardware trace -- can
+  supply the real one.  Until then the ensemble is a SENSITIVITY, and the honest
+  reading of any absolute-loss number is "canonical value +- the geometry spread
+  printed above", not the canonical value alone.
+  Reported as measured.  No bar was widened, no scheduler was tuned, and no file
+  outside this one was edited.
+  elapsed 699.9s

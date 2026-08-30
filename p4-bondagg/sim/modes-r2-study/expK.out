@@ -1,0 +1,85 @@
+  .. S3 call ALONE seed 1/6 ratch=1 ncall=2757 (0s)
+  .. S3 call ALONE seed 2/6 ratch=1 ncall=2757 (0s)
+  .. S3 call ALONE seed 3/6 ratch=1 ncall=2757 (0s)
+  .. S3 call ALONE seed 4/6 ratch=1 ncall=2757 (0s)
+  .. S3 call ALONE seed 5/6 ratch=1 ncall=2757 (0s)
+  .. S3 call ALONE seed 6/6 ratch=1 ncall=2757 (0s)
+== S3 call ALONE (seeds=6)
+   policy    W mn/md/mx | CALL:   p95   p99  dl50    frz  loss | BULK:     gp   p95  ooo%   loss
+   W=0/arr    0/  0/  0 |          11    11 100.0     10  0.00 |            0     0   0.0   0.00
+   W=tick     1/  1/  1 |          11    11 100.0     10  0.00 |            0     0   0.0   0.00
+   W=ratch    1/  1/  1 |          11    11 100.0     10  0.00 |            0     0   0.0   0.00
+   W=20      20/ 20/ 20 |          11    11 100.0     10  0.00 |            0     0   0.0   0.00
+   W=40      40/ 40/ 40 |          11    11 100.0     10  0.00 |            0     0   0.0   0.00
+   W=343    343/343/343 |          11    11 100.0     10  0.00 |            0     0   0.0   0.00
+  .. S3 call+bulk  30k seed 1/6 ratch=1 ncall=2757 (0s)
+  .. S3 call+bulk  30k seed 2/6 ratch=1 ncall=2757 (1s)
+  .. S3 call+bulk  30k seed 3/6 ratch=1 ncall=2757 (1s)
+  .. S3 call+bulk  30k seed 4/6 ratch=1 ncall=2757 (1s)
+  .. S3 call+bulk  30k seed 5/6 ratch=1 ncall=2757 (1s)
+  .. S3 call+bulk  30k seed 6/6 ratch=1 ncall=2757 (2s)
+== S3 call+bulk  30k (seeds=6)
+   policy    W mn/md/mx | CALL:   p95   p99  dl50    frz  loss | BULK:     gp   p95  ooo%   loss
+   W=0/arr    0/  0/  0 |          11    11 100.0     10  0.00 |        26968    11   0.0   0.00
+   W=tick     1/  1/  1 |          11    11 100.0     10  0.00 |        26968    11   0.0   0.00
+   W=ratch    1/  1/  1 |          11    11 100.0     10  0.00 |        26968    11   0.0   0.00
+   W=20      20/ 20/ 20 |          11    11 100.0     10  0.00 |        26968    11   0.0   0.00
+   W=40      40/ 40/ 40 |          11    11 100.0     10  0.00 |        26968    11   0.0   0.00
+   W=343    343/343/343 |          11    11 100.0     10  0.00 |        26968    11   0.0   0.00
+  .. S3 call+bulk  90k seed 1/6 ratch=8 ncall=2757 (1s)
+  .. S3 call+bulk  90k seed 2/6 ratch=8 ncall=2757 (2s)
+  .. S3 call+bulk  90k seed 3/6 ratch=8 ncall=2757 (3s)
+  .. S3 call+bulk  90k seed 4/6 ratch=8 ncall=2757 (5s)
+  .. S3 call+bulk  90k seed 5/6 ratch=8 ncall=2757 (6s)
+  .. S3 call+bulk  90k seed 6/6 ratch=8 ncall=2757 (7s)
+== S3 call+bulk  90k (seeds=6)
+   policy    W mn/md/mx | CALL:   p95   p99  dl50    frz  loss | BULK:     gp   p95  ooo%   loss
+   W=0/arr    0/  0/  0 |          11    11 100.0     10  0.00 |        86892    21  19.2   0.00
+   W=tick     1/  1/  1 |          11    11 100.0     10  0.00 |        86892    21   6.8   0.00
+   W=ratch    8/  8/  8 |          11    11 100.0     10  0.00 |        86892    21   0.0   0.00
+   W=20      20/ 20/ 20 |          11    11 100.0     10  0.00 |        86892    21   0.0   0.00
+   W=40      40/ 40/ 40 |          11    11 100.0     10  0.00 |        86892    21   0.0   0.00
+   W=343    343/343/343 |          11    11 100.0     10  0.00 |        86892    21   0.0   0.00
+  .. S3 call+bulk 140k seed 1/6 ratch=392 ncall=2757 (2s)
+  .. S3 call+bulk 140k seed 2/6 ratch=392 ncall=2757 (5s)
+  .. S3 call+bulk 140k seed 3/6 ratch=392 ncall=2757 (7s)
+  .. S3 call+bulk 140k seed 4/6 ratch=392 ncall=2757 (10s)
+  .. S3 call+bulk 140k seed 5/6 ratch=392 ncall=2757 (12s)
+  .. S3 call+bulk 140k seed 6/6 ratch=392 ncall=2757 (15s)
+== S3 call+bulk 140k (seeds=6)
+   policy    W mn/md/mx | CALL:   p95   p99  dl50    frz  loss | BULK:     gp   p95  ooo%   loss
+   W=0/arr    0/  0/  0 |         251   271  54.5     27  2.61 |       133216   252  74.7   2.64
+   W=tick     1/  1/  1 |         252   271  54.5     25  2.61 |       133216   261  29.9   2.64
+   W=ratch  392/392/392 |         264   442  53.6    398  2.61 |       133216   272   0.0   2.64
+   W=20      20/ 20/ 20 |         254   271  53.6     60  2.61 |       133216   261   0.0   2.64
+   W=40      40/ 40/ 40 |         254   271  53.6    120  2.61 |       133216   264   0.0   2.64
+   W=343    343/343/343 |         264   442  53.6    353  2.61 |       133216   272   0.0   2.64
+  .. mid call ALONE seed 1/6 ratch=31 ncall=2757 (0s)
+  .. mid call ALONE seed 2/6 ratch=8 ncall=2757 (0s)
+  .. mid call ALONE seed 3/6 ratch=14 ncall=2757 (0s)
+  .. mid call ALONE seed 4/6 ratch=38 ncall=2757 (0s)
+  .. mid call ALONE seed 5/6 ratch=35 ncall=2757 (0s)
+  .. mid call ALONE seed 6/6 ratch=37 ncall=2757 (0s)
+== mid call ALONE (seeds=6)
+   policy    W mn/md/mx | CALL:   p95   p99  dl50    frz  loss | BULK:     gp   p95  ooo%   loss
+   W=0/arr    0/  0/  0 |          20    20 100.0     11  0.00 |            0     0   0.0   0.00
+   W=tick     1/  1/  1 |          20    20 100.0     12  0.00 |            0     0   0.0   0.00
+   W=ratch    8/ 33/ 38 |          20    21 100.0     13  0.00 |            0     0   0.0   0.00
+   W=20      20/ 20/ 20 |          20    21 100.0     13  0.00 |            0     0   0.0   0.00
+   W=40      40/ 40/ 40 |          20    21 100.0     13  0.00 |            0     0   0.0   0.00
+   W=343    343/343/343 |          20    21 100.0     13  0.00 |            0     0   0.0   0.00
+  .. mid call+bulk 0.65 seed 1/6 ratch=63 ncall=2757 (1s)
+  .. mid call+bulk 0.65 seed 2/6 ratch=62 ncall=2757 (2s)
+  .. mid call+bulk 0.65 seed 3/6 ratch=75 ncall=2757 (3s)
+  .. mid call+bulk 0.65 seed 4/6 ratch=64 ncall=2757 (4s)
+  .. mid call+bulk 0.65 seed 5/6 ratch=69 ncall=2757 (5s)
+  .. mid call+bulk 0.65 seed 6/6 ratch=74 ncall=2757 (7s)
+== mid call+bulk 0.65 (seeds=6)
+   policy    W mn/md/mx | CALL:   p95   p99  dl50    frz  loss | BULK:     gp   p95  ooo%   loss
+   W=0/arr    0/  0/  0 |          48    49  99.6     19  0.12 |        66369    49  54.8   0.15
+   W=tick     1/  1/  1 |          48    50  99.3     18  0.12 |        66369    50  12.3   0.15
+   W=ratch   62/ 66/ 75 |          55    76  91.3     56  0.12 |        66369    60   0.0   0.15
+   W=20      20/ 20/ 20 |          51    62  92.5     33  0.12 |        66369    59   0.0   0.15
+   W=40      40/ 40/ 40 |          54    75  91.4     50  0.12 |        66369    60   0.0   0.15
+   W=343    343/343/343 |          55    76  91.3     56  0.12 |        66369    60   0.0   0.15
+TOTAL 31s
