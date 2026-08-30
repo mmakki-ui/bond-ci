@@ -1,0 +1,48 @@
+#!/bin/sh
+# fake ip. Default routes are a LADDER of N routed sources, so the harness can
+# drive any N -- not a 1-WAN/2-WAN toggle. The devices and their ORDER mirror the
+# four WANs the client box actually declares (docs/INTENT.md OBJ-A/OBJ-H, and the
+# ubus shim's netifd fixture, which is where the metrics 1/2/3/4 come from):
+#     N>=1  eth1   (network.wan,       ubus metric 1)
+#     N>=2  usb0   (network.tethering, ubus metric 2)  -- the metered one
+#     N>=3  eth0   (network.secondwan, ubus metric 3)  -- DARK unless routed here
+#     N>=4  wwan0  (network.wwan,      ubus metric 4)
+# The route metrics below (10/20/30/40) are only the ROUTE-PARSE fallback's view;
+# whenever ubus answers, netifd's metric wins (metric precedence, OBJ-H). Both
+# orderings agree, which is the point.
+#
+# KNOBS ($ECOSIM_STATE):
+#   nwan=<N>     number of ROUTED sources, 1..4. Default 2 (the legacy world).
+#   onewan=1     legacy alias for nwan=1 (speed's arity guard must refuse).
+#   blackhole=1  ARMS GL's VPN kill-switch route the way iproute2 prints it:
+#                `blackhole default metric 254` -- FIRST field `blackhole`, and
+#                NO `dev`. Source discovery must never read it as a WAN.
+#   unclaimed=<dev>  a default route on a device ubus declares no interface for
+#                (the NEVER-SHRINK case).
+#   iproutefail=1  the PROBE CANNOT ANSWER: `ip` exits NON-ZERO and prints nothing,
+#                the way a fork failure under memory pressure, a netlink error or a
+#                PATH gap mid-upgrade presents. This is NOT "no default routes" --
+#                that case is `nwan=0`-shaped and exits 0 with empty output. The two
+#                must never be confused (U32 B1), so the shim can produce both.
+S="$ECOSIM_STATE"
+N=$(cat "$S/nwan" 2>/dev/null)
+case "$N" in ''|*[!0-9]*) N=2 ;; esac
+[ "$(cat "$S/onewan" 2>/dev/null)" = 1 ] && N=1
+case "$1 $2" in
+  "route show"|"route "*)
+    # scoped to the ROUTE surface so the bar tests exactly what it claims: the
+    # default-route PROBE could not answer. `ip link set` is untouched.
+    [ "$(cat "$S/iproutefail" 2>/dev/null)" = 1 ] && exit 1
+    [ "$N" -ge 1 ] && echo "default dev eth1 metric 10"
+    [ "$N" -ge 2 ] && echo "default dev usb0 metric 20"
+    [ "$N" -ge 3 ] && echo "default dev eth0 metric 30"
+    [ "$N" -ge 4 ] && echo "default dev wwan0 metric 40"
+    [ "$(cat "$S/blackhole" 2>/dev/null)" = 1 ] && echo "blackhole default metric 254"
+    U=$(cat "$S/unclaimed" 2>/dev/null)
+    [ -n "$U" ] && echo "default dev $U metric 40"
+    ;;
+  "link set"*) : ;;      # mtu changes: no-op
+  "rule "*)    : ;;
+  *) : ;;
+esac
+exit 0
