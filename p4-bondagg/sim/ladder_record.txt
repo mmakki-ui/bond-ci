@@ -1,0 +1,54 @@
+# ladder_record.txt -- U39. The FIRST measured record of what `ladder` actually does.
+#
+# 14 consecutive `emulator-gate` runs of the `ladder` job on branch `dev`,
+# github.com/mmakki-ui/bond, 2026-08-30 02:05Z .. 11:56Z (run ids below), plus one
+# confirming run of the same tree (96b9ddb) on the public CI mirror,
+# mmakki-ui/bond-ci run 33315042085, which reproduced the same two persistent fails.
+#
+# EVERY value below is READ OUT OF A CI LOG. None is a local re-run: there is no Go
+# toolchain on the dev PC, so pathsim cannot be executed here at all.
+# Reproduce:  gh run view <run> --repo mmakki-ui/bond --log --job <ladder job id>
+#
+# This file is the baseline .github/scripts/ladder_gate.py classifies against.
+# Regenerate it after ANY change to pathsim.py's bars or to p4-bondagg/daemon.
+#
+# runs (newest first):
+#   33310068067
+#   33309728418
+#   33309669280
+#   33309050419
+#   33308803251
+#   33308480590
+#   33305695310
+#   33302777656
+#   33302704133
+#   33301987287
+#   33301888459
+#   33301200754
+#   33300668372
+#   33287188647
+
+bar          threshold                     pass/14   measured over the 14 runs
+----------------------------------------------------------------------------------------------------
+S1.loss      loss <= 0.50%                    14/14   min 0  max 0
+S1.share     p1share < 8.0%                   14/14   min 0  max 0
+S2.loss      loss <= 6.00%                     6/14   min 3.32  max 8.43
+S2.share     p1share > 25.0%                  14/14   min 31.6  max 39.6
+S2.tail      tail900 >= 1871.5 of 1900         0/14   min 1692  max 1835
+S2b.loss     loss <= 50.0%                    14/14   min 22.35  max 28.71
+S2b.deliv    delivered >= 1800                14/14   min 2424  max 2640
+S3.loss      loss <= 55.0%                    14/14   min 35.77  max 40.23
+S3.thr       late_thr >= 1.50 Mb              14/14   min 1.56  max 1.9
+S3.rate      p0rate <= 1000 kb                 9/14   min 690  max 1400
+S3.peerloss  median_peerloss <= 3.0%           0/14   min 20  max 33
+S4.loss      loss <= 12.0%                    14/14   min 6.2  max 6.2
+S4.tail      tail >= 392 of 400               14/14   min 400  max 400
+S5.loss      loss <= 1.00%                    14/14   min 0  max 0.1
+S6.loss      loss <= 0.80%                     9/14   min 0.37  max 1.7
+S6.k         K == 20                          13/14   values 12 x1, 20 x13
+S7.loss      loss <= 3.50%                    13/14   min 2.47  max 3.83
+S7.k         K in {8,12}                      14/14   values 12 x1, 8 x13
+S8.loss      loss <= 4.00%                    13/14   min 1.97  max 4.23
+S9.loss      loss <= 45.0%                    14/14   min 20.24  max 27.22
+*.order      inorder == True              140/140   all 10 stages x 14 runs
+*.dup        dup == 0                     140/140   all 10 stages x 14 runs
