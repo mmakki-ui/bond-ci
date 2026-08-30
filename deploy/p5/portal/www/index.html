@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Second layer behind the CGI's JSON escaper (injection surface INJ-2): no
+     inline script, no remote origin, nothing to connect to but this server. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; base-uri 'none'">
+<title>P5 portal</title>
+<style>
+ body { font: 14px/1.45 system-ui, sans-serif; margin: 0; padding: 1rem; max-width: 52rem; }
+ h1 { font-size: 1.1rem; margin: 0 0 .75rem; }
+ h2 { font-size: .95rem; margin: 1.4rem 0 .4rem; }
+ .card { border: 1px solid #bbb; border-radius: 6px; padding: .75rem; margin-bottom: .75rem; }
+ .intent { font-size: 1.4rem; font-weight: 600; }
+ .position { color: #a15c00; }
+ .muted { color: #666; }
+ .pending { color: #a15c00; font-size: .8rem; }
+ table { border-collapse: collapse; width: 100%; }
+ th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid #ddd; font-variant-numeric: tabular-nums; }
+ button { margin: 0 .3rem .3rem 0; padding: .3rem .6rem; }
+ button[disabled] { opacity: .45; }
+ #err { color: #b00; white-space: pre-wrap; }
+ pre { background: #f4f4f4; padding: .5rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>P5 portal <span class="muted">— fact writer and viewer. Never a controller.</span></h1>
+
+<div class="card" id="authcard">
+  <b>Session</b>
+  <p class="muted" id="authnote"></p>
+  <input id="sid" size="36" placeholder="GL session id (32 hex)" autocomplete="off">
+  <button id="authgo">Use</button>
+</div>
+
+<div class="card">
+  <h2>Mode</h2>
+  <div><span class="muted">Intent (what you chose)</span><br><span class="intent" id="intent">—</span></div>
+  <div id="posrow" hidden><span class="muted">Position (where the system is now)</span><br>
+    <span class="position" id="position">—</span></div>
+  <div class="muted">node: <span id="node">—</span> · auto: <span id="auto">—</span></div>
+  <div id="modebtns" style="margin-top:.6rem"></div>
+</div>
+
+<div class="card">
+  <h2>Parameters</h2>
+  <div id="fields"></div>
+</div>
+
+<div class="card">
+  <h2>Sources</h2>
+  <p class="muted">As the box declares them. Participation and priority are set in
+     GL's own interface configuration, not here — demote a source there and
+     <code>eco</code> follows.</p>
+  <button id="srcrefresh">refresh sources</button>
+  <table><thead><tr><th>interface</th><th>device</th><th>state</th><th>metric</th><th>metered</th></tr></thead>
+  <tbody id="sources"></tbody></table>
+</div>
+
+<div class="card">
+  <h2>Divergence</h2>
+  <div>kmwan mode: <b id="kmwan">—</b>
+   <span class="muted">— shown, not fought. A load-balance mode starts its tracker and splits
+   traffic underneath the tunnel.</span></div>
+</div>
+
+<div class="card">
+  <h2>Probes <span class="muted">(read-only, enumerated)</span></h2>
+  <div id="probes"></div>
+  <pre id="probeout" hidden></pre>
+</div>
+
+<div id="err"></div>
+<script src="portal.js"></script>
+</body>
+</html>

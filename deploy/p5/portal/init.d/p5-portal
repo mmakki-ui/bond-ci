@@ -1,0 +1,72 @@
+#!/bin/sh /etc/rc.common
+# /etc/init.d/p5-portal — the M9 portal's OWN uhttpd instance. BUSYBOX/procd.
+#
+# WHY A SEPARATE INSTANCE, NOT GL's (m9-portal-design.md §5 / INTENT.md OBJ-E):
+# `/www/cgi-bin` is GL's docroot; a firmware upgrade wipes it and dropping files
+# there entangles P5 with their server (C3). So: own docroot, own port, own
+# process. Zero new packages -- uhttpd is already installed and running on the
+# box (observed: `/usr/sbin/uhttpd -f -h /www -r GL-MT6000 -x /cgi-bin -u /ubus`,
+# INTENT.md:134-136).
+#
+# NO UCI IS WRITTEN. The instance is configured entirely by the argv below, so
+# P5 never edits `/etc/config/uhttpd` -- a foreign file, and the same class of
+# entanglement that makes `/etc/config/firewall` an unresolved contradiction in
+# E0's contract (ROADMAP.md "Three consequences", item 3). uci is READ here, and
+# only with fixed literal keys.
+
+START=95
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/sbin/uhttpd
+P5_PORTAL_DIR="${P5_PORTAL_DIR:-/usr/lib/p5/portal}"
+P5_STATE_DIR="${P5_STATE_DIR:-/etc/p5/portal}"
+DOCROOT="$P5_PORTAL_DIR/www"
+
+# lan_addr: the address to bind, DERIVED from the box's own LAN interface --
+# never a literal in this file. Tries netifd's own answer first (the OBJ-A rule:
+# "source status comes FROM GL, not from inference"), then the uci config.
+# Prints nothing when it cannot tell, and the caller then REFUSES TO START.
+lan_addr() {
+    _a=$(ubus call network.interface.lan status 2>/dev/null \
+         | sed -n 's/.*"address"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p' | head -1)
+    [ -n "$_a" ] || _a=$(uci -q get network.lan.ipaddr 2>/dev/null)
+    case "$_a" in
+      ''|*[!0-9.]*) return 1 ;;
+    esac
+    printf '%s' "$_a"
+}
+
+start_service() {
+    # LAN-BOUND ONLY, NEVER WAN (design §5, non-negotiable). Bound EXPLICITLY to
+    # one address; there is no path here that can produce a wildcard bind, and no
+    # reliance on a firewall default. If the LAN address cannot be established
+    # the service does not start -- failing closed beats binding hopefully.
+    _addr=$(lan_addr) || {
+        logger -t p5-portal "REFUSING TO START: cannot establish the LAN address; will not bind"
+        return 1
+    }
+    # NO ARBITRARY CONSTANT: the listen port is an operator declaration, not a
+    # number invented here. With no declaration the portal does not start.
+    _port=$(awk 'NR==1{print $1; exit}' "$P5_STATE_DIR/port" 2>/dev/null)
+    case "$_port" in
+      ''|*[!0-9]*) logger -t p5-portal "REFUSING TO START: no port declared in $P5_STATE_DIR/port"; return 1 ;;
+    esac
+    [ "$_port" -ge 1 ] && [ "$_port" -le 65535 ] || {
+        logger -t p5-portal "REFUSING TO START: declared port '$_port' is out of range"; return 1
+    }
+    [ -d "$DOCROOT" ] || { logger -t p5-portal "REFUSING TO START: no docroot $DOCROOT"; return 1; }
+
+    procd_open_instance
+    # -x /cgi-bin  : CGI prefix, served out of OUR docroot only
+    # NO -u        : the ubus proxy is deliberately NOT exposed. The page talks
+    #                to one CGI; a ubus HTTP surface would be a second, much
+    #                larger attack surface than the one design §5 asks us to keep
+    #                minimal, and it would let a browser call ubus objects the
+    #                portal never enumerates.
+    procd_set_param command "$PROG" -f -h "$DOCROOT" -x /cgi-bin -p "$_addr:$_port"
+    procd_set_param respawn
+    procd_set_param stderr 1
+    procd_close_instance
+    logger -t p5-portal "listening on $_addr:$_port (LAN address, derived)"
+}

@@ -1,0 +1,30 @@
+# deploy/p5/portal/catalogue/probes — the ENUMERATED read-only probe list.
+#
+# m9-portal-design.md §3b: "Enumerated actions only. The runner exposes a fixed
+# list of named tests. It does NOT accept a command, a path, or a test name
+# interpolated into a shell."
+#
+# So the REQUEST supplies only a NAME, matched against column 1 by exact literal
+# match. The argv comes from THIS FILE and never from the request. That is what
+# keeps the `uci` row safe: its argument vector is fixed here, so no request byte
+# can reach a uci key (injection surface INJ-5).
+#
+# HEAD TOKENS ARE SYMBOLIC AND CLOSED. Column 2's first token must be one of
+# XCTL | UCI | BONDCTL, resolved by the CGI to the configured artifact path. An
+# arbitrary program name in this file is refused at load (bar INJ-5b), so a
+# catalogue edit cannot turn into arbitrary execution. Remaining argv tokens must
+# match ^[A-Za-z0-9._@:/-]+$ -- no shell metacharacters, no spaces, no quotes.
+#
+# READ-ONLY ONLY. Every row is a probe in the design's sense: "safe any time,
+# read-only". The DISRUPTIVE half of §3b (the Layer-2 fault battery against the
+# real artifacts, and E1's saturating edge-vs-mid probe) is deliberately NOT
+# shipped here -- see deploy/p5/portal/README.md "What is deliberately not built".
+# Bar PC-3 asserts every row's head is a read-only verb.
+#
+# fields: name|argv|label
+sources|XCTL _sources|Sources as GL declares them: iface, device, state (routed/up/idle/absent), metric, metered
+node|XCTL node|Lifecycle node: off / engaged / suspended / suspended_degraded
+primary|XCTL _primary|The lowest-metric live source (what `eco` enrols)
+server|XCTL _server|Bond server host, resolved from the live WireGuard peer
+selfcheck|XCTL selfcheck|Artifact self-check
+kmwan|UCI -q get kmwan.global.mode|kmwan's mode -- C3 show-divergence. A load-balance flip starts its tracker and splits traffic underneath the tunnel (INTENT.md OBJ-H hazard 4).

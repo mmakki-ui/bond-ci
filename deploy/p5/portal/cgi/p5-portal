@@ -1,0 +1,299 @@
+#!/bin/sh
+# /usr/lib/p5/portal/cgi/p5-portal — M9 portal CGI. BUSYBOX-SAFE POSIX sh.
+#
+# THIS FILE PLUS lib/portal-lib.sh IS THE ENTIRE ATTACK SURFACE (design §5:
+# "Keep the CGI minimal"). Everything else the portal ships is static text.
+#
+# THE CONTRACT. The portal is a CALLER of the reconciler, never a controller
+# (m9-portal-design.md §1). The COMPLETE set of side-effecting externals this
+# file may invoke is four argument vectors and nothing else:
+#
+#     $BONDCTL on
+#     $BONDCTL off
+#     $BONDCTL mode <a literal read out of catalogue/modes>
+#     $XCTL reconcile
+#
+# plus fact-file writes into $BOND_DIR under a catalogue-declared key. There is
+# NO init-script start/stop/restart, NO shaper CLI, NO uci write, NO sqm, NO wg,
+# NO iptables, NO edge verb -- an edge is reconcile()'s to pick. Bars PC-2
+# (static scan of this file) and PC-5 (runtime ledger over every control) enforce
+# it; this comment does not.
+#
+# `bondctl on|off|mode` is itself a fact writer (deploy/p5/bondctl) already
+# covered by Layer-2. Routing the portal's mode and lifecycle writes through it
+# is deliberate: the portal then adds NO second implementation of the ADR-003 §2
+# write table (eco SETS auto, every other mode CLEARS it), so the two cannot
+# drift. `shape`/`profile`/`floor_kbit` have no bondctl verb, so those are
+# written directly and followed by `bond-xctl reconcile` -- the same shape.
+
+set -u
+P5_PORTAL_DIR="${P5_PORTAL_DIR:-/usr/lib/p5/portal}"
+. "$P5_PORTAL_DIR/lib/portal-lib.sh"
+
+p5_read_request
+
+# ---- authentication, before anything else reads or writes -------------------
+# Fails closed. See lib/portal-lib.sh "authentication" for exactly which part of
+# this is established on the box and which part is a labelled hypothesis.
+p5_auth_ok || p5_die "403 Forbidden" auth
+
+emit_kv() { p5_json_str "$1"; printf ':'; p5_json_str "$2"; }
+
+# ---- read: the catalogue ----------------------------------------------------
+emit_catalogue() {
+    printf '{"ok":true,"modes":['
+    _first=1
+    while IFS='|' read -r v verb stt note || [ -n "${v:-}" ]; do
+        case "${v:-}" in ''|'#'*) continue ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv value "$v"
+        printf ','; emit_kv verb "${verb:-}"
+        printf ','; emit_kv status "${stt:-}"
+        printf ','; emit_kv note "${note:-}"
+        printf '}'
+    done < "$P5_CAT_DIR/modes"
+    printf '],"fields":['
+    _first=1
+    while IFS='|' read -r k kind dom cons lab || [ -n "${k:-}" ]; do
+        case "${k:-}" in ''|'#'*) continue ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv key "$k"
+        printf ','; emit_kv kind "${kind:-}"
+        printf ','; emit_kv domain "${dom:-}"
+        printf ','; emit_kv consumer "${cons:-}"
+        printf ','; emit_kv label "${lab:-}"
+        printf '}'
+    done < "$P5_CAT_DIR/fields"
+    printf '],"probes":['
+    _first=1
+    while IFS='|' read -r n argv lab || [ -n "${n:-}" ]; do
+        case "${n:-}" in ''|'#'*) continue ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        # NOTE: `argv` is deliberately NOT emitted. The page needs the name and
+        # the label; shipping the argument vector to the browser would invite a
+        # client that thinks it may compose one.
+        printf '{'; emit_kv name "$n"
+        printf ','; emit_kv label "${lab:-}"
+        printf '}'
+    done < "$P5_CAT_DIR/probes"
+    printf ']}\n'
+}
+
+# ---- read: state ------------------------------------------------------------
+# THE PAIR (design §2 / ADR-003 rule 5). `intent` and `position` are two DISTINCT
+# fields. `position` is non-empty only under auto. A page that renders one
+# "current mode" field is the defect this section exists to prevent, so the split
+# is made here, server-side, where a bar can test it without a browser.
+emit_state() {
+    _auto=off; [ -f "$BOND_DIR/auto" ] && _auto=on
+    printf '{"ok":true,'
+    emit_kv intent   "$(p5_intent)";   printf ','
+    emit_kv position "$(p5_position)"; printf ','
+    emit_kv auto     "$_auto";         printf ','
+    emit_kv node     "$("$XCTL" node 2>/dev/null)"; printf ','
+    # A fact with no consumer yet is still reported with its stored value, so the
+    # page can say "written, nothing reads it" instead of implying it works.
+    printf '"facts":{'
+    _first=1
+    while IFS='|' read -r k rest || [ -n "${k:-}" ]; do
+        case "${k:-}" in ''|'#'*) continue ;; esac
+        p5_key_sane "$k" || continue
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        emit_kv "$k" "$(p5_readfile "$BOND_DIR/$k")"
+    done < "$P5_CAT_DIR/fields"
+    printf '},'
+    # kmwan's mode -- C3 show-divergence, not a control (INTENT.md OBJ-H hazard 4).
+    emit_kv kmwan "$("$UCI" -q get kmwan.global.mode 2>/dev/null)"; printf ','
+    # the numeric field's envelope: absent means the field is disabled, and why.
+    emit_kv floor_envelope "$(p5_readfile "$P5_STATE_DIR/floor_envelope")"
+    printf '}\n'
+}
+
+# ---- read: the source table -------------------------------------------------
+# SEPARATE from ?q=state on purpose. `bond-xctl _sources` asks the box about
+# every declared interface over ubus and is by far the most expensive read the
+# portal makes; folding it into the state poll would make every refresh pay for
+# it. N-GENERIC: whatever rows the box declares, in whatever number and order --
+# no index is privileged, nothing is truncated, no interface name is tested.
+emit_sources() {
+    printf '{"ok":true,"sources":['
+    _first=1
+    "$XCTL" _sources 2>/dev/null | while read -r _if _dev _st _metric _metered; do
+        [ -n "${_if:-}" ] || continue
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv iface "$_if"
+        printf ','; emit_kv device "${_dev:-}"
+        printf ','; emit_kv state "${_st:-}"
+        printf ','; emit_kv metric "${_metric:-}"
+        printf ','; emit_kv metered "${_metered:-}"
+        printf '}'
+    done
+    printf ']}\n'
+}
+
+# ---- read: an ENUMERATED probe ---------------------------------------------
+# The request supplies a NAME only. The argv comes from catalogue/probes and its
+# head token is resolved from a CLOSED symbol set, so no request byte reaches a
+# command line (injection surfaces INJ-1 and INJ-5).
+run_probe() {
+    _want=$(p5_arg name)
+    _names=$(p5_cat_keys probes)
+    _n=$(p5_match_literal "$_names" "$_want") || p5_die "400 Bad Request" unknown_probe
+    _argv=$(p5_cat_field probes "$_n" 2)
+    _head=${_argv%% *}; _rest=${_argv#* }
+    [ "$_rest" = "$_argv" ] && _rest=""
+    case "$_head" in
+      XCTL)    _prog="$XCTL" ;;
+      UCI)     _prog="$UCI" ;;
+      BONDCTL) _prog="$BONDCTL" ;;
+      *)       p5_die "500 Internal Server Error" probe_head ;;
+    esac
+    for _t in $_rest; do
+        case "$_t" in
+          *[!A-Za-z0-9._@:/-]*) p5_die "500 Internal Server Error" probe_argv ;;
+        esac
+    done
+    # $_rest is intentionally unquoted: it is word-split into argv, and every
+    # token has just been proven metacharacter-free and catalogue-sourced.
+    # shellcheck disable=SC2086
+    _out=$("$_prog" $_rest 2>&1); _rc=$?
+    p5_hdr "200 OK"
+    printf '{"ok":true,'; emit_kv probe "$_n"
+    printf ',"rc":%d,' "$_rc"
+    emit_kv output "$_out"
+    printf '}\n'
+}
+
+# ---- write ------------------------------------------------------------------
+write_mode() {
+    _v_raw=$(p5_arg v)
+    # 1. is it a mode this catalogue knows at all?
+    _v=$(p5_match_literal "$(p5_modes_all)" "$_v_raw") || p5_die "400 Bad Request" unknown_mode
+    # 2. does the EXECUTOR implement it? bond-xctl has no fail-loud arm for an
+    #    unknown mode (its case ends `*) R="$W"`), so an unimplemented value would
+    #    be accepted silently and behave like lightning. Refuse (ADR-003 rule 6).
+    p5_match_literal "$(p5_modes_impl)" "$_v" >/dev/null || p5_die "501 Not Implemented" mode_unimplemented
+
+    # 3. ADR-003 rule 4 -- the confirmation flow. Pinning out of auto leaves the
+    #    mode fact at whatever position bond-ecod escalated to, i.e. a pin the
+    #    user never chose. Refused until the client echoes back what it accepts.
+    _pin=$(p5_pin_needing_confirm "$_v")
+    if [ -n "$_pin" ]; then
+        _c=$(p5_arg confirm)
+        if [ "$_c" != "$_pin" ]; then
+            p5_hdr "409 Conflict"
+            printf '{"ok":false,"error":"confirm_required",'
+            emit_kv pin "$_pin"; printf ','
+            emit_kv selecting "$_v"
+            printf '}\n'
+            exit 0
+        fi
+    fi
+
+    _verb=$(p5_cat_field modes "$_v" 2)
+    case "$_verb" in
+      lifecycle)
+        # `direct` is the lifecycle OFF state, not a mode fact value. bondctl off
+        # clears the rc fact and reconciles. It is NOT a service stop.
+        _out=$("$BONDCTL" off 2>&1); _rc=$?
+        ;;
+      mode)
+        # selecting a bonded mode implies the bond is on; both calls are
+        # level-triggered and idempotent.
+        _out=$("$BONDCTL" on 2>&1); _rc=$?
+        [ "$_rc" -eq 0 ] || { reply_effect "$_rc" "$_v" "$_out"; exit 0; }
+        _out=$("$BONDCTL" mode "$_v" 2>&1); _rc=$?
+        ;;
+      *) p5_die "500 Internal Server Error" bad_verb ;;
+    esac
+    reply_effect "$_rc" "$_v" "$_out"
+}
+
+write_field() {
+    _k_raw=$(p5_arg k)
+    _k=$(p5_match_literal "$(p5_cat_keys fields)" "$_k_raw") || p5_die "400 Bad Request" unknown_field
+    # applied to the CATALOGUE'S key, so even a corrupted catalogue cannot aim
+    # the write outside $BOND_DIR (injection surface INJ-3).
+    p5_key_sane "$_k" || p5_die "500 Internal Server Error" bad_key
+    _kind=$(p5_cat_field fields "$_k" 2)
+    _dom=$(p5_cat_field fields "$_k" 3)
+    _v_raw=$(p5_arg v)
+
+    case "$_kind" in
+      enum)
+        _v=$(p5_match_literal "$_dom" "$_v_raw") || p5_die "400 Bad Request" unknown_value
+        ;;
+      uint)
+        # NO ARBITRARY CONSTANT: the bounds are not in the code and not in the
+        # catalogue. They come from an operator-declared envelope file, and with
+        # no envelope the field is refused rather than given a placeholder
+        # ceiling. OBJ-F (U24) is what will eventually derive the real one.
+        _env="$P5_STATE_DIR/$_dom"
+        [ -r "$_env" ] || p5_die "409 Conflict" no_envelope
+        _line=$(p5_readfile "$_env")
+        _lo=${_line%% *}; _hi=${_line#* }; _hi=${_hi%% *}
+        _lo=$(p5_uint "${_lo:-}") || p5_die "500 Internal Server Error" bad_envelope
+        _hi=$(p5_uint "${_hi:-}") || p5_die "500 Internal Server Error" bad_envelope
+        [ "$_lo" -ge 1 ] || p5_die "500 Internal Server Error" bad_envelope
+        [ "$_hi" -ge "$_lo" ] || p5_die "500 Internal Server Error" bad_envelope
+        _v=$(p5_uint "$_v_raw") || p5_die "400 Bad Request" not_a_number
+        [ "$_v" -ge "$_lo" ] && [ "$_v" -le "$_hi" ] || p5_die "400 Bad Request" out_of_range
+        ;;
+      *) p5_die "500 Internal Server Error" bad_kind ;;
+    esac
+
+    # $_v is the CATALOGUE literal (enum) or a re-emitted canonical decimal
+    # (uint). It is never the request's bytes -- so a newline, a quote or a
+    # metacharacter has no path into the fact file (injection surface INJ-4).
+    printf '%s\n' "$_v" > "$BOND_DIR/$_k" || p5_die "500 Internal Server Error" write_failed
+    _out=$("$XCTL" reconcile 2>&1); _rc=$?
+    reply_effect "$_rc" "$_v" "$_out"
+}
+
+# restore-to-defaults (design §5): REMOVES the fact so the consumer falls back to
+# its own default. Removal, not a written "default value" -- the portal has no
+# business asserting what somebody else's default is.
+reset_field() {
+    _k_raw=$(p5_arg k)
+    _k=$(p5_match_literal "$(p5_cat_keys fields)" "$_k_raw") || p5_die "400 Bad Request" unknown_field
+    p5_key_sane "$_k" || p5_die "500 Internal Server Error" bad_key
+    rm -f "$BOND_DIR/$_k"
+    _out=$("$XCTL" reconcile 2>&1); _rc=$?
+    reply_effect "$_rc" "" "$_out"
+}
+
+reply_effect() {   # $1 = rc, $2 = applied value, $3 = combined output
+    if [ "$1" -eq 0 ]; then p5_hdr "200 OK"; _okv=true
+    else p5_hdr "500 Internal Server Error"; _okv=false; fi
+    printf '{"ok":%s,' "$_okv"
+    emit_kv applied "$2"; printf ','
+    emit_kv intent "$(p5_intent)"; printf ','
+    emit_kv position "$(p5_position)"; printf ','
+    emit_kv detail "$3"
+    printf '}\n'
+}
+
+# ---- dispatch ---------------------------------------------------------------
+case "${REQUEST_METHOD:-GET}" in
+  GET)
+    case "$(p5_arg q)" in
+      catalogue) p5_hdr "200 OK"; emit_catalogue ;;
+      state)     p5_hdr "200 OK"; emit_state ;;
+      sources)   p5_hdr "200 OK"; emit_sources ;;
+      probe)     run_probe ;;
+      *)         p5_die "400 Bad Request" unknown_query ;;
+    esac
+    ;;
+  POST)
+    case "$(p5_arg k)" in
+      '')     p5_die "400 Bad Request" missing_key ;;
+      mode)   write_mode ;;
+      *)      if [ "$(p5_arg op)" = reset ]; then reset_field; else write_field; fi ;;
+    esac
+    ;;
+esac
