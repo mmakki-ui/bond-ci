@@ -1,0 +1,380 @@
+[
+ {
+  "run": "33310068067",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2633/2800 loss=5.96% dup=0 inorder=True data0=1916 data1=884 dupsent=0 p1share=31.6% tail900=1756/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2473/3400 loss=27.26% dup=0 inorder=True data0=2124 data1=1197 dupsent=0 delivered=2473",
+   "S3": "fwd=2521/4000 loss=36.98% dup=0 inorder=True data0=2004 data1=1735 dupsent=0 late_thr=1.67Mb p0rate=707kb median_peerloss=30.0% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=508 data1=546 dupsent=54 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=679 data1=321 dupsent=0",
+   "S6": "fwd=2982/3000 loss=0.60% dup=0 inorder=True data0=2190 data1=810 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2917/3000 loss=2.77% dup=0 inorder=True data0=2234 data1=766 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2901/3000 loss=3.30% dup=0 inorder=True data0=2178 data1=822 dupsent=0",
+   "S9": "fwd=3414/4500 loss=24.13% dup=0 inorder=True data0=2648 data1=1789 dupsent=25 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33309728418",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2628/2800 loss=6.14% dup=0 inorder=True data0=1864 data1=936 dupsent=0 p1share=33.4% tail900=1752/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2569/3400 loss=24.44% dup=0 inorder=True data0=2128 data1=1199 dupsent=0 delivered=2569",
+   "S3": "fwd=2503/4000 loss=37.43% dup=0 inorder=True data0=1987 data1=1715 dupsent=0 late_thr=1.61Mb p0rate=1400kb median_peerloss=23.0% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=700 data1=300 dupsent=0",
+   "S6": "fwd=2977/3000 loss=0.77% dup=0 inorder=True data0=2170 data1=830 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2895/3000 loss=3.50% dup=0 inorder=True data0=2250 data1=750 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2888/3000 loss=3.73% dup=0 inorder=True data0=2064 data1=936 dupsent=0",
+   "S9": "fwd=3370/4500 loss=25.11% dup=0 inorder=True data0=2744 data1=1724 dupsent=12 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33309669280",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2624/2800 loss=6.29% dup=0 inorder=True data0=1690 data1=1110 dupsent=0 p1share=39.6% tail900=1744/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2479/3400 loss=27.09% dup=0 inorder=True data0=2070 data1=1306 dupsent=0 delivered=2479",
+   "S3": "fwd=2445/4000 loss=38.88% dup=0 inorder=True data0=2238 data1=1601 dupsent=0 late_thr=1.71Mb p0rate=805kb median_peerloss=29.5% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=704 data1=296 dupsent=0",
+   "S6": "fwd=2977/3000 loss=0.77% dup=0 inorder=True data0=2129 data1=871 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2926/3000 loss=2.47% dup=0 inorder=True data0=2214 data1=786 dupsent=0 K=12 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2941/3000 loss=1.97% dup=0 inorder=True data0=2141 data1=859 dupsent=0",
+   "S9": "fwd=3589/4500 loss=20.24% dup=0 inorder=True data0=2651 data1=1785 dupsent=74 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33309050419",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2620/2800 loss=6.43% dup=0 inorder=True data0=1786 data1=1014 dupsent=0 p1share=36.2% tail900=1740/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2460/3400 loss=27.65% dup=0 inorder=True data0=2102 data1=1293 dupsent=0 delivered=2460",
+   "S3": "fwd=2569/4000 loss=35.77% dup=0 inorder=True data0=2027 data1=1674 dupsent=0 late_thr=1.83Mb p0rate=949kb median_peerloss=28.0% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=508 data1=546 dupsent=54 tail=400/400",
+   "S5": "fwd=999/1000 loss=0.10% dup=0 inorder=True data0=665 data1=335 dupsent=0",
+   "S6": "fwd=2958/3000 loss=1.40% dup=0 inorder=True data0=2111 data1=889 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2904/3000 loss=3.20% dup=0 inorder=True data0=2198 data1=802 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2894/3000 loss=3.53% dup=0 inorder=True data0=2128 data1=872 dupsent=0",
+   "S9": "fwd=3373/4500 loss=25.04% dup=0 inorder=True data0=2832 data1=1679 dupsent=61 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": false,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33308803251",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2594/2800 loss=7.36% dup=0 inorder=True data0=1859 data1=941 dupsent=0 p1share=33.6% tail900=1717/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2491/3400 loss=26.74% dup=0 inorder=True data0=2117 data1=1274 dupsent=0 delivered=2491",
+   "S3": "fwd=2562/4000 loss=35.95% dup=0 inorder=True data0=1879 data1=1839 dupsent=0 late_thr=1.73Mb p0rate=988kb median_peerloss=24.5% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=694 data1=306 dupsent=0",
+   "S6": "fwd=2956/3000 loss=1.47% dup=0 inorder=True data0=2107 data1=893 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2908/3000 loss=3.07% dup=0 inorder=True data0=2289 data1=711 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2900/3000 loss=3.33% dup=0 inorder=True data0=2108 data1=892 dupsent=0",
+   "S9": "fwd=3276/4500 loss=27.20% dup=0 inorder=True data0=2665 data1=1845 dupsent=68 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": false,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33308480590",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2656/2800 loss=5.14% dup=0 inorder=True data0=1835 data1=965 dupsent=0 p1share=34.5% tail900=1779/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2602/3400 loss=23.47% dup=0 inorder=True data0=2104 data1=1238 dupsent=0 delivered=2602",
+   "S3": "fwd=2555/4000 loss=36.12% dup=0 inorder=True data0=1889 data1=1810 dupsent=0 late_thr=1.76Mb p0rate=1400kb median_peerloss=27.5% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=708 data1=292 dupsent=0",
+   "S6": "fwd=2986/3000 loss=0.47% dup=0 inorder=True data0=2066 data1=934 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2922/3000 loss=2.60% dup=0 inorder=True data0=2219 data1=781 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2873/3000 loss=4.23% dup=0 inorder=True data0=2179 data1=821 dupsent=0",
+   "S9": "fwd=3332/4500 loss=25.96% dup=0 inorder=True data0=2692 data1=1759 dupsent=0 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": true,
+   "S8": false,
+   "S9": true
+  }
+ },
+ {
+  "run": "33305695310",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2597/2800 loss=7.25% dup=0 inorder=True data0=1792 data1=1008 dupsent=0 p1share=36.0% tail900=1722/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2488/3400 loss=26.82% dup=0 inorder=True data0=2183 data1=1206 dupsent=0 delivered=2488",
+   "S3": "fwd=2466/4000 loss=38.35% dup=0 inorder=True data0=1925 data1=1887 dupsent=0 late_thr=1.85Mb p0rate=690kb median_peerloss=22.5% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=714 data1=286 dupsent=0",
+   "S6": "fwd=2984/3000 loss=0.53% dup=0 inorder=True data0=2124 data1=876 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2911/3000 loss=2.97% dup=0 inorder=True data0=2180 data1=820 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2903/3000 loss=3.23% dup=0 inorder=True data0=2073 data1=927 dupsent=0",
+   "S9": "fwd=3386/4500 loss=24.76% dup=0 inorder=True data0=2624 data1=1883 dupsent=93 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33302777656",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2636/2800 loss=5.86% dup=0 inorder=True data0=1781 data1=1019 dupsent=0 p1share=36.4% tail900=1761/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2539/3400 loss=25.32% dup=0 inorder=True data0=2181 data1=1177 dupsent=0 delivered=2539",
+   "S3": "fwd=2534/4000 loss=36.65% dup=0 inorder=True data0=2006 data1=1752 dupsent=0 late_thr=1.90Mb p0rate=1325kb median_peerloss=23.0% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=687 data1=313 dupsent=0",
+   "S6": "fwd=2965/3000 loss=1.17% dup=0 inorder=True data0=2136 data1=864 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2913/3000 loss=2.90% dup=0 inorder=True data0=2291 data1=709 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2902/3000 loss=3.27% dup=0 inorder=True data0=2039 data1=961 dupsent=0",
+   "S9": "fwd=3454/4500 loss=23.24% dup=0 inorder=True data0=2670 data1=1790 dupsent=32 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": false,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33302704133",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2611/2800 loss=6.75% dup=0 inorder=True data0=1812 data1=988 dupsent=0 p1share=35.3% tail900=1742/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2494/3400 loss=26.65% dup=0 inorder=True data0=2195 data1=1175 dupsent=0 delivered=2494",
+   "S3": "fwd=2503/4000 loss=37.43% dup=0 inorder=True data0=1919 data1=1725 dupsent=0 late_thr=1.68Mb p0rate=969kb median_peerloss=24.5% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=735 data1=265 dupsent=0",
+   "S6": "fwd=2984/3000 loss=0.53% dup=0 inorder=True data0=2126 data1=874 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2920/3000 loss=2.67% dup=0 inorder=True data0=2231 data1=769 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2914/3000 loss=2.87% dup=0 inorder=True data0=2137 data1=863 dupsent=0",
+   "S9": "fwd=3488/4500 loss=22.49% dup=0 inorder=True data0=2644 data1=1874 dupsent=91 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33301987287",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2564/2800 loss=8.43% dup=0 inorder=True data0=1838 data1=962 dupsent=0 p1share=34.4% tail900=1692/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2517/3400 loss=25.97% dup=0 inorder=True data0=2177 data1=1134 dupsent=0 delivered=2517",
+   "S3": "fwd=2517/4000 loss=37.08% dup=0 inorder=True data0=1969 data1=1738 dupsent=0 late_thr=1.68Mb p0rate=841kb median_peerloss=24.5% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=716 data1=284 dupsent=0",
+   "S6": "fwd=2949/3000 loss=1.70% dup=0 inorder=True data0=1980 data1=1020 dupsent=0 K=12 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2920/3000 loss=2.67% dup=0 inorder=True data0=2192 data1=808 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2903/3000 loss=3.23% dup=0 inorder=True data0=2032 data1=968 dupsent=0",
+   "S9": "fwd=3275/4500 loss=27.22% dup=0 inorder=True data0=2580 data1=1867 dupsent=33 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": false,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33301888459",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2682/2800 loss=4.21% dup=0 inorder=True data0=1907 data1=893 dupsent=0 p1share=31.9% tail900=1809/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2432/3400 loss=28.47% dup=0 inorder=True data0=2148 data1=1235 dupsent=0 delivered=2432",
+   "S3": "fwd=2501/4000 loss=37.48% dup=0 inorder=True data0=2088 data1=1669 dupsent=0 late_thr=1.75Mb p0rate=823kb median_peerloss=25.0% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=701 data1=299 dupsent=0",
+   "S6": "fwd=2968/3000 loss=1.07% dup=0 inorder=True data0=2093 data1=907 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2895/3000 loss=3.50% dup=0 inorder=True data0=2193 data1=808 dupsent=1 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2937/3000 loss=2.10% dup=0 inorder=True data0=2111 data1=889 dupsent=0",
+   "S9": "fwd=3511/4500 loss=21.98% dup=0 inorder=True data0=2697 data1=1754 dupsent=0 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": false,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33301200754",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2584/2800 loss=7.71% dup=0 inorder=True data0=1850 data1=950 dupsent=0 p1share=33.9% tail900=1707/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2473/3400 loss=27.26% dup=0 inorder=True data0=2173 data1=1219 dupsent=0 delivered=2473",
+   "S3": "fwd=2504/4000 loss=37.40% dup=0 inorder=True data0=1968 data1=1747 dupsent=0 late_thr=1.67Mb p0rate=1008kb median_peerloss=20.0% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=510 data1=546 dupsent=56 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=707 data1=293 dupsent=0",
+   "S6": "fwd=2989/3000 loss=0.37% dup=0 inorder=True data0=2064 data1=936 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2885/3000 loss=3.83% dup=0 inorder=True data0=2272 data1=728 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2912/3000 loss=2.93% dup=0 inorder=True data0=2119 data1=881 dupsent=0",
+   "S9": "fwd=3364/4500 loss=25.24% dup=0 inorder=True data0=2681 data1=1842 dupsent=120 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": false,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33300668372",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2707/2800 loss=3.32% dup=0 inorder=True data0=1880 data1=920 dupsent=0 p1share=32.9% tail900=1835/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2640/3400 loss=22.35% dup=0 inorder=True data0=2182 data1=1179 dupsent=0 delivered=2640",
+   "S3": "fwd=2391/4000 loss=40.23% dup=0 inorder=True data0=2354 data1=1523 dupsent=0 late_thr=1.56Mb p0rate=949kb median_peerloss=33.0% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=717 data1=283 dupsent=0",
+   "S6": "fwd=2976/3000 loss=0.80% dup=0 inorder=True data0=2152 data1=848 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2904/3000 loss=3.20% dup=0 inorder=True data0=2291 data1=709 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2906/3000 loss=3.13% dup=0 inorder=True data0=2184 data1=816 dupsent=0",
+   "S9": "fwd=3482/4500 loss=22.62% dup=0 inorder=True data0=2668 data1=1825 dupsent=40 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ },
+ {
+  "run": "33287188647",
+  "st": {
+   "S1": "fwd=600/600 loss=0.00% dup=0 inorder=True data0=600 data1=0 dupsent=0 p1share=0.0%",
+   "S2": "fwd=2645/2800 loss=5.54% dup=0 inorder=True data0=1793 data1=1007 dupsent=0 p1share=36.0% tail900=1772/1900 (ramp txdrop=conservation)",
+   "S2b": "fwd=2424/3400 loss=28.71% dup=0 inorder=True data0=2112 data1=1270 dupsent=0 delivered=2424",
+   "S3": "fwd=2528/4000 loss=36.80% dup=0 inorder=True data0=1977 data1=1717 dupsent=0 late_thr=1.81Mb p0rate=1250kb median_peerloss=26.5% (thr bar=72% of post-cut capacity ceiling; transitions are stochastic inside the fixed window)",
+   "S4": "fwd=938/1000 loss=6.20% dup=0 inorder=True data0=509 data1=546 dupsent=55 tail=400/400",
+   "S5": "fwd=1000/1000 loss=0.00% dup=0 inorder=True data0=677 data1=323 dupsent=0",
+   "S6": "fwd=2979/3000 loss=0.70% dup=0 inorder=True data0=2130 data1=870 dupsent=0 K=20 (residual: double-loss groups + lost parity + pre-arm ~0.45%)",
+   "S7": "fwd=2906/3000 loss=3.13% dup=0 inorder=True data0=2217 data1=783 dupsent=0 K=8 (single-parity residual at 5%: multi-loss groups + lost parity; raw rides the 4.5 tier boundary)",
+   "S8": "fwd=2934/3000 loss=2.20% dup=0 inorder=True data0=2099 data1=901 dupsent=0",
+   "S9": "fwd=3403/4500 loss=24.38% dup=0 inorder=True data0=2802 data1=1643 dupsent=2 (chaos smoke: invariants + >55% delivery; capacity-integral ceiling ~95%, timing-dependent transition/parity costs dominate; throughput SLAs live in S2/S3)"
+  },
+  "verdict": {
+   "S1": true,
+   "S2": false,
+   "S2b": true,
+   "S3": false,
+   "S4": true,
+   "S5": true,
+   "S6": true,
+   "S7": true,
+   "S8": true,
+   "S9": true
+  }
+ }
+]

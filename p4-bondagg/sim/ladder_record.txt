@@ -1,0 +1,100 @@
+# ladder_record.txt -- U39. The FIRST measured record of what `ladder` actually does.
+#
+# 14 consecutive `emulator-gate` runs of the `ladder` job on branch `dev`,
+# github.com/mmakki-ui/bond, 2026-08-30 02:05Z .. 11:56Z (run ids below), plus one
+# confirming run of the same tree (96b9ddb) on the public CI mirror,
+# mmakki-ui/bond-ci run 33315042085, which reproduced the same two persistent fails.
+#
+# EVERY value below is READ OUT OF A CI LOG. None is a local re-run: there is no Go
+# toolchain on the dev PC, so pathsim cannot be executed here at all. The raw stage
+# lines are in ladder_ci_runs.json, byte-identical to those logs.
+#
+# THIS FILE IS A RENDERING, NOT A SOURCE (round 3).
+# ==================================================
+# Round 2 hand-wrote these columns and nothing checked them, so a fabricated pass
+# count was invisible: moving S3.thr to UNGATED with a made-up "9/14" passed the
+# whole self-test. Every column here is now DERIVED --
+#   `ladder_replay.measure(pathsim.py, ladder_ci_runs.json)` replays each recorded
+#   run through pathsim's real verdict()/bars source and recomputes the threshold
+#   text, the pass count and the envelope --
+# and `ladder_equiv_check.py` asserts this file reproduces that derivation exactly,
+# fatally, on every CI run. Editing a number here without the runs backing it is a
+# CI failure. Regenerate, do not hand-patch:
+#     python p4-bondagg/sim/ladder_equiv_check.py --emit-record
+#
+# Regenerate the RUNS (ladder_ci_runs.json) after ANY change to pathsim.py's bars
+# or to p4-bondagg/daemon, and say in the commit what changed and why.
+# Reproduce a row:  gh run view <run> --repo mmakki-ui/bond --log --job <ladder job id>
+#
+# COLUMNS -- pipe-delimited, and the delimiter is load-bearing: round 2 split on
+# whitespace, which is ambiguous for `tail900 >= 1871.5 of 1900` and `K in {8,12}`.
+#   bar | threshold | pass/den | envelope
+#   threshold : BYTE-EQUAL to the `bar=` text pathsim prints. ladder_gate.py
+#               compares the two on every run -- that is what makes a diluted
+#               threshold (`delivered >= 1800` -> `>= 1`) fail the job instead of
+#               being printed next to this envelope as though nothing happened.
+#   pass/den  : the CLASS is derived from this and checked against it. 14/14 GATED,
+#               0/14 KNOWN HONEST FAIL, anything between UNGATED.
+#   envelope  : `min <x> max <y>` (numeric bars) or `tokens {a,b}`. Source of the
+#               fatal DRIFT band [min-(max-min), max+(max-min)] -- derived from
+#               MEASURED VALUES, so it survives a diluted threshold. `min == max`
+#               means the record established no spread and NO band exists; those
+#               four bars (S1.loss, S1.share, S4.loss, S4.tail) are named
+#               non-coverage, carried by their threshold alone.
+#
+# The threshold column previously rendered four loss bars with one decimal
+# (`loss <= 50.0%`) where pathsim prints two (`loss <= 50.00%`). Same number, and
+# the printed form is now authoritative because the gate compares against it.
+#
+# runs (newest first):
+#   33310068067
+#   33309728418
+#   33309669280
+#   33309050419
+#   33308803251
+#   33308480590
+#   33305695310
+#   33302777656
+#   33302704133
+#   33301987287
+#   33301888459
+#   33301200754
+#   33300668372
+#   33287188647
+#
+# KNOWN EXCURSIONS OUTSIDE THIS ENVELOPE, all recorded, none of them widening it.
+# Four values have landed outside the 14-run range on later runs of this branch:
+#   S3.loss  35.40%  run 33321544571 (min 35.77, passing side)
+#   S3.rate  674 kb  run 33321544571 (min 690,   passing side)
+#   S6.loss  1.73%   run 33321817968 (max 1.70,  FAILING side; UNGATED, so it did
+#                                     not fail the job -- it now trips no DRIFT
+#                                     band either: the band is [-0.96, 3.03])
+#   S3.peerloss 34.0% run 33323192348 on tip bb9c301 (max 33; inside the band [7,46])
+# The envelope is a description of what was seen, NOT a bound, and this is the
+# concrete argument against widening the six UNGATED bars to their observed max --
+# the observed max is not stable either. U39a.
+
+bar         | threshold                 | pass/den | envelope
+------------|---------------------------|----------|-------------------------
+S1.loss     | loss <= 0.50%             |    14/14 | min 0 max 0
+S1.share    | p1share < 8.0%            |    14/14 | min 0 max 0
+S2.loss     | loss <= 6.00%             |     6/14 | min 3.32 max 8.43
+S2.share    | p1share > 25.0%           |    14/14 | min 31.6 max 39.6
+S2.tail     | tail900 >= 1871.5 of 1900 |     0/14 | min 1692 max 1835
+S2b.deliv   | delivered >= 1800         |    14/14 | min 2424 max 2640
+S2b.loss    | loss <= 50.00%            |    14/14 | min 22.35 max 28.71
+S3.loss     | loss <= 55.00%            |    14/14 | min 35.77 max 40.23
+S3.peerloss | median_peerloss <= 3.0%   |     0/14 | min 20 max 33
+S3.rate     | p0rate <= 1000 kb         |     9/14 | min 690 max 1400
+S3.thr      | late_thr >= 1.50 Mb       |    14/14 | min 1.56 max 1.9
+S4.loss     | loss <= 12.00%            |    14/14 | min 6.2 max 6.2
+S4.tail     | tail >= 392 of 400        |    14/14 | min 400 max 400
+S5.loss     | loss <= 1.00%             |    14/14 | min 0 max 0.1
+S6.k        | K == 20                   |    13/14 | min 12 max 20
+S6.loss     | loss <= 0.80%             |     9/14 | min 0.37 max 1.7
+S7.k        | K in {8,12}               |    14/14 | min 8 max 12
+S7.loss     | loss <= 3.50%             |    13/14 | min 2.47 max 3.83
+S8.loss     | loss <= 4.00%             |    13/14 | min 1.97 max 4.23
+S9.loss     | loss <= 45.00%            |    14/14 | min 20.24 max 27.22
+*.order     | inorder == True           |  140/140 | tokens {True}
+*.dup       | dup == 0                  |  140/140 | min 0 max 0
