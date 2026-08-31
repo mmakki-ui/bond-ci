@@ -1,0 +1,38 @@
+==========================================================================================
+CHECK 1 -- STATIC CODE AUDIT: does the classifier read far-end state?
+==========================================================================================
+classifier block = reserved_dp.py lines 127..165 (armed/at_risk/healthy/host/mir_budget, computed BEFORE any packet is offered this tick)
+PASS -- zero reads of s.arr / s.down in the classifier block.
+  Only reads: s.spotty[i] (static, fixed at __init__ from path_defs),
+  lcaps[i] = s._local_cap(i, now) (this-tick sample of the LOCAL config
+  trace / local queue -- this host's own interface, not the peer), and
+  s.drain_ewma[i] / s._local_ms(i) (this host's own local backlog+drain
+  EWMA, DRAIN_TAU=0.10s causal local filter). mir_budget/tot_budget use
+  only s.cap0[i], the NOMINAL config capacity, not any runtime meter.
+
+for completeness, ALL s.arr touches in the file (outside the classifier):
+  line 90: s.enq = {}; s.arr = {}; s.sent_on = {}
+  line 120: s.fifo.append(seq); s.enq[seq] = now; s.arr[seq] = None
+  line 223: if s.arr.get(seq) is not None:       # already delivered (native or prior copy)
+  line 252: if s.arr.get(seq) is None or x2 < s.arr[seq]:
+  line 253: s.arr[seq] = x2
+  line 261: while s._front_lo < s.next_seq and s.arr.get(s._front_lo) is not None:
+  line 263: if s._front_lo < s.next_seq and s.arr.get(s._front_lo) is None \
+  line 280: deliv_items = [(a, seq) for seq, a in s.arr.items() if a is not None]
+  (line 223, inside PIECE 2 mirror-SEND loop: dedup only -- "don't fire a
+  copy for a seq this SAME sender already knows it already transmitted /
+  the reorder ring already resolved". It does not feed armed/at_risk/
+  healthy/host/mir_budget -- those are already fixed for the tick by the
+  time this line runs. No ACK, no RTT sample, no peer report.)
+
+==========================================================================================
+CHECK 2 -- DYNAMIC PROOF: armed_frac vs whether a stall is ACTUALLY happening
+  MID rig (hidden downstream stall), load=0.70, seeds=8, reserve r=0.15
+==========================================================================================
+  WITH dropouts (real hidden stalls)         armed_frac per-seed=['1.0000', '1.0000', '1.0000', '1.0000', '1.0000', '1.0000', '1.0000', '1.0000']  median=1.0000
+  NO dropouts (spotty class, never stalls)   armed_frac per-seed=['1.0000', '1.0000', '1.0000', '1.0000', '1.0000', '1.0000', '1.0000', '1.0000']  median=1.0000
+
+PASS -- armed_frac IDENTICAL whether or not the spotty path ever actually
+  stalls (delta=0.00e+00). Arming tracks path-CLASS presence + local health,
+  never a far-end/delivered-rate stall signal -- it is armed continuously
+  once the spotty class is alive+offering, dropout or no dropout.
