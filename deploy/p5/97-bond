@@ -1,0 +1,47 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/97-bond
+# On every wg ifup, delegate to the stateless executor's self-testing engage.
+# All lifecycle logic (probe -> DAG walk -> engage_verify -> revert) lives in
+# ONE owner — bond-xctl — so this hook cannot drift from it. Silent while
+# disabled: off stays off (emulator I1). Auto-resume: a profile switch back to
+# an engarde-capable server re-engages here without user action (I6).
+#
+# P5 reconciler: calls `bond-xctl reconcile` (the single verb). The hook is now
+# MODE-BLIND by construction -- it never picks engage vs speed; reconcile() derives
+# the edge from desired()=(rc,mode). This DISSOLVES MF-2(a): the deployed hook gated
+# on `$SVC enabled` and fired `engage`, which (engarde stays enabled during speed)
+# tore speed down on any wg ifup -> hook/watchdog oscillation. No gate now: when the
+# box is off, reconcile -> disengage is a safe no-op.
+#
+# U52: which fired interface is the wg tunnel is DERIVED via ubus
+# (bond-xctl _is_wg), not read from $BOND_DIR/wg-logical. That file was
+# written ONLY by p2-engarde's bootstrap (p2-engarde/bootstrap-bond.sh:79) --
+# nothing in deploy/p5 ever wrote it, and per U50 P5 no longer depends on
+# p2-engarde at all. On a box that never ran that bootstrap (a clean install,
+# or the server, which docs/knowledge/inventory/2026-08-30-server-brume2.txt's
+# `### etc-bond` shows has no /etc/bond/wg-logical at all) this hook used to
+# `exit 0` at the missing-file check and stay inert forever, with nothing in
+# any log to say so. Deriving removes the dependency outright; classification
+# failure (ubus itself unreachable) now logs at error level instead of the
+# silent `exit 0` -- see the FAIL LOUD branch below.
+
+XCTL="${XCTL:-/usr/sbin/bond-xctl}"
+
+[ "$ACTION" = "ifup" ] || exit 0
+
+"$XCTL" _is_wg "$INTERFACE"
+case $? in
+    0)  # this ifup IS the wg tunnel -- reconcile
+        logger -t bond-hook "wg ifup: reconciling via bond-xctl"
+        "$XCTL" reconcile >/dev/null 2>&1 &
+        ;;
+    1)  ;;  # a different interface came up -- correctly silent, not an error
+    *)  # FAIL LOUD: could not classify the event at all (no ubus, or ubus
+        # gave no answer for $INTERFACE). The old code's equivalent case --
+        # $BOND_DIR/wg-logical missing or unreadable -- used to `exit 0` here
+        # with no trace anywhere. This is the fix's other half: when the
+        # question genuinely cannot be answered, say so.
+        logger -t bond-hook "ERROR: cannot classify ifup($INTERFACE) via ubus -- P5 will not auto-reconcile on wg transitions until this is fixed"
+        ;;
+esac
+exit 0
