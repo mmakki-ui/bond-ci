@@ -1,0 +1,2 @@
+#!/bin/sh
+[ "$1" = "enabled" ] && exit "${SVC_OFF:-0}"
