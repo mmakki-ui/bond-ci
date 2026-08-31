@@ -1,0 +1,71 @@
+name: u69-verify-probe
+
+# U69 INDEPENDENT VERIFICATION. Reproduces the two minimal disagreements the U69
+# bisect reported, from the stated inputs, on this runner -- not by re-reading the
+# bisect's own logs. Each step is a hard assertion: if the claimed divergence does
+# not reproduce, this job fails and the U69 finding is in question.
+#
+# Claim 1 (13 bars): busybox ash is a STANDALONE shell -- for a name in its applet
+#   table it never consults $PATH, so `busybox ash -c 'command -v ip'` answers the
+#   bare applet name while dash answers a filesystem path, and a PATH-interposed
+#   shim for `ip` is bypassed under ash but honoured under dash.
+# Claim 2 (1 bar): `diff` has no portable default format -- GNU emits NORMAL
+#   ("< "/"> "), busybox emits UNIFIED ("-"/"+"), so `grep -c '^[<>]'` counts 2 on
+#   GNU and 0 on busybox; the fix's explicit `-u` + `^[-+][^-+]` counts 2 on both.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: install busybox and dash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y busybox-static dash
+          busybox 2>&1 | head -1
+
+      - name: "half 1: applet precedence — command -v ip under ash vs dash"
+        run: |
+          a=$(busybox ash -c 'command -v ip')
+          d=$(dash -c 'command -v ip')
+          b=$(bash -c 'command -v ip')
+          echo "busybox ash : $a"
+          echo "dash        : $d"
+          echo "bash        : $b"
+          [ "$a" = "ip" ] || { echo "NOT REPRODUCED: ash answered '$a', not the bare applet name"; exit 1; }
+          case "$d" in /*) ;; *) echo "NOT REPRODUCED: dash answered '$d', not a PATH path"; exit 1 ;; esac
+          echo "REPRODUCED: ash resolves ip internally, dash consults PATH"
+
+      - name: "half 1b: a PATH shim for ip is bypassed under ash, honoured under dash"
+        run: |
+          mkdir -p /tmp/shim
+          printf '#!/bin/sh\necho SHIM\n' > /tmp/shim/ip
+          chmod +x /tmp/shim/ip
+          out_dash=$(PATH=/tmp/shim:$PATH dash -c 'ip route show default' || true)
+          out_ash=$(PATH=/tmp/shim:$PATH busybox ash -c 'ip route show default' || true)
+          echo "dash saw : '$out_dash'"
+          echo "ash saw  : '$out_ash'"
+          [ "$out_dash" = "SHIM" ] || { echo "NOT REPRODUCED: dash did not honour the shim"; exit 1; }
+          [ "$out_ash" != "SHIM" ] || { echo "NOT REPRODUCED: ash honoured the shim -- no standalone bypass"; exit 1; }
+          echo "REPRODUCED: the shim is bypassed only under busybox ash"
+
+      - name: "half 2: diff default format — GNU normal vs busybox unified"
+        run: |
+          printf 'a\n' > /tmp/x
+          printf 'b\n' > /tmp/y
+          g=$(diff /tmp/x /tmp/y | grep -c '^[<>]' || true)
+          bb=$(busybox diff /tmp/x /tmp/y | grep -c '^[<>]' || true)
+          echo "GNU     diff | grep -c '^[<>]'  ->  $g"
+          echo "busybox diff | grep -c '^[<>]'  ->  $bb"
+          [ "$g" -eq 2 ]  || { echo "NOT REPRODUCED: GNU counted $g, not 2"; exit 1; }
+          [ "$bb" -eq 0 ] || { echo "NOT REPRODUCED: busybox counted $bb, not 0"; exit 1; }
+          gu=$(diff -u /tmp/x /tmp/y | grep -c '^[-+][^-+]' || true)
+          bu=$(busybox diff -u /tmp/x /tmp/y | grep -c '^[-+][^-+]' || true)
+          echo "GNU     diff -u | grep -c '^[-+][^-+]'  ->  $gu"
+          echo "busybox diff -u | grep -c '^[-+][^-+]'  ->  $bu"
+          [ "$gu" -eq 2 ] && [ "$bu" -eq 2 ] || { echo "NOT REPRODUCED: the -u fix does not count 2 on both"; exit 1; }
+          echo "REPRODUCED: default formats disagree, explicit -u agrees on both"
