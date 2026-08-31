@@ -1,0 +1,342 @@
+##############################################################################################################
+# rig_constants.py -- U10 ITEM 4: per-link constants settled at N=2
+# seeds=8  T=9.0s  rig=mid
+##############################################################################################################
+  rig     C:\Users\mmakk\Claude Code\bond\.claude\worktrees\u10b\p4-bondagg\sim\pull-study\03-reserved-composite\reserved_composite.py
+  oracle  C:\Users\mmakk\Claude Code\bond\.claude\worktrees\u10b\p4-bondagg\sim\pull-study\03-reserved-composite\ackclock_sim.py
+  physics C:\Users\mmakk\Claude Code\bond\.claude\worktrees\u10b\p4-bondagg\sim\nsched_model.py
+##############################################################################################################
+
+==============================================================================================================
+C1  CENSUS -- per-link constants the GATED scheduler set reads, and whether the
+    SAME value is present in the two-link ancestor rig (ackclock_sim.make_defs)
+==============================================================================================================
+  ackclock_sim.make_defs('mid') returns 2 path dicts -- written out longhand, one
+  tether and one eth.  That is the N=2 rig.  reserved_composite.build_rig is its
+  N-generic successor.  Values below are compared, not asserted.
+
+  per-link constant                                   N=2 rig  N-generic rig      delta
+  spotty (tether/cellA): cap_fn(t) over [0,T)    make_defs[0]   build_rig[0]          0
+      loc_owd                                              25             25          0
+      down_owd                                              2              2          0
+      jit                                                  25             25          0
+  steady (eth/eth): cap_fn(t) over [0,T)         make_defs[1]   build_rig[1]          0
+      loc_owd                                               8              8          0
+      down_owd                                              1              1          0
+      jit                                                   1              1          0
+  default dropout schedule                           3 x 0.4s       3 x 0.4s          0
+  local_mult (mid local drain)                             20             20          0
+
+  -> IDENTICAL: cellA and eth ARE the N=2 rig's two paths, sampled at every tick
+     cellB, cellC and wifi were invented afterwards for the N>2 mixes.  They have
+     no ancestor and no measurement behind them.  ADR-004 condition 2 (compare
+     the rig to a real router) is OPEN, so NONE of these has ever been measured
+     against hardware at any N.
+
+  Scheduler-side per-link constants, and whether the GATED set reads them:
+    target_ms = 40.0                 per-link admission ms-gate AND the delivered-rate meter threshold
+        reserved_composite.py:205, ackclock_sim.py:123 LIVE for Dc, ewma, pull, oracle
+    reorder hold +130.0 ms           additive term of the ring hold; also the Dc duplicate TTL (:245)
+        reserved_composite.py:497, ackclock_sim.py:610 LIVE for every scheduler (finalize)
+    hold clamps 0.08 / 0.35 s        floor and ceiling on the same hold
+        reserved_composite.py:497, ackclock_sim.py:610 LIVE, see C2
+    hold jitter multiplier 3.0       3 sigma of the MAX-jitter link only
+        reserved_composite.py:498, ackclock_sim.py:611 LIVE
+    maxq_ms = 300.0                  pool bound = 0.300 * sum(cap0) -- AGGREGATE, scales with N
+        reserved_composite.py:205,226  LIVE for Dc/pull/D
+    QMAX_MS = 300.0                  per-path downstream fluid tail-drop bound
+        nsched_model.py:344 via reserved_composite.py:177 LIVE
+    NLAG = 0.350 + 0.100 s window    per-link lagged delivered-rate meter window
+        nsched_model.py:347, reserved_composite.py:252 LIVE for Dc, ewma
+    deliv_hist horizon 0.6 s         per-link delivered-history trim
+        reserved_composite.py:473      LIVE for Dc
+    DRAIN_TAU = 0.10 / REGEN = 0.02  per-link local drain EWMA and idle probe-up toward cap0
+        reserved_composite.py:182,183  LIVE for every SimD scheduler (feeds _local_ms -> _meter_ok)
+    HEALTH_FRAC = 0.75               host must drain >= 75% of nominal cap0
+        reserved_composite.py:181,311  NOT live for Dc/Dpp -- the else-branch is D/D' only (:310)
+    tshare = assigned[0]/sum         a per-link metric keyed to INDEX 0
+        reserved_composite.py:518, ackclock_sim.py:643 LIVE, see C5
+
+==============================================================================================================
+C2  THE HOLD FORMULA ACROSS N -- arithmetic only, no simulation
+    hold = clamp[0.08, 0.35]( (max owd - min owd) + 3.0*max(jit) + 130.0 ) / 1000
+==============================================================================================================
+  mix         N owd spread  3*max jit    +const    raw ms   hold ms   const%  clamped
+  N2-het      2       18.0       75.0     130.0     223.0     223.0    58.3%       no
+  N3-het      3       24.0       84.0     130.0     238.0     238.0    54.6%       no
+  N4-het      4       24.0       84.0     130.0     238.0     238.0    54.6%       no
+  N5-het      5       29.0       90.0     130.0     249.0     249.0    52.2%       no
+  N4-teth     4       29.0       90.0     130.0     249.0     249.0    52.2%       no
+  N5-corr     5       29.0       90.0     130.0     249.0     249.0    52.2%       no
+
+  Both MEASURED terms are ORDER STATISTICS over the link set, so both are
+  non-decreasing in N by construction -- adding a link can only widen the owd
+  spread and can only raise max(jit).  That much is N-generic in FORM.
+  What is not: the +130 ms is the LARGEST term at every N in the table, so the
+  hold is majority-constant everywhere the rig has ever run.
+  WIDEST mix the archetype set can build (all five, any N>=5): raw=249.0 ms,
+  ceiling=350 ms.  The ceiling is UNREACHABLE with these archetypes at ANY N --
+  max/min are set by the archetype SET, not by how many links are drawn from it,
+  so duplicating links cannot widen it.  Nothing in the rig ever exercises either
+  clamp: they are untested code at every N the battery runs.
+
+==============================================================================================================
+C3  THE HOLD, MEASURED ACROSS N.  One sim run per (mix, sched, seed); the hold is
+    then swept POST HOC by re-releasing the same arrivals, so nothing but the
+    receiver-side ring changes.  Grid: 0.00..1.00 s in 20 ms steps.
+    CAVEAT, stated: for Dc the same formula ALSO sets the sender-side duplicate
+    TTL (reserved_composite.py:245), which is fixed at its formula value here.
+    So C3 isolates the RING, which U11 measured as 78-96% of Dc's loss.
+==============================================================================================================
+  SELF-GATE: recomputation reproduces run() at the formula hold on 96/96 runs -> OK
+
+  the CEILING column is loss at hold = 350 ms, the formula's own clamp
+  mix         N formula loss@form p95@form  loss@350 best hold loss@best p95@best gain pt
+  N2-het      2     223     1.342       70     1.066      1000    0.296       78   1.046  [Dc] EDGE
+  N2-het      2     223     3.314      129     1.852       960    0.643      608   2.671  [oracle]
+  N3-het      3     238     3.743      158     3.035       840    1.087      199   2.656  [Dc]
+  N3-het      3     238     6.288      158     3.231       960    1.083      598   5.205  [oracle]
+  N4-het      4     238     3.457       88     2.260       980    0.732       89   2.725  [Dc]
+  N4-het      4     238     5.862      158     2.706       960    0.880      608   4.982  [oracle]
+  N5-het      5     249     4.080      112     2.826       960    1.030      113   3.049  [Dc]
+  N5-het      5     249     6.924      178     3.417       960    1.192      738   5.732  [oracle]
+  N4-teth     4     249     6.686      198     5.399       920    2.201      418   4.485  [Dc]
+  N4-teth     4     249     7.683      178     4.131       960    1.507      738   6.176  [oracle]
+  N5-corr     5     249     5.221      118     3.399       940    1.792      208   3.430  [Dc]
+  N5-corr     5     249     6.951      178     3.389       960    1.321      618   5.630  [oracle]
+
+  NESTED CHAIN N=2->5.  loss-minimising hold: N=2:1000  N=3:840  N=4:980  N=5:960
+                        formula output      : N=2:223  N=3:238  N=4:238  N=5:249
+  measured optimum moves 160 ms across the chain; the formula moves 26 ms.
+  READ THE TWO COLUMNS TOGETHER.  Loss and p95 move in OPPOSITE directions with
+  the hold, so "best hold" is the LOSS-optimal hold and is not a recommendation:
+  the rig is RIG=mid, where HANDOFF records the hold as a real latency trade (p50
+  68 -> 129 ms), unlike at the edge where it moved no percentile.  What C3
+  establishes is narrower and enough: the formula does NOT sit at the loss
+  optimum at ANY N; the gap is 602-777 ms and does NOT close as N grows; and
+  the loss on the table is far larger than any bar tolerance in the battery.
+  The optimum ordering across the chain is N=2:1000 N=3:840 N=4:980 N=5:960.
+  READ THAT ORDERING AS CENSORED, NOT AS A SHAPE.  N2-het sits ON the grid
+  boundary (0-1000 ms), so its argmin is where the sweep STOPPED, not
+  where the curve turned, and the curve is flat near the optimum. The
+  non-monotonicity of this ordering is therefore NOT established here and no
+  conclusion is drawn from it.
+  WHAT IS ESTABLISHED WITHOUT THE ORDERING: the formula misses the optimum by
+  602-777 ms at every N and the gap does not close as N grows, so the defect
+  is a LEVEL error, not a failure to scale with N -- the opposite of what item 4
+  was looking for, and it survives even if every argmin above moved a grid step.
+  NOTE: the loss-optimal hold exceeds the formula's own 350 ms CEILING on at
+  least one mix, so the ceiling is not dormant on the loss axis -- it is
+  below the loss optimum at every N measured here.
+
+==============================================================================================================
+C4  target_ms ACROSS N -- swept LIVE (it changes admission, so it cannot be swept
+    post hoc).  The one per-link constant every gated scheduler reads.
+    grid: 10, 20, 30, 40, 60, 80, 120 ms   (the shipped value is 40.0)
+==============================================================================================================
+    AN ARGMIN IS NOT A RESULT WITHOUT AN ERROR BAR.  Every cell below is a
+    median over 8 seeds, and the seeds are COMMON across the grid, so the
+    comparison between two grid points is PAIRED per seed.  C4b reads each
+    argmin against that pairing before any verdict is drawn from it.
+==============================================================================================================
+  load=0.65   Dc loss% by target_ms
+    mix         N       10       20       30       40       60       80      120
+    N2-het      2   15.702    0.817    0.566    0.965    1.493    1.538    1.584   best=30ms
+    N3-het      3   22.029    2.486    2.163    3.407    6.683    9.718   16.699   best=30ms
+    N4-het      4   15.816    1.668    2.024    3.073    4.913    6.509    9.696   best=20ms
+    N5-het      5   19.803    2.659    2.188    3.237    6.266    9.340   15.212   best=30ms
+                                                                                
+  load=0.65   Dc gp by target_ms
+    N2-het      2    58556    68895    69070    68792    68425    68394    68362   best=30ms
+    N3-het      3    65297    81663    81934    80892    78148    75607    69760   best=30ms
+    N4-het      4    95093   111074   110672   109487   107409   105605   102006   best=20ms
+    N5-het      5    99439   120697   121281   119980   116225   112413   105132   best=30ms
+  load=0.95   Dc loss% by target_ms
+    mix         N       10       20       30       40       60       80      120
+    N2-het      2   36.940   15.528   10.248   10.309   13.051   16.403   21.288   best=30ms
+    N3-het      3   45.121   21.493   14.413   13.275   15.187   18.639   28.820   best=40ms
+    N4-het      4   38.930   16.169   11.097   10.691   13.225   17.230   26.917   best=40ms
+    N5-het      5   43.415   19.454   12.994   11.843   14.961   19.613   30.236   best=40ms
+                                                                                
+  load=0.95   Dc gp by target_ms
+    N2-het      2    64021    85759    91120    91057    88274    84870    79911   best=30ms
+    N3-het      3    67169    96089   104755   106147   103808    99583    87121   best=40ms
+    N4-het      4   100823   138399   146773   147443   143261   136648   120655   best=40ms
+    N5-het      5   102544   145968   157675   159761   154110   145679   126427   best=40ms
+
+--------------------------------------------------------------------------------------------------------------
+C4b  IS THE ARGMIN SEED-RESOLVED?  For each row: the argmin, the runner-up, and
+     the PAIRED per-seed difference loss(argmin) - loss(runner-up).  The seeds
+     are common to both grid points, so this is the difference of two runs of
+     the SAME world.  RESOLVED means all 8 seeds agree on the sign (a sign
+     test at p = 2^-8); anything less is inside seed noise and CANNOT carry a
+     verdict.  This section changes no value and no bar.
+--------------------------------------------------------------------------------------------------------------
+  mix        load   argmin  runner-up  paired med  worst seed    seeds  verdict
+  N2-het     0.65       30         20      -0.245      -0.208    8/8    RESOLVED
+  N3-het     0.65       30         20      -0.322      -0.278    8/8    RESOLVED
+  N4-het     0.65       20         30      -0.347      -0.326    8/8    RESOLVED
+  N5-het     0.65       30         20      -0.473      -0.381    8/8    RESOLVED
+  N2-het     0.95       30         40      -0.059       0.094    6/8    inside seed noise
+  N3-het     0.95       40         30      -1.149      -1.092    8/8    RESOLVED
+  N4-het     0.95       40         30      -0.404      -0.367    8/8    RESOLVED
+  N5-het     0.95       40         30      -1.144      -1.080    8/8    RESOLVED
+
+  THE N AXIS, PAIRED THE SAME WAY.  Take the N=2 row's own argmin and score it
+  on every other mix at the same load.  If the constant were N-invariant the
+  N=2 choice would be as good anywhere; a RESOLVED negative difference means
+  the optimum genuinely MOVED with link count.
+  mix        load own argmin  N=2 pick  paired med  worst seed    seeds  verdict
+  N3-het     0.65         30        30          --          --       --  same grid point
+  N4-het     0.65         20        30      -0.347      -0.326    8/8    MOVED (resolved)
+  N5-het     0.65         30        30          --          --       --  same grid point
+  N3-het     0.95         40        30      -1.149      -1.092    8/8    MOVED (resolved)
+  N4-het     0.95         40        30      -0.404      -0.367    8/8    MOVED (resolved)
+  N5-het     0.95         40        30      -1.144      -1.080    8/8    MOVED (resolved)
+
+  GRID RESOLUTION.  The finest spacing on this grid is 10 ms, so nothing here
+  can rule an effect in or out below one grid step -- the shipped 40 ms and its
+  neighbours included.
+  -> target_ms classification carried into C6: OPEN
+     C4b: the loss optimum MOVES with N. 4 of 4 off-N=2 rows beat the N=2 pick by a margin every one of
+       the 8 seeds agrees on (N4-het@0.65 20 vs 30 ms, N3-het@0.95 40 vs 30 ms, N4-het@0.95 40 vs 30 ms,
+       N5-het@0.95 40 vs 30 ms). N-invariance is contradicted by C4's own table at this resolution, and
+       the 10 ms grid step is coarser than the effect such a verdict would have to rule out. Reported
+       OPEN; no value changed.
+
+==============================================================================================================
+C5  THE INDEX-0 METRIC.  `tshare = assigned[0] / sum(assigned)` --
+    reserved_composite.py:518 and ackclock_sim.py:643, identical text in both.
+    Measured against the N-generic spotty-CLASS share (the quantity
+    highn_battery.py already computes for itself, over spotty_idx:
+      grep -n 'sshare.. = sum' highn_battery.py   and
+      grep -n '^def spotty_idx' highn_battery.py)
+==============================================================================================================
+  mix         N sched       tshare  class share      error   per-link shares
+  N2-het      2 pull         0.253        0.253     +0.000   0.253 0.747
+  N2-het      2 Dc           0.198        0.198     +0.000   0.198 0.802
+  N3-het      3 pull         0.210        0.374     -0.163   0.210 0.163 0.626
+  N3-het      3 Dc           0.174        0.308     -0.133   0.174 0.133 0.692
+  N4-het      4 pull         0.156        0.277     -0.121   0.156 0.121 0.260 0.463
+  N4-het      4 Dc           0.126        0.223     -0.097   0.126 0.097 0.281 0.496
+  N5-het      5 pull         0.142        0.339     -0.197   0.142 0.110 0.087 0.237 0.424
+  N5-het      5 Dc           0.120        0.285     -0.165   0.120 0.091 0.074 0.257 0.458
+  N4-teth     4 pull         0.186        0.444     -0.258   0.186 0.144 0.113 0.556
+  N4-teth     4 Dc           0.162        0.385     -0.223   0.162 0.122 0.101 0.615
+  N5-corr     5 pull         0.142        0.339     -0.197   0.142 0.110 0.087 0.237 0.424
+  N5-corr     5 Dc           0.119        0.297     -0.178   0.119 0.098 0.079 0.253 0.450
+
+  At N=2 the two agree exactly -- index 0 IS the only spotty link.  From N=3 the
+  error is the share of every spotty link after the first.  Downstream consumers
+  of the index-0 number, none of which are N-generic:
+    grep -n 'tshare stable' docs/knowledge/design/p5-execution-handover.md
+      -- names it as
+      an E2c equivalence criterion for the SHIPPED standing-lightning datapath
+    grep -n 'tshare 0.181' docs/HANDOFF.md   and
+    grep -n 'tshare 0.181' docs/knowledge/decisions/ADR-003-mode-set.md
+      -- both cite it as
+      "pull put 18% on the spotty source", the number that motivates `speed`
+  highn_battery.py does NOT use it (it computes sshare over spotty_idx), so the
+  BATTERY is clean and the METRIC and its citations are not.
+
+==============================================================================================================
+C6  VERDICT -- constant by constant.  (a) N-INVARIANT  (b) DERIVABLE  (c) OPEN.
+    Every row cites the probe above that establishes it.  Nothing here is changed,
+    and per the no-arbitrary-constants rule an OPEN row is REPORTED, never
+    replaced with a freshly invented number.
+==============================================================================================================
+
+  cellA / eth physical knobs           [OPEN]
+    does : the rig's two original paths: cap base/amp/period, loc/down owd, jit, the dropout schedule, local_mult
+    evidence: C1: byte-identical to ackclock_sim.make_defs at every tick (delta 0 on all seven
+      quantities). cellB, cellC and wifi have no ancestor. ADR-004 condition 2 is open, so not one of
+      them has ever been measured against hardware at ANY N.
+
+  target_ms = 40.0                     [OPEN]
+    does : per-link admission ms-gate and delivered-rate meter threshold; read by Dc, ewma, pull and oracle
+    evidence: C4: the loss-optimal value is 30/30/20/30 ms at load 0.65 and 30/40/40/40 ms at 0.95,
+      for N=2,3,4,5 respectively -- the argmin MOVES on both axes on the printed table. C4b: the loss
+      optimum MOVES with N. 4 of 4 off-N=2 rows beat the N=2 pick by a margin every one of the 8 seeds
+      agrees on (N4-het@0.65 20 vs 30 ms, N3-het@0.95 40 vs 30 ms, N4-het@0.95 40 vs 30 ms,
+      N5-het@0.95 40 vs 30 ms). N-invariance is contradicted by C4's own table at this resolution, and
+      the 10 ms grid step is coarser than the effect such a verdict would have to rule out. Reported
+      OPEN; no value changed. Separate, and NOT an N defect: 40 is not the argmin at 0.65. Left
+      exactly as it is; an OPEN row is reported, never replaced.
+
+  reorder hold, the +130.0 ms term     [OPEN]
+    does : additive term of the ring release timeout, and of the Dc duplicate TTL
+    evidence: C2: the largest of the three terms at every N (52-58 percent of the raw value). C3: the
+      formula returns 223-249 ms while the loss optimum is 840-1000 ms; the gap is 602-777 ms and does
+      not close as N grows. A LEVEL error the rig cannot derive -- ROADMAP U13 owns the derivation. Do
+      NOT substitute another number.
+
+  hold: 3.0 * max(jit)                 [DERIVABLE in form, OPEN in value]
+    does : 3-sigma jitter margin, taken from the single highest-jitter link
+    evidence: C2: an order statistic over the link set, so N-generic in shape. But it is anchored on
+      the max-jitter link, which need not be either of the two extremal-OWD links whose arrival skew
+      it is margining -- at N=2 they coincide and from N=3 they need not. ackclock_sim.py:614-620
+      already carries the derived shape (0.5 * measured RTTmin spread + 3 * measured sigma); it is
+      reachable only under sched=="C" and the gated set never runs it.
+
+  hold clamps 0.08 / 0.35 s            [OPEN]
+    does : floor and ceiling on the same hold
+    evidence: C2: the widest mix the archetype set can build gives raw 249 ms, so NEITHER clamp is
+      reachable at ANY N -- they are untested code on every run the battery has ever made. C3: the
+      loss optimum is 840-1000 ms, 2.4-2.9 times ABOVE the 350 ms ceiling, so the ceiling is not
+      dormant on the loss axis. It caps the answer.
+
+  maxq_ms = 300.0 -> 0.3 * sum(cap0)   [DERIVABLE]
+    does : shared-pool byte bound
+    evidence: Already N-generic in form: a delay bound times the AGGREGATE nominal rate, linear in N
+      by construction. Two caveats to carry: cap0 is cap_fn(0.0), which is U33's finding F1; and U7's
+      shipped Go pool bound derives from sum(SO_SNDBUF) instead (ROADMAP, U7 round 2), so the rig and
+      the artifact bound the same pool by DIFFERENT quantities. That divergence belongs to U9 / EQ-1.
+
+  QMAX_MS = 300.0                      [N-INVARIANT in form, OPEN in value]
+    does : per-path downstream fluid tail-drop bound
+    evidence: Per-link; no N term appears anywhere it is used. Its VALUE has never been measured on
+      hardware (ADR-004 condition 2).
+
+  NLAG = 0.350 + the 0.100 s window    [N-INVARIANT in form, OPEN in value]
+    does : per-link lagged delivered-rate meter window
+    evidence: Per-link; no N term. It is a hardware RTT-scale quantity, and G1 is what measures it.
+
+  deliv_hist horizon = 0.6 s           [DERIVABLE]
+    does : per-link delivered-history trim
+    evidence: _lagged_deliv reads [now-NLAG-0.100, now-NLAG), so the horizon must exceed NLAG + 0.100
+      = 0.450 s or the meter reads an empty window. The requirement is exact and derivable from the
+      module; the remaining 0.150 s of margin is not.
+
+  DRAIN_TAU = 0.10 / REGEN = 0.02      [OPEN]
+    does : per-link local drain EWMA and idle probe-up toward cap0; feeds _local_ms and therefore Dc's room() gate
+    evidence: Per-link and N-independent in form, but no derivation exists on the record for either
+      value.
+
+  HEALTH_FRAC = 0.75                   [NOT LIVE for the gated set]
+    does : host must be draining at least 75 percent of its nominal cap0
+    evidence: reserved_composite.py:298 sends Dc and Dpp down the meter branch; HEALTH_FRAC is read
+      only at :311, inside the D / D-prime else-branch. It gates nothing this CI job scores. Reported
+      so it is not mistaken for a live N=2 constant.
+
+  tshare = assigned[0] / sum           [DERIVABLE]
+    does : a PER-LINK metric keyed to INDEX 0, in the rig and in the oracle alike
+    evidence: C5: exact at N=2, because index 0 IS the only spotty link there, and wrong by
+      0.097-0.223 from N=3. The N-generic form already exists -- grep -n 'sshare.. = sum'
+      highn_battery.py computes the share over spotty_idx and reduces to tshare at N=2. The battery is
+      clean; the METRIC and its three downstream citations are not.
+
+  cap0 = cap_fn(0.0)                   [DERIVABLE]
+    does : each path's NOMINAL cap, read in nine places
+    evidence: U33's finding F1: nominal is sampled from the trace at one instant rather than being a
+      property of the archetype (base/amp/period). Not an N=2 constant, but it is the input to
+      maxq_kb, drain_ewma, push_est and REGEN, so it belongs in this table.
+
+  SUMMARY: 2 N-INVARIANT, 5 DERIVABLE, 5 OPEN, 1 not live for the gated set.
+  READ THE FIRST THREE COUNTS WITH THIS: 3 of the 13 rows carry an explicit
+  "OPEN in value" and are counted under their FORM label, so the settled count
+  is an upper bound.  Rows whose VALUE has never been measured against anything
+  outside the rig: 8 of 13.  ADR-004 condition 2 is what closes them.
+  Nothing above was changed by this file.
+
+==============================================================================================================
+elapsed 256.8s

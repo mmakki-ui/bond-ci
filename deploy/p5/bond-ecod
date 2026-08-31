@@ -1,0 +1,242 @@
+#!/bin/sh
+# /usr/sbin/bond-ecod — auto mode policy daemon (P5). Field-proven v1.3 with
+# the P5 `tput` trigger class (policer-degradation closure, D1/F6) AND the
+# P3 safety fixes folded FORWARD (reconciled onto the P5 divergence, not
+# copied): (1) the tunnel probe is gated on its OWN availability so a dead
+# raw sensor can no longer silently disable it; a soft-degrade holds
+# lightning when carrier is up but NEITHER sensor yields RTT; (2) the bloat
+# counters are BOUNDED (resync at NEED_MAX) so a sustained step no longer
+# ratchets lightning forever; (3) TPROBE retargets to the operator bond-
+# server via `bondctl _server` (host-only; 76.76.2.0 fallback); (4) both
+# EWMA blocks share one `ewma_update` helper (arithmetic byte-identical
+# below NEED_MAX); (5) a dead sensor logs loudly. It remains the SINGLE
+# mode-policy actor — the only loop that flips eco<->lightning. It reads the
+# watchdog's published sensor fact ($RUN_DIR/tput) but never probes
+# throughput itself and never reads any other loop's internals.
+#
+# Policy: 1 bad cycle -> lightning immediately (sticky-fast).
+#         NEED_CLEAN clean cycles -> eco. Primary identity change -> re-derive.
+# Health: carrier==0 OR both raw pings out the primary fail.
+# Triggers to lightning: hard-bad (carrier/ping) · raw bloat · tunnel bloat ·
+#         no-usable-RTT soft-degrade (NORTT_N cycles) ·
+#         *** tput degraded (capacity drop with CLEAN RTT) ***.
+# Guards (per cycle, all no-op): auto absent, bond disabled, suspended,
+#         suspended-degraded, an AGGREGATE mode (whatever bond-xctl's
+#         AGG_SCHED_TABLE holds, asked via `bondctl _sched` -- no copy here),
+#         and any box where that question cannot be ASKED (fail CLOSED).
+#
+# Env knobs (harness): BOND_DIR RUN_DIR SYS_NET BONDCTL SVC CYCLE NEED_CLEAN
+# NORTT_N MAXCYCLES.
+
+BOND_DIR="${BOND_DIR:-/etc/bond}"
+RUN_DIR="${RUN_DIR:-/var/run/bond}"
+BONDCTL="${BONDCTL:-/usr/sbin/bondctl}"
+SYS_NET="${SYS_NET:-/sys/class/net}"
+SVC="${SVC:-/etc/init.d/engarde-client}"
+PING="${PING:-ping}"
+BLOAT_DELTA="${BLOAT_DELTA:-100}"
+BLOAT_N="${BLOAT_N:-3}"
+NORTT_N="${NORTT_N:-$BLOAT_N}"      # consecutive no-usable-RTT cycles = soft-degrade
+MIN_BASE="${MIN_BASE:-4}"
+TPROBE="${TPROBE:-$("$BONDCTL" _server 2>/dev/null | head -1)}"  # tunnel-path probe = operator bond-server (bondctl _server)
+[ -n "$TPROBE" ] || TPROBE="76.76.2.0"                           # fallback = deployed literal (equivalence anchor)
+PROBATION="${PROBATION:-600}"
+NEED_MAX_MULT="${NEED_MAX_MULT:-8}"
+LOGGER="${LOGGER:-logger}"
+CYCLE="${CYCLE:-5}"
+NEED_CLEAN="${NEED_CLEAN:-24}"
+MAXCYCLES="${MAXCYCLES:-0}"
+
+log() { "$LOGGER" -t bond-ecod "$*"; }
+
+# ewma_update <prefix> <rtt> — fold one RTT sample into <prefix>base /
+# <prefix>samples / <prefix>bloat (raw uses "", tunnel uses "t"). One
+# body for both sensors so the arithmetic is byte-identical (ecosim-parity).
+# Asymmetric EWMA: baselines FALL fast (1/2) and RISE slow (1/8) so a
+# poisoned-high learn collapses on the first quiet readings. Judge only
+# after MIN_BASE samples; single spikes reset, never act.
+# The bloat counter is BOUNDED: once elevation persists NEED_MAX cycles the
+# plateau is accepted as the new normal (base:=current sample, bloat:=0).
+# That kills the rise-slow ratchet, which otherwise froze base on any
+# upward step > BLOAT_DELTA and latched lightning forever. A transient
+# (< NEED_MAX) is unchanged.
+ewma_update() {
+    _pf="$1"; _rtt="$2"
+    eval "_b=\${${_pf}base}; _s=\${${_pf}samples}; _bl=\${${_pf}bloat}"
+    if [ "$_s" -lt "$MIN_BASE" ]; then
+        _b=$(( (_b * _s + _rtt) / (_s + 1) ))
+        _s=$((_s + 1)); _bl=0
+    elif [ "$_rtt" -gt $((_b + BLOAT_DELTA)) ]; then
+        _bl=$((_bl + 1))
+        if [ "$_bl" -ge "$NEED_MAX" ]; then _b=$_rtt; _bl=0; fi
+    else
+        _bl=0
+        if [ "$_rtt" -lt "$_b" ]; then
+            _b=$(( (_b + _rtt) / 2 ))
+        else
+            _b=$(( (_b * 7 + _rtt) / 8 ))
+        fi
+    fi
+    eval "${_pf}base=\$_b; ${_pf}samples=\$_s; ${_pf}bloat=\$_bl"
+}
+
+clean=0
+n=0
+base=0; samples=0; baseP=""; bloat=0
+tbase=0; tsamples=0; tbloat=0; tlost=0
+norrt=0; norrt_logged=0
+NEED_NOW=$NEED_CLEAN; NEED_MAX=$((NEED_CLEAN * NEED_MAX_MULT)); last_eco=0
+while :; do
+    sleep "$CYCLE"
+    n=$((n+1))
+    [ "$MAXCYCLES" -gt 0 ] && [ "$n" -gt "$MAXCYCLES" ] && exit 0
+
+    [ -f "$BOND_DIR/auto" ]            || { clean=0; continue; }
+    "$SVC" enabled 2>/dev/null          || { clean=0; continue; }
+    [ -f "$RUN_DIR/suspended" ]         && { clean=0; continue; }
+    [ -f "$RUN_DIR/suspended-degraded" ] && { clean=0; continue; }
+    MODE=$(cat "$BOND_DIR/mode" 2>/dev/null)
+    # AGGREGATE modes are not this policy's business: ecod only flips eco<->lightning
+    # and must never fight the aggregate feeder. Tested by ASKING the one owner of the
+    # mode class (bond-xctl AGG_SCHED_TABLE, via bondctl _sched) rather than comparing
+    # against a mode name -- pre-U17 this read `[ "$MODE" = "speed" ]`, which would have
+    # silently let ecod run (and issue _mode_auto) while the box was in `max`.
+    #
+    # FAIL CLOSED on the three-way answer. Replacing a self-contained string test
+    # with a question to another executable introduces a THIRD outcome that the
+    # string test never had -- "the question could not be asked" -- and the first
+    # form of this line treated it as "not an aggregate mode". On a half-upgraded
+    # box (old bondctl or old bond-xctl on disk, `_sched` an unknown verb -> exit 1)
+    # that runs the eco/lightning policy against an aggregating box and lets it
+    # issue _mode_auto, rewriting /etc/bond/mode. Only exit 3 -- the table
+    # ANSWERING "not an aggregate mode" -- lets this cycle proceed.
+    "$BONDCTL" _sched "$MODE" >/dev/null 2>&1; _sc=$?
+    [ "$_sc" = 3 ] || { clean=0; continue; }
+
+    P=$("$BONDCTL" _primary 2>/dev/null | head -1)
+    [ -n "$P" ] || { clean=0; continue; }
+    if [ "$P" != "$baseP" ]; then
+        base=0; samples=0; bloat=0; baseP="$P"
+        tbase=0; tsamples=0; tbloat=0; tlost=0
+        norrt=0; norrt_logged=0
+    fi
+
+    # === P5 tput trigger: policer degradation (capacity drop, CLEAN RTT) =====
+    # The watchdog (sensor, single writer) publishes a passive goodput verdict.
+    # ecod (actuator) treats "degraded" exactly like hard-bad: escape to
+    # lightning. Closes the HANDOVER section-7 blind spot with no new loop.
+    case "$(cat "$RUN_DIR/tput" 2>/dev/null)" in
+        degraded*)
+            clean=0
+            if [ "$MODE" != "lightning" ]; then
+                log "tput degraded (policer; clean RTT) -> mode lightning"
+                "$BONDCTL" _mode_auto lightning
+            fi
+            continue ;;
+    esac
+
+    H=1; RTTMS=""
+    CF="$SYS_NET/$P/carrier"
+    if [ -r "$CF" ] && [ "$(cat "$CF" 2>/dev/null)" = "0" ]; then
+        H=0
+    fi
+    if [ "$H" = 1 ]; then
+        OUT=$("$PING" -I "$P" -c 1 -W 2 1.1.1.1 2>/dev/null) \
+            || OUT=$("$PING" -I "$P" -c 1 -W 2 8.8.8.8 2>/dev/null) \
+            || H=0
+        [ "$H" = 1 ] && RTTMS=$(echo "$OUT" | sed -n 's/.*time=\([0-9][0-9]*\).*/\1/p' | head -1)
+    fi
+
+    raw_usable=0; tun_usable=0
+
+    # RAW bloat: sustained RTT elevation over the learned per-path base.
+    # Only when the raw sensor gave a usable RTT (see soft-degrade below).
+    if [ "$H" = 1 ] && [ -n "$RTTMS" ]; then
+        raw_usable=1
+        ewma_update "" "$RTTMS"
+        [ "$bloat" -gt 0 ] && clean=0
+        if [ "$bloat" -ge "$BLOAT_N" ]; then
+            if [ "$MODE" != "lightning" ]; then
+                NEED_NOW=$NEED_CLEAN
+                log "primary $P bloated (${RTTMS}ms > base ${base}+${BLOAT_DELTA}) -> mode lightning"
+                "$BONDCTL" _mode_auto lightning
+            fi
+            continue
+        fi
+    fi
+
+    # TUNNEL bloat: the bloat users feel. Gated on the tunnel probe's OWN
+    # availability — NOT on the raw parse — so a dead raw sensor can never
+    # silently disable it (was the un-safe drift-to-eco). Probe rides the
+    # bond-server reflector THROUGH the tunnel whenever the carrier is up.
+    # In lightning it measures min-path and cools naturally; the flip-loop
+    # this creates is damped by PROBATION BACKOFF: a tunnel-flip soon after
+    # an eco-return doubles the next clean requirement (capped) — a
+    # persistently rotten primary converges to mostly-lightning, never a
+    # fast loop.
+    if [ "$H" = 1 ]; then
+        TOUT=$("$PING" -c 1 -W 2 "$TPROBE" 2>/dev/null)
+        TRTT=$(echo "$TOUT" | sed -n 's/.*time=\([0-9][0-9]*\).*/\1/p' | head -1)
+        if [ -n "$TRTT" ]; then
+            tun_usable=1; tlost=0
+            ewma_update "t" "$TRTT"
+            [ "$tbloat" -gt 0 ] && clean=0
+            if [ "$tbloat" -ge "$BLOAT_N" ]; then
+                if [ "$MODE" != "lightning" ]; then
+                    NOW=$(date +%s)
+                    if [ $((NOW - last_eco)) -lt "$PROBATION" ]; then
+                        NEED_NOW=$((NEED_NOW * 2)); [ "$NEED_NOW" -gt "$NEED_MAX" ] && NEED_NOW=$NEED_MAX
+                    else NEED_NOW=$NEED_CLEAN; fi
+                    log "tunnel path bloated (${TRTT}ms > base ${tbase}+${BLOAT_DELTA}) -> mode lightning (next eco needs $NEED_NOW clean)"
+                    "$BONDCTL" _mode_auto lightning
+                fi
+                continue
+            fi
+        else
+            # tunnel sensor dead while the carrier is up: degrade loudly,
+            # once per outage, and do not let its silence read as health.
+            [ "$tlost" = 0 ] && { log "primary $P tunnel sensor lost (no RTT via $TPROBE) -> tunnel path unjudged"; tlost=1; }
+        fi
+    fi
+
+    # SOFT-DEGRADE: carrier up but NEITHER sensor returned a usable RTT.
+    # Missing telemetry must never read as health — the old raw-parse guard
+    # let this drift silently to eco (UNSAFE). Hold: never count clean, and
+    # once the blackout persists NORTT_N cycles prefer lightning. Log once.
+    # Sits AFTER both sensor blocks; the suspended-degraded guard up top
+    # (its own continue) is never reached from here, so it is never swallowed.
+    if [ "$H" = 1 ] && [ "$raw_usable" = 0 ] && [ "$tun_usable" = 0 ]; then
+        clean=0
+        norrt=$((norrt + 1))
+        if [ "$norrt" -ge "$NORTT_N" ]; then
+            [ "$norrt_logged" = 0 ] && { log "primary $P carrier up but no usable RTT from either sensor (${norrt} cycles) -> holding lightning"; norrt_logged=1; }
+            [ "$MODE" != "lightning" ] && "$BONDCTL" _mode_auto lightning
+        fi
+        continue
+    fi
+    norrt=0; norrt_logged=0
+
+    if [ "$H" = 0 ]; then
+        clean=0
+        if [ "$MODE" != "lightning" ]; then
+            log "primary $P degraded -> mode lightning"
+            "$BONDCTL" _mode_auto lightning
+        fi
+        continue
+    fi
+
+    clean=$((clean+1))
+    APPLIED=$(cat "$BOND_DIR/applied_wans" 2>/dev/null)
+    if [ "$MODE" = "eco" ] && [ "$APPLIED" != "$P" ]; then
+        log "primary now $P (applied: $APPLIED) -> re-deriving eco"
+        "$BONDCTL" _mode_auto eco
+        continue
+    fi
+    if [ "$MODE" != "eco" ] && [ "$clean" -ge "$NEED_NOW" ]; then
+        log "primary $P healthy $NEED_NOW cycles -> mode eco"
+        "$BONDCTL" _mode_auto eco
+        last_eco=$(date +%s)
+    elif [ "$MODE" = "eco" ] && [ "$last_eco" -gt 0 ] && [ $(( $(date +%s) - last_eco )) -ge "$PROBATION" ]; then
+        NEED_NOW=$NEED_CLEAN
+    fi
+done
