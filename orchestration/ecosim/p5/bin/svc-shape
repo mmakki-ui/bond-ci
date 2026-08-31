@@ -1,0 +1,27 @@
+#!/bin/sh
+# fake /etc/init.d/cake-autorate — the E4 shaping CONTROLLER (U22).
+# Same shape as svc-engarde/svc-agg, plus the procd `running` verb that
+# bond-xctl's shape_now() probes.
+#
+# restart COUNTS, for the same reason the feeder shims count: a shaping bounce
+# is an effect, and SH-1 asserts a healthy box causes ZERO of them.
+#
+# KNOBS ($ECOSIM_STATE):
+#   shape_broken=1   the controller refuses to come up (models a broken or
+#                    absent cake-autorate). start/restart FAIL and `running`
+#                    reports not-running -- the SH-3 INV8 world.
+S="$ECOSIM_STATE"; N=cake-autorate
+broke() { [ "$(cat "$S/shape_broken" 2>/dev/null)" = 1 ]; }
+case "$1" in
+  enable)  echo 1 > "$S/enabled.$N" ;;
+  disable) echo 0 > "$S/enabled.$N" ;;
+  start)   broke && exit 1; echo 1 > "$S/running.$N"; echo "SVC $N start" >> "$S/ledger" ;;
+  restart) broke && exit 1
+           c=$(cat "$S/restarts.$N" 2>/dev/null || echo 0); echo $((c+1)) > "$S/restarts.$N"
+           echo 1 > "$S/running.$N"; echo "SVC $N restart" >> "$S/ledger" ;;
+  stop)    echo 0 > "$S/running.$N" ;;
+  enabled) [ "$(cat "$S/enabled.$N" 2>/dev/null)" = 1 ] || exit 1 ;;
+  running) broke && exit 1
+           [ "$(cat "$S/running.$N" 2>/dev/null)" = 1 ] || exit 1 ;;
+esac
+exit 0
