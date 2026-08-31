@@ -1,0 +1,128 @@
+#!/bin/sh
+# /usr/sbin/bondctl — P5 thin CLI. Kept user surface, but de-daemonized:
+# it only PARSES intent and WRITES desired facts (mode / auto), then invokes
+# the stateless executor (bond-xctl) which walks the DAG. All operational
+# logic (engage/verify/revert/genconf/speed) lives in bond-xctl; all mode
+# policy lives in bond-ecod. bondctl writes NO endpoints and starts NO
+# feeders directly — that is the whole point of the P5 split (ADR-001).
+#
+#   bondctl on|off|status
+#   bondctl mode lightning|eco|speed          (eco IS the auto policy; others pin)
+#   bondctl auto on|off                       (ecod mode policy)
+#   bondctl _mode_auto lightning|eco          (internal: ecod only)
+#
+# BUSYBOX-SAFE POSIX sh.
+
+BOND_DIR="${BOND_DIR:-/etc/bond}"
+RUN_DIR="${RUN_DIR:-/var/run/bond}"
+XCTL="${XCTL:-/usr/sbin/bond-xctl}"
+ECOD_SVC="${ECOD_SVC:-/etc/init.d/bond-ecod}"
+WDOG_SVC="${WDOG_SVC:-/etc/init.d/bond-watchdog}"
+# SVC is the eco/lightning FEEDER service, still engarde today (U50b owns the
+# mechanism). U50a deleted this file's `ENGARDE_BIN` outright: after `need()`
+# below stopped reading it, nothing in the CLI referenced the binary at all, and
+# a declared-but-unread path is exactly the kind of stale hook that grows a new
+# dependency later.
+SVC="${SVC:-/etc/init.d/engarde-client}"
+ECOD_BIN="${ECOD_BIN:-/usr/sbin/bond-ecod}"
+WG_DEV="${WG_DEV:-wgclient1}"
+LOCAL_EP="127.0.0.1:59401"
+TAG="bondctl"
+log() { echo "$TAG: $*"; logger -t "$TAG" "$*" 2>/dev/null; }
+# need(): the CLI's "is P5 installed" precondition. It is the SAME predicate as
+# bond-xctl guard_installed() -- one meaning, stated in the two places that need
+# it -- and U50a changed both together.
+#
+# It used to be `[ -x "$ENGARDE_BIN" ]`, which gated EVERY verb (on/off/mode/
+# _mode_auto/auto) on P2's binary. That is the same dependency the ROADMAP's U50
+# entry describes on the DAG guard, one layer up in the CLI, and it was NOT named
+# there -- found by U50a's own Layer-2 bar, which could not walk a single edge with
+# the binary removed until this changed. Dropping only the DAG term would have left
+# the removal unobservable from the CLI, i.e. unmeasurable.
+#
+# This does NOT remove engarde from the box: the client still carries
+# /usr/sbin/engarde-client and the tunnel still runs through it on :59401
+# (docs/knowledge/inventory/2026-08-30-client-flint2.txt). It removes P5's
+# dependency on it.
+need() { [ -d "$BOND_DIR" ] || { echo "$TAG: $BOND_DIR missing — P5 not installed" >&2; exit 1; }; }
+
+set_auto_on() {            # ADR-003: `eco` IS the auto policy -- selecting it ENABLES the policy
+    [ -x "$ECOD_BIN" ] || { echo "$TAG: bond-ecod not installed" >&2; exit 1; }
+    touch "$BOND_DIR/auto"
+    "$ECOD_SVC" enable 2>/dev/null; "$ECOD_SVC" restart 2>/dev/null || { echo "$TAG: bond-ecod start failed" >&2; exit 1; }
+    "$WDOG_SVC" enable 2>/dev/null; "$WDOG_SVC" start 2>/dev/null
+    log "auto policy ON"
+}
+
+clear_auto_if_manual() {   # manual intent wins: drop auto + stop ecod
+    if [ -f "$BOND_DIR/auto" ]; then
+        rm -f "$BOND_DIR/auto"; "$ECOD_SVC" stop 2>/dev/null
+        log "auto policy disabled by manual mode change"
+    fi
+}
+
+case "${1:-}" in
+  on)   need; "$SVC" enable  2>/dev/null; "$XCTL" reconcile ;;   # write rc fact -> reconcile
+  off)  need; "$SVC" disable 2>/dev/null; "$XCTL" reconcile ;;   # clear rc fact -> reconcile (disengage)
+  mode)
+    M="${2:-}"
+    case "$M" in lightning|eco|speed) : ;;
+      *) echo "usage: bondctl mode lightning|eco|speed" >&2; exit 1 ;; esac
+    need
+    # ADR-003 fact model: INTENT and STATE are read from the PAIR (auto, mode).
+    #   auto set   -> intent is ECO (adaptive); mode is ecod CURRENT POSITION (eco|lightning)
+    #   auto unset -> mode is the user manual pin
+    # So `mode eco` ENABLES the policy; it must NOT clear it. Every other mode pins.
+    if [ "$M" = eco ]; then set_auto_on; else clear_auto_if_manual; fi
+    PREV=$(cat "$BOND_DIR/mode" 2>/dev/null)
+    echo "$M" > "$BOND_DIR/mode"
+    if [ "$M" = speed ]; then
+        if "$XCTL" reconcile; then :; else                    # desired=engaged_speed -> speed
+            echo "${PREV:-lightning}" > "$BOND_DIR/mode"      # CLI restores prior mode on failure
+            echo "$TAG: FATAL: speed engage failed; mode restored to ${PREV:-lightning}" >&2; exit 1
+        fi
+    else
+        "$XCTL" reconcile refresh                             # live config switch (tunnel intact)
+        log "mode -> $M"
+    fi
+    ;;
+  _mode_auto)
+    # internal: bond-ecod only. Keeps auto set. Never selects speed.
+    M="${2:-}"
+    case "$M" in lightning|eco) : ;; *) echo "auto policy never selects '$M'" >&2; exit 1 ;; esac
+    need
+    echo "$M" > "$BOND_DIR/mode"
+    "$XCTL" reconcile refresh
+    ;;
+  auto)
+    need
+    case "${2:-}" in
+      on)
+        set_auto_on
+        ;;
+      off)
+        rm -f "$BOND_DIR/auto"
+        "$ECOD_SVC" stop 2>/dev/null; "$ECOD_SVC" disable 2>/dev/null
+        log "auto policy OFF (mode stays: $(cat "$BOND_DIR/mode" 2>/dev/null))"
+        ;;
+      *) echo "usage: bondctl auto on|off" >&2; exit 1 ;;
+    esac
+    ;;
+  status)
+    N=$("$XCTL" node 2>/dev/null)
+    EP=$(wg show "$WG_DEV" endpoints 2>/dev/null | awk '{print $2}' | head -1)
+    echo "bond:     node=$N  mode=$(cat "$BOND_DIR/mode" 2>/dev/null || echo -)  auto=$( [ -f "$BOND_DIR/auto" ] && echo on || echo off )"
+    echo "endpoint: ${EP:-unknown}   (127.0.0.1:59401=bonded 59402=speed; else=direct)"
+    [ -r "$RUN_DIR/tput" ] && echo "tput:     $(cat "$RUN_DIR/tput" 2>/dev/null)"
+    # LOW: avoid `grep -oE` (busybox `-o` portability). Probe each feeder name once.
+    _feeders=""
+    for _s in engarde-client bond-agg; do
+        ubus call service list 2>/dev/null | grep -q "\"$_s\"" && _feeders="$_feeders$_s "
+    done
+    echo "feeders:  $_feeders"
+    ;;
+  _primary)  "$XCTL" _primary ;;
+  _server)   "$XCTL" _server ;;   # read-only: bond server in-tunnel HOST (no port)
+  selfcheck) "$XCTL" selfcheck ;;
+  *) echo "usage: bondctl on|off|status|mode lightning|eco|speed|auto on|off" >&2; exit 1 ;;
+esac

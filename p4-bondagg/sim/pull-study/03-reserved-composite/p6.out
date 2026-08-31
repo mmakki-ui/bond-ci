@@ -1,0 +1,33 @@
+====================================================================================================
+P6 -- D'' (sched=Dpp, reserved_meter.py) vs pull / A(ewma) / oracle
+RIG: N3 MID = 2 spotty(cellA+cellB) + 1 steady(eth)  N=3 spotty=2 nominal_agg=129000
+T=9.0s seeds=24  physics=nsched_model (UNMODIFIED, via reserved_meter)
+====================================================================================================
+
+load     sched            gp    loss%     res_tx
+--------------------------------------------------
+0.65     pull          69642     16.8          -
+0.65     ewma          78277      6.5          -
+0.65     oracle        79942      4.5          -
+0.65     Dpp           76978      8.1      22045
+
+0.85     pull          88636     19.1          -
+0.85     ewma          99752      8.9          -
+0.85     oracle       101341      7.5          -
+0.85     Dpp           88864     18.9       8551
+
+====================================================================================================
+P6 VERDICT
+====================================================================================================
+load=0.65  Dpp gp=76978 (need >=73000: True)  loss=8.1% (need <=12%: True)  res_tx=22045  -> PASS
+  context: static D:0.30 historically collapsed to 58644/30.0%%; static D:0.15 won at 73913/11.7%% (myslice.txt) -- Dpp must clear the knee no static r finds unaided.
+
+load=0.85  ewma gp=99752 (historical ~99752, this-run fidelity check: True)
+load=0.85  Dpp gp=88864  need >=0.98*ewma=97757  -> FAIL
+  Dpp loss=18.9%  res_tx=8551  (ewma loss=8.9%, oracle gp=101341/loss=7.5%)
+
+====================================================================================================
+P6 OVERALL: FAIL
+====================================================================================================
+
+elapsed 243.7s

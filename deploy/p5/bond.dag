@@ -1,0 +1,85 @@
+# bond.dag — P5 mode/lifecycle DAG (data, not code).
+#
+# The ONE source of truth for what the executor (bond-xctl) does. Parsed
+# IDENTICALLY by:
+#   - deploy/p5/bond-xctl        (busybox sh: IFS='|' read; runs the named
+#                                 guard/action/verify shell functions)
+#   - orchestration/bond_model.py (the P5 CANDIDATE machine: runs the named
+#                                 guard/action/verify Python functions)
+# so the equivalence proof drives the SAME table the box would run
+# (data-equivalence, not a re-implementation). Behaviour changes are
+# reviewable diffs to this file, validated in the emulator, shipped
+# read-only and atomically mv-swapped.
+#
+# FORMAT  (7 pipe-delimited fields; '#' comment lines and blanks ignored)
+#   intent | from | to | guards | actions | verify | retries | onfail
+#     intent   the trigger the CLI/hook/ecod funnels into bond-xctl:
+#              `bond-xctl <intent> [arg]`. Level-triggered: the executor
+#              derives the CURRENT node from probes every invocation and
+#              the action list is idempotent, so an already-satisfied
+#              intent is a verify-only no-op (I4 idempotency, I2 self-heal).
+#     from     comma-set of nodes this intent applies from (`*`=any).
+#     to       the desired node the intent converges toward.
+#     guards   comma-list of guard probes; ALL must pass or the edge is
+#              refused (logged, no state change). `-` = none.
+#     actions  comma-list of actions run in order. `-` = none.
+#     verify   post-condition probe (retried); `-` = none.
+#     retries  attempts for `verify` before taking `onfail`.
+#     onfail   intent to follow when `verify` still fails. `-` = none.
+#
+# NODES: off · engaged · speed · suspended · suspended_degraded
+#   engaged carries the mode fact (lightning|eco) as a side value;
+#   suspended / suspended_degraded are OUTCOME nodes (reached only via the
+#   `suspend` onfail of a failed engage), never desired targets.
+#
+# Maps to HANDOVER §2/§4 transitions T1..T11 (see the `# T#` tag per row).
+#
+# The CLI (bondctl) writes the DESIRED facts first (mode, auto) and, for a
+# failed `speed`, restores the prior mode — those are CLI duties, NOT edges.
+# The executor only walks these edges. `engage` retries=5 is the roaming
+# convergence budget (matches the historical 5-iteration engage loop:
+# <=4 in-flight roams still converge, >=5 -> suspend).
+#
+# NODES are {off, engaged, suspended, suspended_degraded}: `rc` (bond on/off)
+# is the engaged/off discriminator, `susp` overrides. `speed` is a MODE, not a
+# node — a speed-engaged box is node `engaged` carrying mode=speed (feeder =
+# bond-agg). Exactly one feeder runs, selected by mode: `speeddown_if_speed`
+# leads engage/switch/disengage so INV1 (single feeder) holds by construction
+# (this closes a latent two-feeder edge the deployed bondctl had on the
+# on-during-speed and reboot-during-speed sequences — a mandatory INV1 fix,
+# backstopped by watchdog W3).
+#
+# GUARD SPELLING (U6): the speed guard is `enough_sources`, NOT the old
+# `two_wans`. It always MEANT ">= MIN_AGG_SOURCES live sources" -- an ARITY
+# requirement with no upper bound -- and the old spelling read as a 2-WAN
+# assumption that the box does not have (it declares FOUR WANs,
+# docs/INTENT.md:193). Both parsers resolve it to the one N-generic predicate:
+# bond_model.py registers `enough_sources` AND `two_wans` onto
+# g_enough_sources_to_aggregate (NG-0 asserts they are identical), and
+# bond-xctl run_guard accepts both spellings so a half-upgraded box (new
+# bond-xctl, old bond.dag still on disk) resolves the guard rather than
+# refusing every speed edge.
+#
+# GUARD SPELLING (U50a): `installed` means "P5's fact directory $BOND_DIR
+# exists" and NOTHING else. It used to also require /usr/sbin/engarde-client,
+# which put P2's binary on the engage, disengage, switch AND speed rows below --
+# so P5's own DAG could not reach `engaged` or `speed` without the old stack.
+# `speed` was the plainest case: that row already carries `agg_installed` (the
+# bond-agg binary) and none of its actions call engarde. Mo decided to drop the
+# dependency outright rather than narrow it (docs/ROADMAP.md, "U50 DECIDED by
+# Mo (2026-08-30)"), so the term is gone from all four rows at once.
+# The ROWS are unchanged -- the guard's MEANING moved, in bond-xctl
+# guard_installed() and bond_model.py g_installed(), which stay data-equivalent.
+# This does NOT remove engarde from the box: the client still carries the binary
+# and the production tunnel still runs through it on :59401
+# (docs/knowledge/inventory/2026-08-30-client-flint2.txt). It removes P5's
+# DEPENDENCY on it. The eco/lightning FEEDER is still engarde today -- that gap
+# is U50b, not this row set.
+#
+# intent|from|to|guards|actions|verify|retries|onfail
+engage|off,engaged,suspended,suspended_degraded|engaged|installed|speeddown_if_speed,rc_on,genconf,eng_enable,eng_restart,ep_local|verify_local|5|suspend
+suspend|off,engaged,suspended,suspended_degraded|suspended|-|revert|-|0|-
+disengage|off,engaged,suspended,suspended_degraded|off|installed|speeddown_if_speed,rc_off,eng_disable,eng_stop,ep_direct,clear_susp|-|0|-
+switch|off,engaged,suspended,suspended_degraded|engaged|installed|speeddown_if_speed,genconf_if_enabled,eng_restart_if_enabled|-|0|-
+speed|off,engaged|speed|installed,manual,agg_installed,enough_sources|env_gen,agg_install,eng_stop,agg_enable,agg_restart,mtu_1408,ep_speed|verify_speed|3|speed_revert
+speed_revert|off,engaged|engaged|-|agg_stop,agg_disable,mtu_1420,restore_feeder|-|0|-
