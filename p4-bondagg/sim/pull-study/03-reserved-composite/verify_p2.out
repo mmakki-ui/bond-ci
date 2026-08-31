@@ -1,0 +1,20 @@
+rig: N2 MID = 1 cellA(DROPS_A) + 1 eth ; nominal_agg=107000 ; T=9.0 SEEDS=24
+
+load   sched          gp   loss%     res_tx    mir_off
+-------------------------------------------------------
+0.65   Dpp         68295    1.68      16052      16200
+0.65   pull        60578   12.79          -          -
+0.65   ewma        65848    5.20          -          -
+0.65   oracle      67309    3.10          -          -
+
+0.85   Dpp         79341   12.66       8626      15065
+0.85   pull        78682   13.38          -          -
+0.85   ewma        85083    6.33          -          -
+0.85   oracle      85454    5.92          -          -
+
+P2  0.85 gp=79341 (>=83400:False)  loss=12.66 (<=7.5:False)
+    res_tx0.65=16052 res_tx0.85=8626 mir_off0.85=15065
+    res_tx0.85<=~2000 abs:False   res_tx0.85<=10%*0.65[1605]:False
+    admit/nominate ratio @0.85 = res_tx/mir_off = 0.573
+P2 OVERALL (gp AND loss AND res_tx<=2000 abs): FAIL
+elapsed 146.8s

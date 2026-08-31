@@ -1,0 +1,25 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/97-bond
+# On every wg ifup, delegate to the stateless executor's self-testing engage.
+# All lifecycle logic (probe -> DAG walk -> engage_verify -> revert) lives in
+# ONE owner — bond-xctl — so this hook cannot drift from it. Silent while
+# disabled: off stays off (emulator I1). Auto-resume: a profile switch back to
+# an engarde-capable server re-engages here without user action (I6).
+#
+# P5 reconciler: calls `bond-xctl reconcile` (the single verb). The hook is now
+# MODE-BLIND by construction -- it never picks engage vs speed; reconcile() derives
+# the edge from desired()=(rc,mode). This DISSOLVES MF-2(a): the deployed hook gated
+# on `$SVC enabled` and fired `engage`, which (engarde stays enabled during speed)
+# tore speed down on any wg ifup -> hook/watchdog oscillation. No gate now: when the
+# box is off, reconcile -> disengage is a safe no-op.
+
+BOND_DIR="${BOND_DIR:-/etc/bond}"        # overridable for the harness
+XCTL="${XCTL:-/usr/sbin/bond-xctl}"
+
+[ "$ACTION" = "ifup" ] || exit 0
+[ -r "$BOND_DIR/wg-logical" ] || exit 0
+[ "$INTERFACE" = "$(cat "$BOND_DIR/wg-logical")" ] || exit 0
+
+logger -t bond-hook "wg ifup: reconciling via bond-xctl"
+"$XCTL" reconcile >/dev/null 2>&1 &
+exit 0
