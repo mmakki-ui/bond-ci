@@ -1,0 +1,16 @@
+#!/bin/sh
+# fake ping. Tunnel-verify pings (76.76.2.0) succeed iff the server is
+# engarde-capable ($ECOSIM_STATE/capable=1). Raw path pings (-I <if>) succeed
+# iff $ECOSIM_STATE/health != 0. Emits a time= line ecod can parse.
+S="$ECOSIM_STATE"; RAW=0; TARGET=""
+for a in "$@"; do
+    [ "$a" = "-I" ] && RAW=1
+    case "$a" in 76.76.2.0|1.1.1.1|8.8.8.8|*.*.*.*) TARGET="$a" ;; esac
+done
+if [ "$RAW" = 1 ]; then
+    [ "$(cat "$S/health" 2>/dev/null || echo 1)" = 0 ] && exit 1
+    echo "64 bytes from x: seq=0 ttl=54 time=20.0 ms"; exit 0
+fi
+# tunnel path
+[ "$(cat "$S/capable" 2>/dev/null || echo 1)" = 1 ] || exit 1
+echo "64 bytes from x: seq=0 ttl=54 time=30.0 ms"; exit 0
