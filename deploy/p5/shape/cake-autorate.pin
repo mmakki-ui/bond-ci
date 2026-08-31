@@ -1,0 +1,125 @@
+# deploy/p5/shape/cake-autorate.pin — the VENDOR PIN record for P5's shaper.
+#
+# E4 spec (p5-execution-handover.md:70): "Vendor + pin cake-autorate to a fixed
+# commit + sha256 (no curl-from-master)."
+#
+# ===================== WHY THIS IS A FILE-SET PIN, NOT A COMMIT ==============
+# G2 was run on the CLIENT (the GL-MT6000) on 2026-08-30 and the first line of the
+# answer was **NO-GIT**: /root/cake-autorate is not a git checkout, so there is
+# no commit on that box to pin to. That is a consequence of how it was installed
+# — p1-autorate/bootstrap-autorate.sh:122-125 wgets `setup.sh` from
+# `.../cake-autorate/master/setup.sh` and runs it, and setup.sh leaves no `.git`.
+# Asking for a commit would be asking for something the box does not have.
+#
+# So the pin is the FILE SET, verified per file. That is strictly STRONGER than
+# a commit ref: a commit says what a tag claims; these hashes are what is
+# actually running in production today. The spec's sha256 half is satisfied
+# exactly; its commit half is unsatisfiable from this install and that is
+# recorded here rather than papered over.
+#
+# The VERSION ID P5 installs under is derived, not invented: sha256 of the FILES
+# block below, truncated. Content-addressed, so it changes if and only if the
+# pinned set changes — the property a commit ref was there to provide.
+#
+# ===================== WHAT IS DELIBERATELY NOT PINNED ======================
+# `config.wg.sh` — sha256 1ae47a4271702ebd617b0507b1b8334f9076e2a2add2ea455c37
+# e178785054d8 as read off the client on 2026-08-30 — is in the box's directory
+# and is deliberately NOT in the FILES block below.
+#
+# GENERATE / PRESERVE / PIN — the decision is **GENERATE**, and the reasons are
+# in this order:
+#   * It is not upstream code. p1-autorate/bootstrap-autorate.sh:134-171 WRITES
+#     it, from that script's own rate constants and `WG_DEV="wgclient1"`. It is
+#     Mo's OPERATIONAL CONFIG (his rates, his interface, his reflectors).
+#   * PIN would freeze one box's tuning into the product, and would make the
+#     version id move whenever Mo retunes — a config edit would read as a code
+#     change. It would also re-import `wgclient1` as a literal, which is the
+#     hardcode U22a exists to remove.
+#   * PRESERVE (adopt whatever config.wg.sh is on the box) would make P5's
+#     shaping depend on a P1 artifact that E7 removes, and would silently
+#     inherit values nobody re-derived for P5.
+#   * GENERATE: shape-install writes `config.p5.sh` from DECLARED FACTS —
+#     dl_if/ul_if from $BOND_DIR/wg_if (discovery), rates from
+#     $BOND_DIR/shape_bounds, reflectors from $BOND_DIR/shape_reflectors. The
+#     two facts are U24/OBJ-F's and absent today, so the installer refuses
+#     rather than substituting P1's numbers.
+# The live file is EVIDENCE for those facts — a candidate for shape_bounds —
+# not a package artifact. Its sha is recorded here so the record is complete
+# and so E7 knows what it is looking at, not because anything verifies it.
+#
+# ===================== PINNED IS NOT SHIPPED ================================
+# Everything in FILES is VERIFIED. Only the STAGE block is COPIED onto the box.
+# Two pinned files are deliberately never placed:
+#   * `setup.sh` — upstream's INSTALLER, which wgets from master. Putting it in
+#     P5's namespace would smuggle a curl-from-master fetcher into the package
+#     whose whole purpose is to not have one.
+#   * `uninstall.sh` — upstream's REMOVER. On this client the upstream tree is
+#     `/root/cake-autorate`: P1's shaper, carrying production traffic right now
+#     (inventory 2026-08-30-client-flint2.txt:214-218). E7 owns removal; P5 has
+#     no use for a script whose job is to delete the live one.
+# `mqtt-publisher.sh` IS staged: cake-autorate's own config selects it, and an
+# absent optional module is a harder failure to diagnose than an unused file.
+# NOT ESTABLISHED, and named rather than assumed: whether the staged set is
+# runtime-complete. The FILES list is `sha256sum *.sh` at the top level, and
+# nothing has read the bytes to confirm cake-autorate.sh does not source
+# setup.sh. The manifest job closes this mechanically the moment the bytes
+# land — it greps every staged file for references to pinned-but-unstaged
+# names and ABORTS. Until then it is an open item, not a verified claim.
+#
+# ===================== STATE: STILL BLOCKED, AND ON WHAT =====================
+# The sha256 half of G2 is ANSWERED (below). The remaining blocker is the BYTES:
+# hashes are not code, and deploy/p5/shape/vendor/ is empty. `shape-install`
+# refuses (exit 3) with "vendored payload missing" until the SEVEN pinned files
+# are placed there and each matches its hash. To vendor, from the client:
+#     tar -C /root/cake-autorate -cf - $(sed -n 's/^[0-9a-f]\{64\}  //p' \
+#         deploy/p5/shape/cake-autorate.pin) | gzip -n > car-vendor.tar.gz
+# and unpack it into deploy/p5/shape/vendor/ (flat, no wrapper directory).
+#
+# TWO THINGS STILL OWED FROM THE BOX, asked rather than guessed:
+#   a. The list below is `sha256sum *.sh` at the TOP LEVEL. Whether the runtime
+#      needs anything that is not a top-level `.sh` is NOT established by that
+#      command. Owed: `find /root/cake-autorate -type f | sort` (and sha256sum
+#      over all of it), so the set is ENUMERATED rather than assumed. The four
+#      running processes are `launcher.sh` and three/four `cake-autorate.sh`
+#      workers (inventory 2026-08-30-client-flint2.txt:214-218), which source
+#      `lib.sh` and `defaults.sh` — all top-level `.sh` — but "the running
+#      processes are .sh" is not "the set is complete".
+#   b. `sha256sum /etc/init.d/cake-autorate` on the client. P5 REPLACES that
+#      file with its own procd wrapper (deploy/p5/init.d/cake-autorate), and
+#      E7's removal record should know what it is replacing.
+#
+# FORMAT: KEY=VALUE lines, plus a FILES block and a STAGE block. Parsed with a
+# plain read loop, never sourced — a pin record must not be able to execute
+# anything.
+
+# Upstream identity. Recorded for provenance only; NOTHING fetches it.
+CAR_UPSTREAM=https://github.com/lynxthecat/cake-autorate
+
+# How the pinned set was obtained, and why there is no commit.
+CAR_ORIGIN=NO-GIT
+CAR_SOURCE=/root/cake-autorate on the CLIENT (GL-MT6000), read by Mo 2026-08-30
+
+# The pinned file set: "<sha256>  <name>", one per line, between the markers.
+# Every name is resolved relative to shape/vendor/. shape-install refuses if any
+# pinned file is missing or mismatched, AND refuses if vendor/ holds a file that
+# is not pinned here (no unpinned code reaches the box).
+BEGIN_FILES
+c12f4125036b3ed7598a85bda6a4dff5208272b37bac5509f8e3727be3bafdea  cake-autorate.sh
+32c2116db96a093ef0ef394987ee97ca0222fd5a42f6b85bbd6644d14126258d  defaults.sh
+f8cc847eb905f3caf4995b2ded7bedbf79e22336240c981c41eb416b76755635  launcher.sh
+26f4f6a2949887bddbfc468e4c0b4d2ca44cb16b81c9e498f9d213d82e286467  lib.sh
+22265885174502651c36bfc4efbcc4febf97030b3a3b864e9dedbb6fcf9e20fc  mqtt-publisher.sh
+59257dba772ae7ff5d412b8da031d27cf94f6de2cc7bba1e97379eab614b56e7  setup.sh
+d21e87f9b6cb9d681f2abd95d750ceb8d8ac5431987ed069eb3dcfacede4fa07  uninstall.sh
+END_FILES
+
+# The subset that is COPIED onto the box. Every name here MUST appear in FILES.
+# shape-install REFUSES if this block is absent — an unfinished pin must not
+# default to "ship everything". Absent by design: setup.sh, uninstall.sh.
+BEGIN_STAGE
+cake-autorate.sh
+defaults.sh
+launcher.sh
+lib.sh
+mqtt-publisher.sh
+END_STAGE

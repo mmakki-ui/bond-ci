@@ -1,0 +1,124 @@
+# bond.dag — P5 mode/lifecycle DAG (data, not code).
+#
+# The ONE source of truth for what the executor (bond-xctl) does. Parsed
+# IDENTICALLY by:
+#   - deploy/p5/bond-xctl        (busybox sh: IFS='|' read; runs the named
+#                                 guard/action/verify shell functions)
+#   - orchestration/bond_model.py (the P5 CANDIDATE machine: runs the named
+#                                 guard/action/verify Python functions)
+# so the equivalence proof drives the SAME table the box would run
+# (data-equivalence, not a re-implementation). Behaviour changes are
+# reviewable diffs to this file, validated in the emulator, shipped
+# read-only and atomically mv-swapped.
+#
+# FORMAT  (7 pipe-delimited fields; '#' comment lines and blanks ignored)
+#   intent | from | to | guards | actions | verify | retries | onfail
+#     intent   the trigger the CLI/hook/ecod funnels into bond-xctl:
+#              `bond-xctl <intent> [arg]`. Level-triggered: the executor
+#              derives the CURRENT node from probes every invocation and
+#              the action list is idempotent, so an already-satisfied
+#              intent is a verify-only no-op (I4 idempotency, I2 self-heal).
+#     from     comma-set of nodes this intent applies from (`*`=any).
+#     to       the desired node the intent converges toward.
+#     guards   comma-list of guard probes; ALL must pass or the edge is
+#              refused (logged, no state change). `-` = none.
+#     actions  comma-list of actions run in order. `-` = none.
+#     verify   post-condition probe (retried); `-` = none.
+#     retries  attempts for `verify` before taking `onfail`.
+#     onfail   intent to follow when `verify` still fails. `-` = none.
+#
+# NODES: off · engaged · agg · suspended · suspended_degraded
+#   engaged carries the mode fact (lightning|eco) as a side value;
+#   suspended / suspended_degraded are OUTCOME nodes (reached only via the
+#   `suspend` onfail of a failed engage), never desired targets.
+#
+# Maps to HANDOVER §2/§4 transitions T1..T11 (see the `# T#` tag per row).
+#
+# The CLI (bondctl) writes the DESIRED facts first (mode, auto) and, for a
+# failed `agg` engage, restores the prior mode — those are CLI duties, NOT edges.
+# The executor only walks these edges. `engage` retries=5 is the roaming
+# convergence budget (matches the historical 5-iteration engage loop:
+# <=4 in-flight roams still converge, >=5 -> suspend).
+#
+# NODES are {off, engaged, suspended, suspended_degraded}: `rc` (bond on/off)
+# is the engaged/off discriminator, `susp` overrides. AGGREGATION is a MODE, not
+# a node — an aggregating box is node `engaged` carrying mode ∈ {max, speed}
+# (feeder = bond-agg). Exactly one feeder runs, selected by mode:
+# `aggdown_if_agg` leads engage/switch/disengage so INV1 (single feeder) holds by
+# construction (this closes a latent two-feeder edge the deployed bondctl had on
+# the on-during-aggregate and reboot-during-aggregate sequences — a mandatory INV1
+# fix, backstopped by watchdog W3).
+#
+# ONE AGGREGATE INTENT (U17). ADR-003 splits the aggregate mode into `max`
+# (stripe everything) and `speed` (fewest/fastest for the offered load). They are
+# ONE lifecycle here — same feeder, same listener, same guards, same enrolled
+# source set — differing only in the AGG_SCHED fact `build_agg_env` emits into
+# agg_env. So there is ONE `agg` row, not one row per mode: a new aggregate
+# scheduler adds a row to bond-xctl's AGG_SCHED_TABLE and NOTHING to this file.
+# A max<->speed flip is an agg_env byte change -> the existing `agg_env_changed`
+# crumb -> `agg_restart`; it walks this same edge, so it needs no new one.
+#
+# GUARD SPELLING (U6): the aggregate guard is `enough_sources`, NOT the old
+# `two_wans`. It always MEANT ">= MIN_AGG_SOURCES live sources" -- an ARITY
+# requirement with no upper bound -- and the old spelling read as a 2-WAN
+# assumption that the box does not have (it declares FOUR WANs,
+# docs/INTENT.md:193). Both parsers resolve it to the one N-generic predicate:
+# bond_model.py registers `enough_sources` AND `two_wans` onto
+# g_enough_sources_to_aggregate (NG-0 asserts they are identical), and
+# bond-xctl run_guard accepts both spellings so a half-upgraded box (new
+# bond-xctl, old bond.dag still on disk) resolves the guard rather than
+# refusing every aggregate edge.
+#
+# GUARD SPELLING (U50a): `installed` means "P5's fact directory $BOND_DIR
+# exists" and NOTHING else -- and P5 MAKES it (bond-xctl mkfacts(), called from
+# take_lock before any edge is walked; bondctl need() does the same for the CLI).
+# That second half was missing in this unit's first round: the repo's only
+# creator of $BOND_DIR is p2-engarde/bootstrap-bond.sh, so on a box where E7 had
+# removed the old stack the guard was FALSE and all four rows below refused --
+# the dependency moved from P2's binary to P2's directory instead of going away.
+# It used to also require /usr/sbin/engarde-client,
+# which put P2's binary on the engage, disengage, switch AND aggregate rows
+# below -- so P5's own DAG could not reach `engaged` or an aggregate mode
+# without the old stack. The aggregate row was the plainest case: it already
+# carries `agg_installed` (the bond-agg binary) and none of its actions call
+# engarde. (U50a was written when that row was spelled `speed`; U17 renamed it
+# to `agg`. Same row, same guard set -- the rename moved no edge.) Mo decided to drop the
+# dependency outright rather than narrow it (docs/ROADMAP.md, "U50 DECIDED by
+# Mo (2026-08-30)"), so the term is gone from all four rows at once.
+# The ROWS are unchanged -- the guard's MEANING moved, in bond-xctl
+# guard_installed() and bond_model.py g_installed(), which stay data-equivalent.
+# This does NOT remove engarde from the box: the client still carries the binary
+# and the production tunnel still runs through it on :59401
+# (docs/knowledge/inventory/2026-08-30-client-flint2.txt). It removes P5's
+# DEPENDENCY on it. The eco/lightning FEEDER is still engarde today -- that gap
+# is U50b, not this row set.
+#
+# E4 SHAPING (U22, spec: docs/knowledge/design/e4-shaping-in-dag.md; ADR-001
+# decision 1 SUPERSEDED). Shaping is a SIDE VALUE carried on every node, exactly
+# as `mode` is carried on `engaged` -- NOT a node dimension, so no node and no
+# intent is added and the Layer-1 state space is unchanged. Three rules:
+#   R1  no new nodes, no new intents; `shape_apply` is appended to the ACTION
+#       list of every edge that changes the lifecycle.
+#   R2  shaping can NEVER tear down the tunnel (INV8). It contributes NO guard
+#       (a failed guard refuses the whole edge) and NO verify (a failed verify
+#       walks `onfail`, which for engage is `suspend`), and act_shape_apply
+#       ALWAYS returns 0. Drift and failure are corrected by the NEXT reconcile
+#       through converged(), never by escalation.
+#   R3  converged() observes it, or the fold is inert (a fact-space no-op is not
+#       an effect-space no-op) -- see bond-xctl converged().
+# `suspend` is deliberately UNTOUCHED: it is the failure-escape path, and adding
+# work to an escape path is how escapes stop working.
+# PLACEMENT IS LOAD-BEARING: `shape_apply` goes LAST on every edge, and
+# specifically AFTER mtu_1408/mtu_1420. cake's overhead accounting is
+# MTU-sensitive, so shaping must be (re)applied after the MTU settles or it is
+# configured against the wrong frame size. This is the concrete reason the fold
+# belongs in the DAG: the existing machine already sequences what shaping
+# depends on. Barred by SH-4 in BOTH layers.
+#
+# intent|from|to|guards|actions|verify|retries|onfail
+engage|off,engaged,suspended,suspended_degraded|engaged|installed|aggdown_if_agg,rc_on,genconf,eng_enable,eng_restart,ep_local,shape_apply|verify_local|5|suspend
+suspend|off,engaged,suspended,suspended_degraded|suspended|-|revert|-|0|-
+disengage|off,engaged,suspended,suspended_degraded|off|installed|aggdown_if_agg,rc_off,eng_disable,eng_stop,ep_direct,clear_susp,shape_apply|-|0|-
+switch|off,engaged,suspended,suspended_degraded|engaged|installed|aggdown_if_agg,genconf_if_enabled,eng_restart_if_enabled,shape_apply|-|0|-
+agg|off,engaged|agg|installed,manual,agg_installed,enough_sources|env_gen,agg_install,eng_stop,agg_enable,agg_restart,mtu_1408,ep_agg,shape_apply|verify_agg|3|agg_revert
+agg_revert|off,engaged|engaged|-|agg_stop,agg_disable,mtu_1420,restore_feeder,shape_apply|-|0|-

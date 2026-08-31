@@ -1,0 +1,682 @@
+#!/bin/sh
+# shellcheck shell=sh
+# deploy/p5/shape-install — E4's INSTALL half. U22a.
+#
+# WHAT THIS IS. U22 folded shaping into the lifecycle (`shape` fact, shape_now()
+# probe, act_shape_apply appended LAST to five bond.dag rows, the converged()
+# clause). That half CONTROLS a shaper. Nothing PRODUCED one:
+# bond-xctl's `SHAPE_SVC=` default (/etc/init.d/cake-autorate) had no producer
+# anywhere in the tree, and E7 removes P1's cake/autorate on the client. So a P5 deploy
+# removed the shaper and installed nothing, and every box then idled in the
+# permanent shaping retry loop e4-shaping-in-dag.md §9.3 predicted. This file is
+# the producer. Bars SH-8..SH-15 go RED on a tree without it.
+#
+# WHICH BOX. The CLIENT (the GL-MT6000). It is bond-xctl's peer, and bond-xctl
+# is client-side (C4). The SERVER (the GL-MT2500) has NO PHYSICAL ACCESS, has
+# no SQM and no autorate at all, and P5 there is ADDITIVE-ONLY (HANDOFF §0a,
+# handover §E7 amendment) — nothing here is scheduled to run on it. The
+# capability gate is nevertheless NOT a model-string match, for the reason in
+# §GATE below. Box ADDRESSES live in docs/, never in a shipped file: this tree
+# is mirrored to a public repo for CI, and the scrub gate refuses them.
+#
+# WHAT IT DOES NOT DO, deliberately:
+#   * it does not enable or start anything. Placing files is not activation.
+#     The DAG owns activation: act_shape_apply enables + restarts the controller
+#     on the next reconcile, and that single ownership point is what keeps
+#     shaping from becoming a second controller (ADR-001 decision 1, superseded).
+#   * it touches NO management path: no /etc/config/network, no
+#     /etc/config/firewall, no routing, no dropbear/ssh, no reboot, no opkg.
+#     Bar SH-12 is a static lint that asserts it, so the claim is checked and
+#     not merely written. (P1's bootstrap DOES opkg-install and DOES rewrite
+#     other people's uci — see §REUSE.)
+#   * it invents no constant. Its inputs are DECLARED, and today the vendored
+#     BYTES and two facts are absent; with any input missing this refuses
+#     LOUDLY and changes nothing. See §INPUTS.
+#   * it fetches nothing. No wget, no curl, no git, no opkg. Bar SH-13 lints for
+#     that, with p1-autorate/bootstrap-autorate.sh (curl-from-master) as the
+#     NEGATIVE CONTROL that must FAIL the same lint.
+#
+# §INPUTS — declared, each with a named owner. Missing => exit 3.
+#   1. shape/cake-autorate.pin FILES block + the vendored bytes  owner: G2 (Mo)
+#      The vendor pin. G2 ran on the CLIENT on 2026-08-30 and answered NO-GIT:
+#      /root/cake-autorate is not a git checkout (p1's bootstrap wgets setup.sh
+#      from master, which leaves no .git), so THERE IS NO COMMIT TO PIN. The pin
+#      is therefore the FILE SET — a sha256 per file, which is strictly stronger
+#      than a commit ref because it is what is actually running rather than what
+#      a tag claims. The hashes are ON RECORD (the pin's FILES block). The BYTES
+#      are NOT: shape/vendor/ is empty, and hashes are not code. So this still
+#      refuses, now precisely — "vendored payload missing", not "sha missing".
+#      The install VERSION ID is sha256 of the FILES block, truncated:
+#      content-addressed, derived, never invented — it is what replaces the
+#      commit ref this install cannot supply.
+#      NOT pinned, deliberately: `config.wg.sh`. It is Mo's operational config,
+#      not upstream code; P5 GENERATES its own from declared facts (below).
+#      PINNED != SHIPPED. Every pinned file is VERIFIED; only the pin's STAGE
+#      block is COPIED onto the box. `setup.sh` (upstream's wget-from-master
+#      installer) and `uninstall.sh` (which removes `/root/cake-autorate` —
+#      P1's LIVE shaper) are verified and deliberately not placed. See
+#      pin_stage. A pin with no STAGE block is a refusal, not "stage all".
+#   2. $BOND_DIR/shape_bounds   6 ints, kbit/s, one line:
+#         dl_min dl_base dl_max ul_min ul_base ul_max        owner: U24/OBJ-F
+#      cake-autorate cannot run without them. p1-autorate/bootstrap-autorate.sh
+#      carries field-derived values for THIS tunnel in its WG_DL_*_KBIT /
+#      WG_UL_*_KBIT assignments; they are a CANDIDATE for that fact, supplied by
+#      the operator, never copied into this path.
+#   3. $BOND_DIR/shape_reflectors  one IP per line           owner: U24/OBJ-F
+#      Upstream's default reflectors are popular client DNS anycast addresses,
+#      and P1 rejected exactly those in writing ("a lingering pin must not
+#      blackhole clients' DNS" -- p1-autorate/bootstrap-autorate.sh, the comment
+#      directly above its WG_REFLECTORS= assignment). Cited by ANCHOR, not by
+#      line number: the first draft of this file said ":87-88" and the text is
+#      nowhere near there, and a number nobody can re-derive is not a citation.
+#      Taking an upstream default here would silently re-adopt a hazard this
+#      project already refused. So it is an input, not a default.
+#   NOT SET AT ALL, and named rather than guessed: cake-autorate's tuning knobs
+#   (no_pingers, bufferbloat_refractory_period_ms, high_load_thr,
+#   shaper_rate_max_adjust_up_load_high). P1 field-derived its values on
+#   2026-08-23; those are measurements of THAT config, not of P5's, so this
+#   writes none of them and upstream's defaults apply. Named open item, not a
+#   silent choice.
+#
+# §GATE — GL-family by CAPABILITY, not by SKU.
+#   Reused from p1-autorate/bootstrap-autorate.sh -- its ONLY `grep -q
+#   "GL-MT6000" /tmp/sysinfo/model` line: /tmp/sysinfo/model as the
+#   identity source, and the refuse-loudly-rather-than-proceed shape. Replaced:
+#   its predicate. `grep -q "GL-MT6000" ... || fail` refuses on the GL-MT2500
+#   server, and a two-SKU list is the same defect with a longer literal. So:
+#     * IDENTITY (model, GL family) is READ and LOGGED and is never by itself a
+#       refusal. It selects WHICH non-interference check applies — GL firmware
+#       is what ships the native SQM this must not fight (§SQM).
+#     * REFUSAL is on what the shaper actually REQUIRES: tc; sch_cake; ifb +
+#       act_mirred (cake-autorate's dl_if is an ifb mirror of the tunnel);
+#       bash (cake-autorate is bash, not ash); a pinger; procd's rc.common;
+#       sha256sum (no verifier => no unverified install); and the discovered
+#       tunnel interface actually existing.
+#   A GL-MT2500, or any OpenWrt box, that HAS those installs. A GL-MT6000 that
+#   lost sch_cake does not. That is the whole point of moving off the SKU.
+#
+# §SQM — non-interference with GL native SQM.
+#   GL's UI (FLOW CONTROL -> SQM) writes /etc/config/sqm, and sqm attaches its
+#   own root qdisc to the interface it names. Two owners on one device is a
+#   qdisc tug-of-war that neither side can win. So:
+#     * an ENABLED sqm queue on the DISCOVERED TUNNEL iface => CONFLICT, exit 5,
+#       nothing installed. P5 does not silently take the device off the operator.
+#     * an enabled sqm queue on any OTHER iface => reported, install proceeds.
+#   Runtime half (the converge-guard the spec asks for) lives in bond-xctl
+#   shape_native_sqm(): act_shape_apply REFUSES to attach while native SQM owns
+#   the discovered iface, logs loudly, and still returns 0 (INV8).
+#
+# §REUSE — what came from p1-autorate/bootstrap-autorate.sh, what did not.
+#   REUSED (mechanism, proven on the box): /tmp/sysinfo/model as identity;
+#   refuse-loudly with a reason; the idempotent converge shape; cake on the
+#   TUNNEL iface and never on an underlay (its §Why: an underlay sees one
+#   encrypted flow and starves it — field-proven on eth1); dl_if = ifb mirror of
+#   the tunnel and ul_if = the tunnel; reflectors pinned through the tunnel and
+#   never popular client DNS.
+#   REPLACED, with the reason: the single-SKU predicate (§GATE); `opkg update &&
+#   opkg install` (violates C3 — this REPORTS a missing capability instead of
+#   mutating the box's package set); curl-from-master via setup.sh (the whole
+#   point of E4's vendor+pin); `uci set sqm.wgclient1...` (P5 must not write GL's
+#   SQM config — it is the very file §SQM checks for a conflicting owner);
+#   deleting other people's config (bootstrap-autorate.sh, its
+#   `---- retire v1 machinery ----` block, removes
+#   99-tether-autorate, /etc/tether-reflectors, sqm.wan/eth1/tether, every
+#   sqm.@queue[0] and network.ethref1..6 — reaching outside its own namespace is
+#   the habit E0's contract exists to end); the hardcoded WG_DEV="wgclient1"
+#   (discovery, §DISCOVERY); and every invented rate/tuning constant (§INPUTS).
+#
+# §DISCOVERY — no `wgclient1` literal. The tunnel iface is $BOND_DIR/wg_if, the
+#   M8/E6 discovery fact, resolved by the SAME two-step bond-xctl shape_if()
+#   uses ($BOND_DIR/wg_if, else $WG_DEV). One discovery path, not a second one.
+#
+# §INTERRUPTION — the box must survive being killed between any two steps.
+#   Payload lands at $SHAPE_BASE/v-<setid>/ (a NEW directory, never over the
+#   live one) and goes live when a POINTER FILE named `current`, holding that
+#   directory's name, is renamed into place — install-new-then-switch, so an
+#   interrupted run leaves the previous version live and a retry is a
+#   no-op-or-forward. Every write in this installer is temp-file + mv, i.e.
+#   rename(2), which is atomic; `current` is a plain file rather than a symlink
+#   precisely so that its swap is a rename too. No step is destructive before
+#   its replacement exists, and the previous version dir is left on disk.
+#
+# VERBS
+#   preflight  read-only. Prints identity, capabilities, inputs, controller
+#              ownership, sqm state, and a VERDICT. Changes NOTHING. Exit:
+#              0 ready · 3 declared input missing · 4 capability missing ·
+#              5 native-SQM conflict · 6 a FOREIGN controller already owns
+#              $SHAPE_SVC (on the client, P1's — E7's to remove, not this file's).
+#   install    runs preflight, refuses on any non-zero, then installs.
+#   status     what is installed right now.
+#   remove     idempotent teardown of P5's OWN shaping payload only.
+#
+# NEVER EXECUTED ON EITHER BOX. Like the rest of P5. Layer-2 runs this exact
+# file under shims; that is not the box (repo-is-not-the-world).
+# BUSYBOX-SAFE POSIX sh.
+
+set -u
+
+TAG="shape-install"
+HERE=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || HERE="."
+
+# --- overridable roots (harness + on-box are the SAME code path) ------------
+BOND_DIR="${BOND_DIR:-/etc/bond}"
+WG_DEV="${WG_DEV:-}"
+# where the pin + vendored payload live. Repo: deploy/p5/shape. On the box: the
+# same directory, shipped beside this script.
+P5_SHARE="${P5_SHARE:-$HERE/shape}"
+# where the P5-owned init script template lives (shipped beside this file).
+P5_INITD="${P5_INITD:-$HERE/init.d}"
+SHAPE_BASE="${SHAPE_BASE:-/usr/lib/p5/cake-autorate}"
+SHAPE_SVC="${SHAPE_SVC:-/etc/init.d/cake-autorate}"
+SQM_CONF="${SQM_CONF:-/etc/config/sqm}"
+SYSINFO_MODEL="${SYSINFO_MODEL:-/tmp/sysinfo/model}"
+GLVERSION="${GLVERSION:-/etc/glversion}"
+SYS_MODULE="${SYS_MODULE:-/sys/module}"
+PROC_MODULES="${PROC_MODULES:-/proc/modules}"
+MODDIR="${MODDIR:-}"
+SYS_CLASS_NET="${SYS_CLASS_NET:-/sys/class/net}"
+RC_COMMON="${RC_COMMON:-/etc/rc.common}"
+PROCD_BIN="${PROCD_BIN:-/sbin/procd}"
+# OWNERSHIP MARKER for $SHAPE_SVC. `/etc/init.d/cake-autorate` is a name P1
+# ALREADY USES on the client -- its own cake-autorate service, `S97cake-autorate`
+# in rc.d, shaping production traffic right now. Without this check `install`
+# would silently overwrite that file and `remove` would delete it, and P1 is
+# deployed and must not be touched. So: install REFUSES over an unmarked file
+# (exit 6, naming E7 as the owner of removing P1), and remove leaves an unmarked
+# file alone. The marker is the first content line of the shipped init script.
+P5_MARK="P5-OWNED-INIT: deploy/p5/init.d/cake-autorate"
+svc_is_p5() { [ -f "${1:-}" ] && grep -q "$P5_MARK" "$1" 2>/dev/null; }
+
+# scratch for the pin's FILES block (busybox sh has no arrays). Removed on exit
+# including on interrupt, and it lives in TMPDIR, never in a shipped directory.
+_PF="${TMPDIR:-/tmp}/.shape-install.$$"
+trap 'rm -f "$_PF" 2>/dev/null' EXIT INT TERM
+
+log()  { echo "$TAG: $*"; logger -t "$TAG" "$*" 2>/dev/null; }
+warn() { echo "$TAG: WARN: $*" >&2; logger -t "$TAG" "WARN: $*" 2>/dev/null; }
+die()  { echo "$TAG: REFUSING: $*" >&2; logger -t "$TAG" "REFUSING: $*" 2>/dev/null; exit "${2:-1}"; }
+
+# ---- discovery: the SAME two-step bond-xctl shape_if() uses ----------------
+shape_if() {
+    _I=$(cat "$BOND_DIR/wg_if" 2>/dev/null)
+    [ -n "$_I" ] || _I="$WG_DEV"
+    echo "$_I"
+}
+
+# ---- pin parsing. READ, never sourced: a pin record must not execute. ------
+pin_get() {
+    [ -r "$P5_SHARE/cake-autorate.pin" ] || return 1
+    while IFS= read -r _l; do
+        case "$_l" in
+            "#"*|"") continue ;;
+            "$1="*)  printf '%s' "${_l#"$1"=}"; return 0 ;;
+        esac
+    done < "$P5_SHARE/cake-autorate.pin"
+    return 1
+}
+# pin_files — the FILES block, "<sha256>  <name>" lines. Only WELL-FORMED lines
+# are emitted. On its own that is a silent drop, not a fail-closed: a mangled
+# FILES line simply disappears, the pinned set gets smaller, the version id
+# (which is sha256 of THIS output) changes, and the install reports success on a
+# different set than the pin declares. MEASURED, 2026-08-30 adversarial verify:
+# mangling the FILES line of a pinned-but-unstaged file and deleting it from
+# vendor/ gave rc=0, "2 file(s) pinned, 2 staged", version id v-936d5eb41db2
+# instead of v-0de0f0e47840. pin_files_declared below is the fix — the parsed
+# count must EQUAL the declared count, checked in pin_verify.
+pin_files() {
+    [ -r "$P5_SHARE/cake-autorate.pin" ] || return 1
+    _in=0
+    while IFS= read -r _l; do
+        case "$_l" in
+            BEGIN_FILES) _in=1; continue ;;
+            END_FILES)   _in=0; continue ;;
+        esac
+        [ "$_in" = 1 ] || continue
+        case "$_l" in
+            [0-9a-f][0-9a-f]*"  "?*) printf '%s\n' "$_l" ;;
+        esac
+    done < "$P5_SHARE/cake-autorate.pin"
+}
+# pin_files_declared — how many lines the FILES block CLAIMS: every non-blank,
+# non-comment line between the markers, whether or not it parses. Comparing it
+# with what pin_files actually parsed is the only thing that can SEE a dropped
+# line, and a dropped line is the difference between "this is the pinned set"
+# and "this is whatever survived parsing".
+pin_files_declared() {
+    [ -r "$P5_SHARE/cake-autorate.pin" ] || return 1
+    _in=0; _c=0
+    while IFS= read -r _l; do
+        case "$_l" in
+            BEGIN_FILES) _in=1; continue ;;
+            END_FILES)   _in=0; continue ;;
+        esac
+        [ "$_in" = 1 ] || continue
+        case "$_l" in "#"*|"") continue ;; esac
+        _c=$((_c+1))
+    done < "$P5_SHARE/cake-autorate.pin"
+    printf '%s\n' "$_c"
+}
+# pin_setid — the VERSION ID. sha256 of the FILES block, truncated. Derived from
+# the pinned content, never picked; it is what stands in for the commit ref this
+# install cannot supply (CAR_ORIGIN=NO-GIT).
+pin_setid() { pin_files | sha256sum 2>/dev/null | cut -c1-12; }
+
+# pin_stage — the STAGE block: which of the PINNED files are actually copied
+# onto the box. PINNED != SHIPPED, and the difference is a safety property, not
+# bookkeeping:
+#   * `setup.sh` is upstream's INSTALLER and it wgets from master
+#     (p1-autorate/bootstrap-autorate.sh's `---- cake-autorate ----` block is
+#     what runs it). Placing it in
+#     P5's namespace would put a curl-from-master fetcher inside the package
+#     whose entire purpose is to not have one — SH-13 lints the installer, and
+#     a fetcher smuggled in as payload would walk straight past that lint.
+#   * `uninstall.sh` is upstream's REMOVER. On this client the upstream tree is
+#     `/root/cake-autorate` — P1's shaper, running production traffic right now
+#     (inventory 2026-08-30-client-flint2.txt:214-218). Shipping a script that
+#     removes it is a foot-gun P5 has no use for; E7 owns removal.
+# Both stay PINNED, because the pin is a statement about the whole vendored set
+# and the version id must change if any of it changes. They are simply not
+# copied. Fails CLOSED: no STAGE block, or a staged name that is not pinned, is
+# a refusal — never "stage everything".
+pin_stage() {
+    [ -r "$P5_SHARE/cake-autorate.pin" ] || return 1
+    _in=0
+    while IFS= read -r _l; do
+        case "$_l" in
+            BEGIN_STAGE) _in=1; continue ;;
+            END_STAGE)   _in=0; continue ;;
+        esac
+        [ "$_in" = 1 ] || continue
+        case "$_l" in
+            "#"*|"") continue ;;
+            *) printf '%s\n' "$_l" ;;
+        esac
+    done < "$P5_SHARE/cake-autorate.pin"
+}
+
+# pin_verify — every pinned file present under vendor/ and hash-matching, AND no
+# UNPINNED file in vendor/. Prints one diagnostic line per problem. Returns 0
+# only when the vendored tree is exactly the pinned set.
+pin_verify() {
+    _bad=0; _n=0
+    pin_files > "$_PF" 2>/dev/null
+    while read -r _h _f; do
+        [ -n "${_f:-}" ] || continue
+        _n=$((_n+1))
+        if [ ! -r "$P5_SHARE/vendor/$_f" ]; then
+            echo "    pinned but NOT VENDORED: $_f"; _bad=$((_bad+1)); continue
+        fi
+        _a=$(sha256sum "$P5_SHARE/vendor/$_f" 2>/dev/null | awk '{print $1}')
+        if [ "$_a" != "$_h" ]; then
+            echo "    HASH MISMATCH: $_f (pinned $_h, actual ${_a:-<unhashable>})"
+            _bad=$((_bad+1))
+        fi
+    done < "$_PF"
+    [ "$_n" -gt 0 ] || { echo "    the pin declares NO files"; return 1; }
+    # EVERY declared line must have parsed. A line that pin_files could not read
+    # is not "one fewer file", it is an unreadable pin: it changes the pinned
+    # set AND the version id while every other check still passes. Fail closed.
+    _dec=$(pin_files_declared 2>/dev/null); _dec=${_dec:-0}
+    if [ "$_n" != "$_dec" ]; then
+        echo "    MALFORMED FILES block: $_dec line(s) declared, only $_n parsed as '<sha256>  <name>'"
+        _bad=$((_bad+1))
+    fi
+    # nothing unpinned may reach the box
+    if [ -d "$P5_SHARE/vendor" ]; then
+        for _v in "$P5_SHARE/vendor"/*; do
+            [ -f "$_v" ] || continue
+            _b=${_v##*/}
+            case "$_b" in .gitkeep) continue ;; esac
+            grep -q "  $_b\$" "$_PF" || { echo "    VENDORED BUT NOT PINNED: $_b"; _bad=$((_bad+1)); }
+        done
+    fi
+    # the STAGE block must exist and must be a SUBSET of the pinned set. An
+    # absent block is a refusal, not a licence to stage everything (see
+    # pin_stage) -- a pin whose staging half is missing is an unfinished pin.
+    _s=0
+    for _sf in $(pin_stage 2>/dev/null); do
+        _s=$((_s+1))
+        grep -q "  $_sf\$" "$_PF" || { echo "    STAGED BUT NOT PINNED: $_sf"; _bad=$((_bad+1)); }
+    done
+    [ "$_s" -gt 0 ] || { echo "    the pin declares NO STAGE block (which files land on the box?)"; _bad=$((_bad+1)); }
+    [ "$_bad" = 0 ]
+}
+
+# ---- capability probes -----------------------------------------------------
+have() { command -v "$1" >/dev/null 2>&1; }
+# mod_present NAME — loadable OR loaded OR built-in. Built-in modules appear
+# under /sys/module with no .ko anywhere, which is why that is checked FIRST;
+# a module-file-only test would refuse a kernel with cake compiled in.
+mod_present() {
+    [ -d "$SYS_MODULE/$1" ] && return 0
+    grep -q "^$1 " "$PROC_MODULES" 2>/dev/null && return 0
+    _kd="$MODDIR"
+    [ -n "$_kd" ] || _kd="/lib/modules/$(uname -r 2>/dev/null)"
+    [ -d "$_kd" ] || return 1
+    find "$_kd" -name "$1.ko*" 2>/dev/null | grep -q . && return 0
+    return 1
+}
+
+MISSING_CAP=""
+cap() {  # cap <name> <test...>  — the test is run via eval
+    _n="$1"; shift
+    if eval "$*" >/dev/null 2>&1; then
+        echo "  CAP  ok      $_n"
+    else
+        echo "  CAP  MISSING $_n"
+        MISSING_CAP="$MISSING_CAP $_n"
+    fi
+}
+
+# ---- native SQM ------------------------------------------------------------
+# Prints the interface of every ENABLED sqm queue, one per line. Reads the
+# config file directly rather than via uci: a check that reports "no conflict"
+# because its own tool is absent is worse than no check. The trailing sentinel
+# flushes the last section (uci config files have no section terminator).
+sqm_enabled_ifaces() {
+    [ -r "$SQM_CONF" ] || return 0
+    { tr -d "\"'" < "$SQM_CONF" 2>/dev/null; echo "config __sentinel"; } | {
+        _en=0; _if=""
+        while read -r _k _a _b; do
+            case "$_k" in
+                config)
+                    if [ "$_en" = 1 ] && [ -n "$_if" ]; then echo "$_if"; fi
+                    _en=0; _if="" ;;
+                option)
+                    case "$_a" in
+                        enabled)   _en="${_b:-0}" ;;
+                        interface) _if="${_b:-}" ;;
+                    esac ;;
+            esac
+        done
+    }
+}
+
+# ---- path safety: never remove outside P5's own namespace ------------------
+# The property: the path is inside P5's OWN namespace directory, and contains no
+# traversal. E0's B1 lost an SSH key by turning a contract row straight into an
+# unlink; nothing here removes anything this refuses.
+#
+# It matches the `/usr/lib/p5/` SEGMENT rather than only the absolute prefix,
+# and that is deliberate. `SHAPE_BASE` is an override so the harness can run
+# THIS file rather than a copy of it, and an absolute-prefix-only test made
+# `remove` refuse its own payload under a test root -- which meant the removal
+# path shipped untested while the bar for it looked reasonable. On the box the
+# absolute form is what holds, because `SHAPE_BASE` defaults to
+# `/usr/lib/p5/cake-autorate` and nothing on the box overrides it; SH-14 asserts
+# that shipped default, so the segment form cannot become a way to smuggle a
+# base out of the namespace.
+p5_path_sane() {
+    [ -n "${1:-}" ] || return 1
+    case "$1" in *..*) return 1 ;; esac
+    case "$1" in
+        /usr/lib/p5/?*)  return 0 ;;
+        */usr/lib/p5/?*) return 0 ;;
+    esac
+    return 1
+}
+
+# ============================ PREFLIGHT ====================================
+preflight() {
+    _rc=0
+    IF=$(shape_if)
+
+    echo "== identity (read, logged, never by itself a refusal) =="
+    _model=$(cat "$SYSINFO_MODEL" 2>/dev/null)
+    echo "  model:      ${_model:-<unknown: $SYSINFO_MODEL absent>}"
+    _fam=other
+    case "$_model" in GL-*) _fam=gl ;; esac
+    [ -r "$GLVERSION" ] && _fam=gl
+    echo "  family:     $_fam   (gl => the native-SQM non-interference check applies)"
+    echo "  tunnel if:  ${IF:-<UNDISCOVERED>}   (from BOND_DIR/wg_if, else WG_DEV)"
+
+    echo "== capabilities the shaper REQUIRES (this is the gate, not the model) =="
+    cap tc         'have tc'
+    cap sch_cake   'mod_present sch_cake'
+    cap ifb        'mod_present ifb'
+    cap act_mirred 'mod_present act_mirred'
+    cap bash       'have bash'
+    cap pinger     'have fping || have ping'
+    cap rc_common  '[ -r "$RC_COMMON" ] || [ -x "$PROCD_BIN" ]'
+    cap sha256sum  'have sha256sum'
+    cap tunnel_if  '[ -n "$IF" ] && { [ -e "$SYS_CLASS_NET/$IF" ] || ip link show "$IF"; }'
+    if [ -n "$MISSING_CAP" ]; then
+        echo "  VERDICT: capability MISSING:$MISSING_CAP"
+        _rc=4
+    fi
+
+    echo "== declared inputs (absent => refuse; never substituted) =="
+    _miss=""
+    _nf=$(pin_files 2>/dev/null | wc -l | tr -d ' ')
+    echo "  pin origin: $(pin_get CAR_ORIGIN 2>/dev/null || echo '<unset>')  (NO-GIT => there is no commit on the box to pin; the FILE SET is the pin)"
+    if [ "${_nf:-0}" -gt 0 ]; then echo "  IN   ok      pin declares $_nf file(s), version id $(pin_setid)"
+    else echo "  IN   MISSING pin FILES block  [G2 -- the sha256 set, read off the box]"; _miss="$_miss PIN_FILES"; fi
+    if [ "${_nf:-0}" -gt 0 ] && pin_verify; then echo "  IN   ok      vendored bytes match the pin, and nothing unpinned is present"
+    else echo "  IN   MISSING vendored bytes under $P5_SHARE/vendor/  [G2 -- hashes are not code]"; _miss="$_miss VENDOR"; fi
+    if [ -s "$BOND_DIR/shape_bounds" ]; then echo "  IN   ok      BOND_DIR/shape_bounds"
+    else echo "  IN   MISSING BOND_DIR/shape_bounds  (dl_min dl_base dl_max ul_min ul_base ul_max, kbit/s)  [U24/OBJ-F]"; _miss="$_miss shape_bounds"; fi
+    if [ -s "$BOND_DIR/shape_reflectors" ]; then echo "  IN   ok      BOND_DIR/shape_reflectors"
+    else echo "  IN   MISSING BOND_DIR/shape_reflectors  (one IP per line, through the tunnel, NOT client DNS)  [U24/OBJ-F]"; _miss="$_miss shape_reflectors"; fi
+    if [ -n "$_miss" ]; then
+        echo "  VERDICT: declared input MISSING:$_miss"
+        if [ "$_rc" = 0 ]; then _rc=3; fi
+    fi
+
+    echo "== controller ownership (P5 must not clobber P1's) =="
+    if [ ! -e "$SHAPE_SVC" ]; then
+        echo "  SVC  ok       $SHAPE_SVC does not exist yet"
+    elif svc_is_p5 "$SHAPE_SVC"; then
+        echo "  SVC  ok       $SHAPE_SVC is P5's (marker present) -- this install replaces our own"
+    else
+        echo "  SVC  FOREIGN  $SHAPE_SVC exists and carries NO P5 marker"
+        echo "  VERDICT: an init script P5 did not write already owns $SHAPE_SVC."
+        echo "           On the CLIENT that is P1's cake-autorate service, which is"
+        echo "           DEPLOYED AND RUNNING. Overwriting it would take down the live"
+        echo "           shaper, and P1-P3 are not this unit's to touch. Removing it is"
+        echo "           E7's job, ordered with the rest of the old stack. Refusing."
+        _rc=6
+    fi
+
+    echo "== GL native SQM non-interference =="
+    _conf=no
+    for _q in $(sqm_enabled_ifaces); do
+        if [ "$_q" = "$IF" ]; then
+            echo "  SQM  CONFLICT native SQM has an ENABLED queue on the tunnel iface '$IF'"
+            _conf=yes
+        else
+            echo "  SQM  note     native SQM enabled on '$_q' (not the tunnel; no conflict)"
+        fi
+    done
+    if [ "$_conf" = no ]; then echo "  SQM  ok       no native SQM queue on '$IF'"; fi
+    if [ "$_conf" = yes ]; then
+        echo "  VERDICT: native SQM owns the tunnel iface. P5 will NOT take the device"
+        echo "           off the operator. Turn FLOW CONTROL -> SQM off for '$IF' in the"
+        echo "           GL UI, or delete that queue, then re-run. (bond-xctl's"
+        echo "           converge-guard refuses to attach for the same reason, loudly,"
+        echo "           and never escalates -- INV8.)"
+        _rc=5
+    fi
+
+    if [ "$_rc" = 0 ]; then
+        echo "VERDICT: READY"
+    else
+        echo "VERDICT: REFUSE ($_rc)"
+    fi
+    return "$_rc"
+}
+
+# ============================ INSTALL ======================================
+do_install() {
+    if preflight; then :; else
+        _prc=$?
+        die "preflight refused (see above). NOTHING was installed, NOTHING was changed." "$_prc"
+    fi
+
+    IF=$(shape_if)
+
+    # --- verify the pin BEFORE anything is placed. No unverified install. ---
+    # (preflight already ran this; re-running it here is deliberate — install
+    # must not depend on a verdict computed earlier, and it is cheap.)
+    _vout=$(pin_verify) || die "PIN NOT SATISFIED -- the vendored tree is not the pinned set. Nothing installed.
+$_vout" 3
+    _setid=$(pin_setid)
+    [ -n "$_setid" ] || die "cannot derive the version id from the pin" 3
+    log "pin verified: $(pin_files | wc -l | tr -d ' ') file(s) pinned, $(pin_stage | wc -l | tr -d ' ') staged, version id $_setid (origin $(pin_get CAR_ORIGIN 2>/dev/null))"
+
+    # --- install-new-then-switch (see §INTERRUPTION) -----------------------
+    _ver="$SHAPE_BASE/v-$_setid"
+    mkdir -p "$SHAPE_BASE" || die "cannot create $SHAPE_BASE" 1
+    if [ -d "$_ver" ]; then
+        log "version $_setid already staged (idempotent re-run)"
+    else
+        _stage="$SHAPE_BASE/.stage.$$"
+        rm -rf "$_stage" 2>/dev/null
+        mkdir -p "$_stage" || die "cannot create $_stage" 1
+        # STAGE, not FILES: everything is verified, only the staged subset is
+        # copied. See pin_stage for why setup.sh/uninstall.sh must not land.
+        for _f in $(pin_stage); do
+            cp "$P5_SHARE/vendor/$_f" "$_stage/$_f" || { rm -rf "$_stage" 2>/dev/null; die "cannot stage $_f" 1; }
+            case "$_f" in *.sh) chmod 0755 "$_stage/$_f" 2>/dev/null ;; esac
+        done
+        mv "$_stage" "$_ver" || { rm -rf "$_stage" 2>/dev/null; die "cannot place $_ver" 1; }
+    fi
+
+    # --- config, generated from the DECLARED inputs only -------------------
+    read -r _dlmin _dlbase _dlmax _ulmin _ulbase _ulmax < "$BOND_DIR/shape_bounds"
+    for _v in "${_dlmin:-}" "${_dlbase:-}" "${_dlmax:-}" "${_ulmin:-}" "${_ulbase:-}" "${_ulmax:-}"; do
+        [ "$_v" -gt 0 ] 2>/dev/null || die "BOND_DIR/shape_bounds must be 6 positive integers (kbit/s)" 3
+    done
+    [ "$_dlmin" -le "$_dlbase" ] && [ "$_dlbase" -le "$_dlmax" ] || die "shape_bounds: need dl min <= base <= max" 3
+    [ "$_ulmin" -le "$_ulbase" ] && [ "$_ulbase" -le "$_ulmax" ] || die "shape_bounds: need ul min <= base <= max" 3
+    _refl=""
+    while IFS= read -r _r; do
+        [ -n "$_r" ] || continue
+        case "$_r" in "#"*) continue ;; esac
+        _refl="$_refl\"$_r\" "
+    done < "$BOND_DIR/shape_reflectors"
+    [ -n "$_refl" ] || die "BOND_DIR/shape_reflectors is empty" 3
+
+    _cfg="$SHAPE_BASE/config.p5.sh"
+    _tmp="$SHAPE_BASE/.config.p5.sh.$$"
+    {
+        echo "#!/usr/bin/env bash"
+        echo "# GENERATED by $TAG from DECLARED INPUTS ONLY. Do not hand-edit: it is"
+        echo "# rewritten on every install. Every value traces to a fact on this box,"
+        echo "# never to a number picked in the installer."
+        echo "#   dl_if/ul_if      <- BOND_DIR/wg_if (M8/E6 discovery)"
+        echo "#   *_shaper_rate_*  <- BOND_DIR/shape_bounds        [U24/OBJ-F]"
+        echo "#   reflectors       <- BOND_DIR/shape_reflectors    [U24/OBJ-F]"
+        echo "# DELIBERATELY UNSET, named rather than guessed: no_pingers,"
+        echo "# bufferbloat_refractory_period_ms, high_load_thr,"
+        echo "# shaper_rate_max_adjust_up_load_high. P1 field-derived values for ITS"
+        echo "# config on 2026-08-23; those are not measurements of P5's, so upstream"
+        echo "# defaults apply here until U24 measures ours."
+        echo "dl_if=ifb4$IF"
+        echo "ul_if=$IF"
+        echo "min_dl_shaper_rate_kbps=$_dlmin"
+        echo "base_dl_shaper_rate_kbps=$_dlbase"
+        echo "max_dl_shaper_rate_kbps=$_dlmax"
+        echo "min_ul_shaper_rate_kbps=$_ulmin"
+        echo "base_ul_shaper_rate_kbps=$_ulbase"
+        echo "max_ul_shaper_rate_kbps=$_ulmax"
+        printf 'reflectors=(%s)\n' "$_refl"
+    } > "$_tmp" || die "cannot write $_tmp" 1
+    mv "$_tmp" "$_cfg" || die "cannot place $_cfg" 1
+
+    # --- flip `current` LAST: this is the switch ---------------------------
+    # `current` is a POINTER FILE holding the version directory's NAME. It was
+    # a symlink first, and a symlink is the wrong tool here for two independent
+    # reasons, both found by review rather than by a passing test:
+    #   1. `mv tmplink current` is NOT a swap. `mv` stats its destination, and
+    #      when `current` is an existing symlink TO A DIRECTORY it follows it
+    #      and moves the new link INSIDE the old version dir -- leaving
+    #      `current` on the OLD payload while the installer reports success.
+    #      Only an UPGRADE hits it, so idempotency and content-addressing bars
+    #      both stay green while it is broken. `mv -T` fixes it on GNU and is
+    #      absent from busybox mv.
+    #   2. Not every filesystem the harness or the box may sit on gives you a
+    #      real symlink, and the failure is silent in the same direction.
+    # A regular file has neither problem: `mv` over an existing regular file is
+    # rename(2), which is ATOMIC -- so the switch has no window at all, and
+    # there is no dereference to be tricked by. The name is then resolved by
+    # whoever reads it (init.d/cake-autorate, do_status), which is one `cat`.
+    if [ -e "$SHAPE_BASE/current" ] && { [ -L "$SHAPE_BASE/current" ] || [ -d "$SHAPE_BASE/current" ]; }; then
+        die "$SHAPE_BASE/current exists and is not a plain pointer file -- refusing to replace something this installer did not create" 1
+    fi
+    _ptr="$SHAPE_BASE/.current.$$"
+    printf 'v-%s\n' "$_setid" > "$_ptr" || die "cannot write the version pointer" 1
+    mv "$_ptr" "$SHAPE_BASE/current" || { rm -f "$_ptr"; die "cannot flip current -> v-$_setid (the payload IS staged at $_ver; re-run to complete)" 1; }
+    _cur=$(cat "$SHAPE_BASE/current" 2>/dev/null)
+    [ "$_cur" = "v-$_setid" ] \
+        || die "current reads '${_cur:-<nothing>}', not 'v-$_setid' -- refusing to report a switch that did not happen" 1
+    log "current -> v-$_setid"
+
+    # --- the controller init script. PLACEMENT IS NOT ACTIVATION here ------
+    # (procd needs an explicit enable, which the DAG's act_shape_apply does.
+    # This is /etc/init.d, NOT /etc/hotplug.d/iface -- where placement WOULD be
+    # activation, E0 blocker B3.)
+    [ -r "$P5_INITD/cake-autorate" ] || die "shipped init script $P5_INITD/cake-autorate missing" 1
+    svc_is_p5 "$P5_INITD/cake-autorate" \
+        || die "the shipped init script has lost its P5 ownership marker ($P5_MARK) -- refusing to place a controller that a later remove could not recognise as ours" 1
+    if [ -e "$SHAPE_SVC" ] && ! svc_is_p5 "$SHAPE_SVC"; then
+        die "$SHAPE_SVC exists and is NOT P5's (no marker). On the client that is P1's LIVE cake-autorate service. E7 removes the old stack; this installer will not overwrite it." 6
+    fi
+    _it="$SHAPE_SVC.p5new.$$"
+    cp "$P5_INITD/cake-autorate" "$_it" || die "cannot stage $SHAPE_SVC" 1
+    chmod 0755 "$_it" 2>/dev/null
+    mv "$_it" "$SHAPE_SVC" || { rm -f "$_it"; die "cannot place $SHAPE_SVC" 1; }
+    log "installed $SHAPE_SVC (NOT enabled, NOT started -- the DAG owns activation)"
+
+    log "done. The next 'bond-xctl reconcile' converges shaping on $IF."
+    return 0
+}
+
+# ============================ STATUS / REMOVE ==============================
+do_status() {
+    IF=$(shape_if)
+    echo "tunnel if:   ${IF:-<undiscovered>}"
+    _c=$(cat "$SHAPE_BASE/current" 2>/dev/null)
+    if [ -n "$_c" ] && [ -d "$SHAPE_BASE/$_c" ]; then echo "payload:     $SHAPE_BASE/$_c"
+    elif [ -n "$_c" ]; then echo "payload:     $SHAPE_BASE/$_c  <MISSING: current names a version that is not on disk>"
+    else echo "payload:     <none>"; fi
+    if [ -r "$SHAPE_BASE/config.p5.sh" ]; then echo "config:      $SHAPE_BASE/config.p5.sh"
+    else echo "config:      <none>"; fi
+    if [ -x "$SHAPE_SVC" ]; then echo "controller:  $SHAPE_SVC"
+    else echo "controller:  <none>"; fi
+    echo "pin:         origin=$(pin_get CAR_ORIGIN 2>/dev/null)  files=$(pin_files 2>/dev/null | wc -l | tr -d ' ')  version=$(pin_setid 2>/dev/null)"
+}
+
+do_remove() {
+    # idempotent; P5's OWN namespace only. Stop before unlinking so nothing is
+    # left running against files that are gone.
+    if [ -e "$SHAPE_SVC" ] && ! svc_is_p5 "$SHAPE_SVC"; then
+        # On the client this file is P1's, deployed and running. Removal of the
+        # old stack is E7's, ordered; it is not a side effect of undoing P5.
+        warn "leaving '$SHAPE_SVC' alone: it carries no P5 ownership marker, so P5 did not write it (on the client it is P1's LIVE cake-autorate service)"
+    elif [ -e "$SHAPE_SVC" ]; then
+        # -e, not -x: a P5-marked controller that lost its exec bit (the
+        # install's chmod is best-effort) is still P5's to remove. The stop/
+        # disable calls simply fail on such a file and are swallowed -- the
+        # unlink is the part that must not be skipped, or remove leaves a
+        # marked file behind and a re-run reports success over a half-clean box.
+        "$SHAPE_SVC" stop    >/dev/null 2>&1
+        "$SHAPE_SVC" disable >/dev/null 2>&1
+        rm -f "$SHAPE_SVC"
+    fi
+    if p5_path_sane "$SHAPE_BASE"; then
+        rm -rf "$SHAPE_BASE"
+    else
+        warn "refusing to remove '$SHAPE_BASE': outside P5's namespace"
+        return 1
+    fi
+    log "removed P5's shaping payload"
+    return 0
+}
+
+case "${1:-}" in
+    preflight) preflight ;;
+    install)   do_install ;;
+    status)    do_status ;;
+    remove)    do_remove ;;
+    *) echo "usage: shape-install preflight|install|status|remove" >&2; exit 2 ;;
+esac
