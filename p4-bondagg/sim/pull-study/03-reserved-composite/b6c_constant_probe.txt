@@ -1,0 +1,147 @@
+##############################################################################################################
+# B6c CONSTANT-HOLD PROBE  seeds=3 T=9.0s rig=mid  (U13 round 3)
+# A CONSTANT hold substituted for the derived hold, swept.  B6a alone vs B6a+B6c.
+##############################################################################################################
+# 54 runs in 141s
+
+B6a ALONE -- does a CONSTANT hold pass the bar the derived hold is gated on?
+P = PASSES B6a (the gate would be green with a hold derived from nothing)
+cell                    0.02s   0.08s   0.15s   0.25s   0.35s   0.50s   0.75s   1.00s   1.50s   2.00s   3.00s   5.00s   8.00s
+N2-het         L=0.65      .       .       .       .       .       P       P       P       P       P       P       P       P
+N2-het         L=0.85      .       .       .       .       P       P       P       P       P       P       P       P       P
+N2-het         L=0.95      .       .       .       .       P       P       P       P       P       P       P       P       P
+N3-het         L=0.65      .       .       .       .       P       P       P       P       P       P       P       P       P
+N3-het         L=0.85      .       .       .       .       P       P       P       P       P       P       P       P       P
+N3-het         L=0.95      .       .       .       P       P       P       P       P       P       P       P       P       P
+N4-het         L=0.65      .       .       .       P       P       P       P       P       P       P       P       P       P
+N4-het         L=0.85      .       .       .       .       P       P       P       P       P       P       P       P       P
+N4-het         L=0.95      .       .       .       P       P       P       P       P       P       P       P       P       P
+N5-het         L=0.65      .       .       .       .       P       P       P       P       P       P       P       P       P
+N5-het         L=0.85      .       .       .       .       P       P       P       P       P       P       P       P       P
+N5-het         L=0.95      .       .       .       .       P       P       P       P       P       P       P       P       P
+N4-teth        L=0.65      .       .       .       .       P       P       P       P       P       P       P       P       P
+N4-teth        L=0.85      .       .       .       .       P       P       P       P       P       P       P       P       P
+N4-teth        L=0.95      .       .       .       .       P       P       P       P       P       P       P       P       P
+N5-corr        L=0.65      .       .       .       .       P       P       P       P       P       P       P       P       P
+N5-corr        L=0.85      .       .       .       .       P       P       P       P       P       P       P       P       P
+N5-corr        L=0.95      .       .       .       .       P       P       P       P       P       P       P       P       P
+
+B6c -- the same substitutions, gated on the DERIVATION:
+  c1 raises >= 1                       (a constant raises nothing)
+  c2 hold <= max lateness the trace exhibited (measured per-seq by LatenessWitness)
+cell                    0.02s   0.08s   0.15s   0.25s   0.35s   0.50s   0.75s   1.00s   1.50s   2.00s   3.00s   5.00s   8.00s
+N2-het         L=0.65      .       .       .       .       .       .       .       .       .       .       .       .       .
+N2-het         L=0.85      .       .       .       .       .       .       .       .       .       .       .       .       .
+N2-het         L=0.95      .       .       .       .       .       .       .       .       .       .       .       .       .
+N3-het         L=0.65      .       .       .       .       .       .       .       .       .       .       .       .       .
+N3-het         L=0.85      .       .       .       .       .       .       .       .       .       .       .       .       .
+N3-het         L=0.95      .       .       .       .       .       .       .       .       .       .       .       .       .
+N4-het         L=0.65      .       .       .       .       .       .       .       .       .       .       .       .       .
+N4-het         L=0.85      .       .       .       .       .       .       .       .       .       .       .       .       .
+N4-het         L=0.95      .       .       .       .       .       .       .       .       .       .       .       .       .
+N5-het         L=0.65      .       .       .       .       .       .       .       .       .       .       .       .       .
+N5-het         L=0.85      .       .       .       .       .       .       .       .       .       .       .       .       .
+N5-het         L=0.95      .       .       .       .       .       .       .       .       .       .       .       .       .
+N4-teth        L=0.65      .       .       .       .       .       .       .       .       .       .       .       .       .
+N4-teth        L=0.85      .       .       .       .       .       .       .       .       .       .       .       .       .
+N4-teth        L=0.95      .       .       .       .       .       .       .       .       .       .       .       .       .
+N5-corr        L=0.65      .       .       .       .       .       .       .       .       .       .       .       .       .
+N5-corr        L=0.85      .       .       .       .       .       .       .       .       .       .       .       .       .
+N5-corr        L=0.95      .       .       .       .       .       .       .       .       .       .       .       .       .
+
+TOTAL over 18 cells x 13 constants = 234 substitutions:
+  pass B6a alone : 164   <- the hole an independent verify walked through
+  pass B6a+B6c   : 0   <- the whole constant class is rejected at the derivation
+
+SMALLEST CONSTANT THAT PASSES B6a ALONE, per cell (the blind-spot edge):
+  N2-het         L=0.65  0.50s
+  N2-het         L=0.85  0.35s
+  N2-het         L=0.95  0.35s
+  N3-het         L=0.65  0.35s
+  N3-het         L=0.85  0.35s
+  N3-het         L=0.95  0.25s
+  N4-het         L=0.65  0.25s
+  N4-het         L=0.85  0.35s
+  N4-het         L=0.95  0.25s
+  N5-het         L=0.65  0.35s
+  N5-het         L=0.85  0.35s
+  N5-het         L=0.95  0.35s
+  N4-teth        L=0.65  0.35s
+  N4-teth        L=0.85  0.35s
+  N4-teth        L=0.95  0.35s
+  N5-corr        L=0.65  0.35s
+  N5-corr        L=0.85  0.35s
+  N5-corr        L=0.95  0.35s
+
+AND THE DERIVED HOLD ITSELF -- B6c must PASS what ships, or it is not a bar:
+  N2-het         L=0.65  raises=  369  hold=   346ms  max lateness=   346ms  -> PASS
+  N2-het         L=0.85  raises=  841  hold=  1170ms  max lateness=  1170ms  -> PASS
+  N2-het         L=0.95  raises= 1035  hold=   968ms  max lateness=   968ms  -> PASS
+  N3-het         L=0.65  raises=  866  hold=   796ms  max lateness=   796ms  -> PASS
+  N3-het         L=0.85  raises= 1398  hold=  1639ms  max lateness=  1639ms  -> PASS
+  N3-het         L=0.95  raises= 1354  hold=  1993ms  max lateness=  1993ms  -> PASS
+  N4-het         L=0.65  raises= 1094  hold=   667ms  max lateness=   667ms  -> PASS
+  N4-het         L=0.85  raises= 1812  hold=  1074ms  max lateness=  1074ms  -> PASS
+  N4-het         L=0.95  raises= 1919  hold=  1980ms  max lateness=  1980ms  -> PASS
+  N5-het         L=0.65  raises= 1390  hold=   788ms  max lateness=   788ms  -> PASS
+  N5-het         L=0.85  raises= 2009  hold=  1405ms  max lateness=  1405ms  -> PASS
+  N5-het         L=0.95  raises= 2007  hold=  2153ms  max lateness=  2153ms  -> PASS
+  N4-teth        L=0.65  raises= 1390  hold=  1127ms  max lateness=  1127ms  -> PASS
+  N4-teth        L=0.85  raises= 1348  hold=  1406ms  max lateness=  1406ms  -> PASS
+  N4-teth        L=0.95  raises= 1753  hold=  2059ms  max lateness=  2059ms  -> PASS
+  N5-corr        L=0.65  raises= 1417  hold=   883ms  max lateness=   883ms  -> PASS
+  N5-corr        L=0.85  raises= 1976  hold=  1613ms  max lateness=  1613ms  -> PASS
+  N5-corr        L=0.95  raises= 2486  hold=  1498ms  max lateness=  1498ms  -> PASS
+
+DERIVED HOLD PASSES B6c ON EVERY CELL: yes
+
+LATENCY COST OF THE 3s CONSTANT (the demonstrated attack), against the clamp
+FLOOR (80ms, the shortest hold the formula can emit) on the same traces:
+  N2-het         L=0.65  p50    21 ->    21 ms   p95    68 ->    79 ms
+  N2-het         L=0.85  p50    88 ->   408 ms   p95   347 ->  2868 ms
+  N2-het         L=0.95  p50   208 ->   458 ms   p95   408 ->  2888 ms
+  N3-het         L=0.65  p50    51 ->   128 ms   p95   108 ->  2648 ms
+  N3-het         L=0.85  p50    98 ->   388 ms   p95   218 ->  2778 ms
+  N3-het         L=0.95  p50   338 ->  1268 ms   p95   408 ->  2968 ms
+  N4-het         L=0.65  p50    42 ->    46 ms   p95    78 ->    89 ms
+  N4-het         L=0.85  p50    88 ->   338 ms   p95   178 ->  2728 ms
+  N4-het         L=0.95  p50   258 ->  1158 ms   p95   380 ->  2878 ms
+  N5-het         L=0.65  p50    55 ->    65 ms   p95    96 ->   113 ms
+  N5-het         L=0.85  p50    88 ->   428 ms   p95   138 ->  2668 ms
+  N5-het         L=0.95  p50   198 ->  1098 ms   p95   332 ->  2808 ms
+  N4-teth        L=0.65  p50    68 ->   278 ms   p95   108 ->  2648 ms
+  N4-teth        L=0.85  p50    88 ->   438 ms   p95   168 ->  2668 ms
+  N4-teth        L=0.95  p50   268 ->  1208 ms   p95   378 ->  2868 ms
+  N5-corr        L=0.65  p50    54 ->    92 ms   p95    96 ->  2348 ms
+  N5-corr        L=0.85  p50    88 ->   938 ms   p95   128 ->  2668 ms
+  N5-corr        L=0.95  p50   118 ->  1048 ms   p95   238 ->  2758 ms
+
+THE ROUND-2 SHIPPED RULE (no skipped-seq filter) ON THE WINDOWED MODEL --
+per cell, the divergence that made hold.go learn a hold no lateness supported:
+  cell               load   filtered UNFILTERED    ratio  maxlate
+  N2-het             0.65       346ms       346ms    1.00x     346ms
+  N2-het             0.85      1120ms      2882ms    2.57x    1120ms
+  N2-het             0.95      1130ms      6191ms    5.48x    1130ms
+  N3-het             0.65       777ms       965ms    1.24x     777ms
+  N3-het             0.85      1305ms      6144ms    4.71x    1305ms
+  N3-het             0.95      1021ms      7232ms    7.09x    1021ms
+  N4-het             0.65       667ms       667ms    1.00x     667ms
+  N4-het             0.85       821ms      7554ms    9.20x     821ms
+  N4-het             0.95       711ms      7623ms   10.72x     711ms
+  N5-het             0.65       788ms       788ms    1.00x     788ms
+  N5-het             0.85       901ms      7764ms    8.62x     901ms
+  N5-het             0.95       525ms      8213ms   15.66x     525ms
+  N4-teth            0.65       907ms      1497ms    1.65x     907ms
+  N4-teth            0.85       941ms      7533ms    8.00x     941ms
+  N4-teth            0.95       679ms      8170ms   12.03x     679ms
+  N5-corr            0.65       826ms      1077ms    1.30x     826ms
+  N5-corr            0.85       832ms      7757ms    9.32x     832ms
+  N5-corr            0.95       570ms      8173ms   14.33x     570ms
+  filtered = what ships after round 3; UNFILTERED = what shipped in round 2.
+  maxlate = the largest lateness the trace exhibited, per-seq (B6c c2 reference).
+  A ratio of 1.00x is a cell whose load never overflows the 2^11 window: no
+  flushTo, so the two rules observe the same events and ARE the same run.
+
+  None of that latency is asserted anywhere: there is no budget for `max` mode
+  (OBJ-D / U14).  B6c rejects the 3s hold because nothing DERIVED it, not because
+  of its cost -- the cost bar is still owed and is still open.
