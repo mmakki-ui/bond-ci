@@ -1,0 +1,81 @@
+name: shellcheck
+
+# U65. The shellcheck gate was named in the design record for months and existed
+# NOWHERE in CI: `grep -rc shellcheck .github/workflows/*.yml` -> 0 and 0, measured
+# 2026-08-31. Every "shellcheck clean" claim in this repo was therefore asserted by
+# construction and never measured, U56's included -- half its named gate could not run.
+#
+# Its OWN workflow file on purpose. emulator-gate.yml already has several concurrent
+# writers and U60 exists to split it; adding a step there would have made this the very
+# bottleneck it is being added under. See U60/U61.
+#
+# SCOPE is what the mirror publishes (scripts/sync-public-ci.sh ALLOW): deploy/p5 and
+# orchestration. deploy/server is NOT published, so U38's four server scripts are NOT
+# covered here -- stated rather than left to be discovered.
+#
+# -s sh, not bash: the target is busybox ash on the GL.iNet boxes. Checking as bash
+# would pass constructs the box cannot run, which is worse than not checking.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: version
+        run: shellcheck --version
+
+      - name: check
+        # A FLOOR on the file count, for the same reason every other gate here has one:
+        # `find | xargs shellcheck` over an EMPTY list exits 0. That is the defect class
+        # U22a was rejected for -- an absent input reading as a clean result -- so an
+        # empty or shrunken list fails loudly instead of passing silently.
+        run: |
+          set -o pipefail
+          # shell files are mostly extensionless here (bond-xctl, bondctl, ...), so
+          # select by shebang rather than by name.
+          : > /tmp/shfiles
+          for d in deploy/p5 orchestration; do
+            [ -d "$d" ] || continue
+            find "$d" -type f ! -path '*/.git/*' -print | while read -r f; do
+              # `tr -d '\r'` is load-bearing, not defensive. A CRLF shebang ends in
+              # "sh\r", so `sh( |$)` never matches and the file is SILENTLY SKIPPED.
+              # That is exactly how this gate went red on dev while passing locally:
+              # the count fell under the floor because files were dropped by LINE
+              # ENDING, not by content. The floor caught it, which is what a floor is
+              # for -- but the cause was the selector, not a missing file. This repo
+              # has hit CRLF before; .gitattributes exists because "CRLF breaks sh".
+              # `if`, NOT `grep -q ... && echo`. Under GitHub's `shell: bash -e` a
+              # non-matching LAST file makes grep exit 1, that becomes the while
+              # loop's exit status, and the step DIES -- before the count is even
+              # printed, which is why the failing logs carried the echoed script and
+              # no output at all. It passed until the file ORDER changed: green by
+              # accident is the worst kind.
+              if head -c 200 "$f" | head -1 | tr -d '\r' \
+                   | grep -qE '^#!.*/(ba)?(da)?(a)?sh( |$)'; then
+                echo "$f" >> /tmp/shfiles
+              fi
+            done
+          done
+          sort -u /tmp/shfiles -o /tmp/shfiles
+          n=$(wc -l < /tmp/shfiles)
+          echo "shell files found: $n"
+          sed 's/^/  /' /tmp/shfiles
+          # 28 = measured on the tree this landed with, not chosen. Raise it when shell
+          # files are added; lower it only in the commit that removes them, and say why.
+          FLOOR=28
+          if [ "$n" -lt "$FLOOR" ]; then
+            echo "FAIL: only $n shell files found, floor is $FLOOR. The selector broke or"
+            echo "files were dropped -- an empty list would make shellcheck exit 0 and"
+            echo "this gate green while checking nothing. A CRLF shebang used to do that"
+            echo "silently (see the tr -d above), so check line endings BEFORE lowering"
+            echo "the floor in the commit that lowers it."
+            exit 1
+          fi
+          # -s sh: busybox ash is the target interpreter on both boxes.
+          xargs -a /tmp/shfiles shellcheck -s sh
