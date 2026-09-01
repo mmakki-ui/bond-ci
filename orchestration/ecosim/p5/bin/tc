@@ -1,0 +1,46 @@
+#!/bin/sh
+# fake tc (E4 shaping, U22). Models ONLY what bond-xctl's shaping path uses:
+#   tc qdisc show    dev <if>
+#   tc qdisc replace dev <if> root cake [...]
+#   tc qdisc del     dev <if> root
+#
+# STATE: $ECOSIM_STATE/qdisc.<if> holds the attached qdisc plus THE MTU IT WAS
+# ATTACHED AGAINST, read from $ECOSIM_STATE/mtu.<if> (written by the ip shim).
+# That second field is the whole point: cake's overhead accounting is
+# MTU-sensitive, so SH-4 asserts the shaping EFFECT reflects the settled MTU
+# rather than asserting an action ordering in a list.
+#
+# KNOBS ($ECOSIM_STATE):
+#   tc_broken=1   every attach fails (models a kernel without sch_cake).
+S="$ECOSIM_STATE"
+[ "$1" = qdisc ] || exit 0
+op="$2"
+IF=""; prev=""
+for a in "$@"; do
+    [ "$prev" = dev ] && IF="$a"
+    prev="$a"
+done
+[ -n "$IF" ] || exit 1
+case "$op" in
+  show)
+    [ -f "$S/qdisc.$IF" ] || { echo "qdisc noqueue 0: dev $IF root refcnt 2"; exit 0; }
+    echo "qdisc $(cat "$S/qdisc.$IF") dev $IF root refcnt 2"
+    ;;
+  replace|add|change)
+    [ "$(cat "$S/tc_broken" 2>/dev/null)" = 1 ] && exit 2
+    kind=""; prev=""
+    for a in "$@"; do
+        [ "$prev" = root ] && kind="$a"
+        prev="$a"
+    done
+    [ -n "$kind" ] || kind=cake
+    M=$(cat "$S/mtu.$IF" 2>/dev/null); [ -n "$M" ] || M=1420
+    echo "$kind mtu $M" > "$S/qdisc.$IF"
+    echo "TC $op $IF $kind mtu $M" >> "$S/ledger"
+    ;;
+  del)
+    rm -f "$S/qdisc.$IF" 2>/dev/null
+    echo "TC del $IF" >> "$S/ledger"
+    ;;
+esac
+exit 0
