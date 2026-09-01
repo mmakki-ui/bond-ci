@@ -1,0 +1,35 @@
+# Line-ending policy. The GL.iNet boxes are busybox (POSIX sh): CRLF breaks `sh`,
+# so every shell target that ships to a box MUST be LF in the working tree too
+# (eol=lf overrides core.autocrlf on Windows).
+
+# Busybox deploy targets (procd init.d, bond-xctl/bondctl/watchdog/ecod, hotplug, DAG data)
+deploy/**                       text eol=lf
+# ecosim shims + harness (also run under sh)
+orchestration/ecosim/**         text eol=lf
+# DEPLOYED P1-3 baseline fold (frozen reference, see p1-autorate/README.md etc.) —
+# includes extensionless busybox targets (autoratectl, bondctl, bond-ecod, 97-bond,
+# 98-wg-autorate, 99-tether-autorate) that *.sh below would otherwise miss
+p1-autorate/**                  text eol=lf
+p2-engarde/**                   text eol=lf
+p3-ecod/**                      text eol=lf
+# P5 standalone product tree (E0, U25). Extensionless busybox targets under
+# p5/bin -- p5-install / p5-uninstall / p5-version -- that *.sh below would miss.
+p5/**                           text eol=lf
+# any explicitly-suffixed shell script
+*.sh                            text eol=lf
+
+# Go + Python stay LF (gofmt / CI determinism)
+*.go                            text eol=lf
+*.py                            text eol=lf
+
+# Compiled daemon artifacts are binary (never normalize)
+bond-agg                        binary
+bond-agg-*                      binary
+*.bin                           binary
+*.tar.gz                        binary
+*.zip                           binary
+# EQ-1 trace fixtures are gzipped binary (U9). Explicit, because a CRLF pass over
+# these silently corrupts them and the public-mirror sync has already lost exec
+# bits and line endings once (U41).
+*.gz                            binary
+*.eq1                           binary

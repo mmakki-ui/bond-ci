@@ -1,0 +1,830 @@
+name: emulator-gate
+
+# Gate for dev -> uat. Runs the Go checks + the offline model on a Linux
+# runner (the toolchain we lack locally). The full pathsim.py ladder is
+# wired in a follow-up (needs the daemon-spawn paths adapted to the
+# daemon/ layout). main is validated via its PR, not direct push.
+on:
+  # RETARGETED BY scripts/sync-public-ci.sh. The SOURCE is workflow_dispatch-only so the
+  # PRIVATE repo (paid Actions minutes) starts nothing; the mirror is public and free, and
+  # carries ONE BRANCH PER UNIT under test, so it fires on all of them. A unit whose branch
+  # triggered no run reads as NO EVIDENCE, which is the state that made five units
+  # unverifiable at once.
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: p4-bondagg/daemon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: gofmt
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then echo "gofmt needed:"; gofmt -l .; echo "--- gofmt -d ---"; gofmt -d .; exit 1; fi
+      - name: vet
+        run: go vet ./...
+      - name: test
+        # Same ratchet as go-server, and for the same reason: `go test` prints "ok"
+        # for a package with ZERO test files, so a bare run proves the step exited 0,
+        # not that anything was checked. This job carried that hole while the
+        # go-server job right below it documented why the hole matters -- found when a
+        # U7 review noted the daemon's evidence was a bare "ok" with no count.
+        # Floor is the count present when the ratchet was added. Raise it when tests
+        # are added; never lower it to go green.
+        # 36 -> 43 (U36 round 1, on a pre-U7 base): main_test.go added seven bars.
+        # Superseded on this branch by the merge below -- see the U36 note appended
+        # after dev's, and never resolve a ratchet DOWNWARD.
+        #
+        # 36 -> 73 -> 77 (U7, E2a pull core) -> 106 (U36a, dynamic source discovery:
+        # 29 bars in discover_test.go covering N in {0,1,2,3,5,8,256}, AGG_PATHS
+        # precedence, the wire ceiling, the flat AGG_W prior, the startup log, and a
+        # source scan that fails if an interface name reappears in daemon CODE).
+        # This file is U8's, and a U7 commit
+        # 36 -> 73 -> 77 (U7, E2a pull core) -> 106 (U15b round 1, E2c standing
+        # lightning: +29 in p4-bondagg/daemon/lightning_test.go) -> 107 (U15b
+        # round 2: +1, TestLightningNominationHappensAfterTheOriginalHasLeftThe
+        # Pool, closing the B2 blocker where the file's strongest structural
+        # claim -- a copy cannot evict its own original -- cited a test that did
+        # not exist). U15b touches U8's file for the
+        # same reason U7 did and under the same rule stated below: the floor and the
+        # tests it counts must land in ONE commit. The U15b tests are the only
+        # executable evidence for the E2c claims -- the nomination rule, native-first
+        # on the wire, the two copy-queue limbs, and that a copy adds nothing to U7's
+        # pool bound -- so landing them under a stale floor would leave the ratchet
+        # unable to notice if the file were later dropped.
+        # This file is U8's, and a U7 or U15b commit
+        # editing it is the deliberate exception documented HERE, in this block, and
+        # 36 -> 73 -> 77 (U7, E2a pull core) -> 80 (U9, EQ-1 trace equivalence: the
+        # two arms of eq1_*_test.go plus the Go-side negative control). This file is U8's, and a U7/U9 commit editing
+        # it is the deliberate exception documented HERE, in this block, and
+        # nowhere else: the floor and the tests it counts must land in the SAME commit.
+        # U9 uses NO t.Run for exactly the reason the next paragraph gives -- the
+        # count below is a TOP-LEVEL count and subtests would inflate it silently.
+        # Landing the tests alone leaves the floor below the truth, which no longer
+        # detects a dropped file; landing the raise alone breaks dev on the next push.
+        # There is no ordering of two commits that avoids both.
+        # 106 is what this branch has -- `cat p4-bondagg/daemon/*_test.go | grep -c '^func Test'`
+        # 81 is what this branch has -- `grep -hc '^func Test' p4-bondagg/daemon/*_test.go`
+        # (80 -> 81 is TestEQ1FreeRunDetectsV1Fake, Arm B's negative control, which
+        # lands in this commit; raising the floor with it is the rule this block states)
+        # 107 is what this branch has -- `grep -hc '^func Test' p4-bondagg/daemon/*_test.go`
+        # -- and it equals the '=== RUN' count because the daemon package has no
+        # subtests (`grep -c 't.Run(' p4-bondagg/daemon/*_test.go` -> 0 in every file).
+        # 73 -> 77 is the four Broadcast/Signal discriminator tests: every earlier
+        # wake-set test parked exactly ONE waiter, so downgrading a Broadcast in
+        # pull.go passed the whole suite. See the DRAIN WAKE SET block in pull.go.
+        #
+        # 77 -> 111 (U15a, E2b the delivered-rate cap). Same deliberate exception and
+        # the same reason, and it is worth naming WHICH unit is touching this file:
+        # U15a adds p4-bondagg/daemon/cap.go + cap_test.go, 34 top-level tests, and the
+        # floor has to move in the commit that adds them or the ratchet measures the
+        # wrong number from the moment it lands. Still no subtests anywhere in the
+        # package (`grep -c 't.Run(' p4-bondagg/daemon/*_test.go` -> 0 in every file),
+        # so 111 = `grep -hc '^func Test' p4-bondagg/daemon/*_test.go` = the '=== RUN'
+        # count. Nothing else in this workflow is touched by U15a.
+        #
+        # 111 -> 115 (U15a round 2). Four tests, all demonstrations rather than
+        # assertions, added because the round-1 review found two load-bearing
+        # properties stated in prose and executed nowhere:
+        #   TestCapZeroRateGuardIsWhatPreventsAPermanentLatch  (B2: the deadlock
+        #     break, run against a guard-less scratch copy of Admit)
+        #   TestCapFixedDeadIvalRingIsInertAtRealisticSpans    (B3: the defect --
+        #     the old DeadIval-sized ring executed at 700/800/1200 ms spans)
+        #   TestCapMarkerRingSizesItselfFromTheMeasuredSpan    (B3: the fix)
+        #   TestCapInertIsReportedNotSilent                    (B3: inertness is
+        #     reported where no span can be measured)
+        #
+        # 115 -> 121 (U15a round 3). Six tests. Same deliberate exception, same
+        # reason, and every one of them runs an attack that was MEASURED against
+        # round 2 on this runner:
+        #   TestCapInertIsCurrentStateNotLifetime      (B1: one fold then 199
+        #     unalignable echoes read INERT=false under round 2's LIFETIME
+        #     predicate; both predicates are run on the one trace)
+        #   TestCapInertDoesNotFireOnAFoldingLink      (B1: the control, N in
+        #     {1,2,3,5,8})
+        #   TestCapUnalignedIsNMinusOnePerFold         (the diagnostic-inflation
+        #     honest fail, pinned as a property: unal = (N-1)x fold on a HEALTHY
+        #     path, which is why the PSTAT guidance changed)
+        #   TestCapBadIntervalIsNotALatchExit          (B2: a non-positive srvMS
+        #     interval used to rebase and clear the latch; the old path is
+        #     executed, not described)
+        #   TestCapLatchExitsAreTheDocumentedSet       (B2: the header's list of
+        #     latch exits checked mechanically against cap.go's source)
+        #   TestCapMarkerFloorSurvivesTheStampEpochRoll (the ~24.9-day silent
+        #     death of the self-sizing ring)
+        # 121 = `grep -hc '^func Test' p4-bondagg/daemon/*_test.go` summed, and
+        # still no subtests anywhere in the package.
+        # 77 -> 84 (U36 round 2, "AGG_W unset = no prior" landed on the PULL path).
+        # Seven bars in pullaggw_test.go. DERIVED on the merged tree, not chosen:
+        #   grep -h '^func Test' p4-bondagg/daemon/*_test.go | wc -l   -> 84
+        #   grep -c  't.Run('    p4-bondagg/daemon/*_test.go           -> 0 in every file
+        # The second is what makes the first equal the '=== RUN' count grepped below:
+        # with no subtests the two cannot drift. 84 = dev's 77 + 7, since round 1's
+        # main_test.go (7 bars on push code this round REVERTS) is deleted, not carried.
+        # Resolved UPWARD from this branch's own pre-merge 43. Never lower a floor.
+        # If lightning.go + lightning_test.go are ever deleted (E1=edge; see the
+        # DELETABILITY note in lightning.go), this floor must drop WITH that
+        # commit, RECOMPUTED against the tree it lands on, not copied from here --
+        # see lightning.go's DELETABILITY section for why and how (77 on this
+        # branch's tree today, 106 total minus lightning_test.go's own 29,
+        # before this round's +1).
+        run: |
+          set -o pipefail
+          go test -v ./... 2>&1 | tee /tmp/bondagg-test.log
+          n=$(grep -c '^=== RUN' /tmp/bondagg-test.log || true)
+          echo "ran $n top-level tests"
+          # ONE floor. Five units (U9, U14, U15a, U15b, U36) each raised this ratchet on
+          # their own branch; merging them stacked five `if` blocks against a single `fi`,
+          # and the step died with `syntax error: unexpected end of file` while every Go
+          # test PASSED. Collapsed to the count MEASURED on the merged tree -- 191, from
+          # that same failing run's `ran 191 top-level tests` -- which is above all five
+          # stacked floors (106, 81, 121, 84, 107), so this RAISES the bar rather than
+          # weakening it. The superseded floors are recorded here and nowhere else.
+          # 191 -> 221 (U17a, "the datapath must CONSUME AGG_SCHED"). Thirty bars
+          # in sched_test.go. DERIVED on this branch's tree, not chosen:
+          #   grep -h '^func Test' p4-bondagg/daemon/*_test.go | wc -l  -> 221
+          #   grep -c  't.Run('    p4-bondagg/daemon/sched_test.go      -> 0
+          # The second is what keeps the first equal to the '=== RUN' count grepped
+          # below; with no subtests the two cannot drift. 221 = 191 + 30, and the
+          # floor moves in the SAME commit as the tests it counts, per the rule
+          # this block states.
+          # 221 -> 223 (U17a, landing on current dev). Two bars added when the
+          # `Ranker.Better` cycle was settled: the acyclicity bar went from a
+          # random sample to an exhaustive one and gained two named companions
+          # (TestRankerLastDWithoutHbarCannotFormACycle,
+          # TestRankGateNeverBlocksEveryEligibleLink). RE-DERIVED on this tree,
+          # not incremented:
+          #   grep -h '^func Test' p4-bondagg/daemon/*_test.go | wc -l  -> 223
+          #   grep -c  't.Run('    p4-bondagg/daemon/sched_test.go      -> 0
+          if [ "$n" -lt 223 ]; then
+            echo "FAIL: only $n tests ran, floor is 223. A test file was dropped or"
+            echo "excluded -- 'go test' would still print ok. Fix, or justify lowering"
+            echo "the floor in the commit that lowers it."
+            exit 1
+          fi
+      - name: race
+        # The race detector, as its own step so a failure is attributable.
+        # Earned: U7's pull core is a two-condition-variable rework of a shared-mutex
+        # wake set -- goroutines parking on backpressure, woken only by real drain
+        # evidence -- and it reached "verified, zero blockers" having NEVER been run
+        # under -race, because nothing in this workflow ran it. A data race in that
+        # code is a silent wrong answer on a router nobody can physically reach.
+        # Fatal, deliberately. A non-fatal race job is the `ladder` mistake: a standing
+        # red that nobody is made to fix.
+        env:
+          CGO_ENABLED: '1'
+        run: go test -race -count=1 ./...
+      - name: build
+        run: go build -o /tmp/bond-agg .
+
+  # ---------------------------------------------------------------------------
+  # The SERVER half. p4-bondagg/server is a SEPARATE Go module (`module bondsrv`
+  # vs the daemon's `module bondagg`), so the `go`/`crossbuild`/`ladder` jobs
+  # above -- all pinned to `working-directory: p4-bondagg/daemon` -- never see it:
+  # nothing compiled, vetted or tested it, and its tests had therefore never
+  # executed anywhere. This job closes that hole. (U16 blocker B2, ROADMAP U8.)
+  #
+  # Deliberately the SAME shape as `go` above -- same action versions, same Go
+  # version, same step order, same gofmt formulation -- so a difference between
+  # the two jobs' results is a difference between the two modules and not between
+  # two CI recipes.
+  #
+  # Caching: identical to `go` and `crossbuild`, i.e. setup-go@v5's default. Both
+  # modules are stdlib-only and neither has a go.sum (`find . -name go.sum` ->
+  # nothing), so both jobs get the same treatment. NOTE the coupling that creates:
+  # setup-go's default dependency glob is repo-wide, so the first go.sum added to
+  # EITHER module starts keying BOTH jobs' caches. Not a correctness risk (a stale
+  # key only costs a download), but it is why the two must be changed together.
+  #
+  # The aarch64 crossbuild is here rather than in `crossbuild` because the daemon
+  # and the server ship to DIFFERENT boxes and must be able to fail independently.
+  # The server box is a GL-MT2500 (Brume 2), aarch64. NOT built: linux/armv7. The
+  # daemon builds it as a fallback against an unconfirmed 32-bit userspace; that
+  # arch is unverified on the server box too (`uname -m` has not been run on it),
+  # so if it comes back 32-bit this job needs the same fallback step. Named, not
+  # silently assumed away.
+  go-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: p4-bondagg/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: gofmt
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then echo "gofmt needed:"; gofmt -l .; echo "--- gofmt -d ---"; gofmt -d .; exit 1; fi
+      - name: vet
+        run: go vet ./...
+      - name: test
+        # -v and a MINIMUM count, not a bare `go test`. `go test` prints "ok" for a
+        # package with ZERO test files, so a refactor that drops the test file passes
+        # green and silently: exactly the shape of the hole this whole job exists to
+        # close. The floor is the count that existed when the module first compiled;
+        # raise it when tests are added, and never lower it to go green.
+        run: |
+          set -o pipefail
+          go test -v ./... 2>&1 | tee /tmp/bondsrv-test.log
+          n=$(grep -c '^=== RUN' /tmp/bondsrv-test.log || true)
+          echo "ran $n top-level tests"
+          if [ "$n" -lt 14 ]; then
+            echo "FAIL: only $n tests ran, floor is 14. A test file was dropped or"
+            echo "excluded -- 'go test' would still print ok. Fix, or justify lowering"
+            echo "the floor in the commit that lowers it."
+            exit 1
+          fi
+      - name: race
+        # The race detector, as its own step so a failure is attributable.
+        # Earned: U7's pull core is a two-condition-variable rework of a shared-mutex
+        # wake set -- goroutines parking on backpressure, woken only by real drain
+        # evidence -- and it reached "verified, zero blockers" having NEVER been run
+        # under -race, because nothing in this workflow ran it. A data race in that
+        # code is a silent wrong answer on a router nobody can physically reach.
+        # Fatal, deliberately. A non-fatal race job is the `ladder` mistake: a standing
+        # red that nobody is made to fix.
+        env:
+          CGO_ENABLED: '1'
+        run: go test -race -count=1 ./...
+      - name: build
+        run: go build -o /tmp/bondsrv .
+      - name: crossbuild linux/arm64 (GL-MT2500 Brume 2)
+        run: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/bondsrv-linux-arm64 .
+      - name: sha256
+        run: sha256sum /tmp/bondsrv-linux-arm64 | tee /tmp/bondsrv.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bondsrv-binaries
+          path: |
+            /tmp/bondsrv-linux-arm64
+            /tmp/bondsrv.sha256
+          retention-days: 14
+
+  model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: run offline model
+        run: python p4-bondagg/sim/sched_model.py | tee /tmp/model.out
+      - name: assert baseline reproduces failure
+        run: |
+          grep -q "MODEL VALID" /tmp/model.out || { echo "baseline no longer reproduces the failure"; exit 1; }
+      - name: assert candidate 6/6
+        run: |
+          grep -q "pinDrain6: 6/6" /tmp/model.out || { echo "candidate is not 6/6"; exit 1; }
+
+  # EIF datapath gate. pathsim exercises P4 rate-share semantics; the
+  # AUTHORITATIVE validator for the ported EIF datapath (CapEst/Estr/QTrack2/
+  # tier controller) is the closed-loop nsched_model.py. This job runs it and
+  # asserts its published verdict, so CI validates real EIF behavior -- not just
+  # rate-share. nsched always exits 0 (verdict is printed), so we grep it. N5H
+  # is a documented seed-dependent hard FAIL -> the gate is battery >= den-1
+  # (i.e. 20/21 with N18 added) AND the MODEL-VALID gate PASS (tolerates the one
+  # documented N5H FAIL; robust to a future N5H fix reaching 21/21).
+  eif-model:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: run nsched EIF model
+        working-directory: p4-bondagg/sim
+        timeout-minutes: 15
+        run: python nsched_model.py | tee /tmp/nsched.out
+      - name: assert EIF verdict (MODEL-VALID PASS + battery >= den-1)
+        run: |
+          grep -Eq '^[[:space:]]*MODEL-VALID gate[[:space:]]+: PASS' /tmp/nsched.out \
+            || { echo "nsched: MODEL-VALID gate did not PASS"; exit 1; }
+          bl=$(grep -oE 'BATTERY: [0-9]+/[0-9]+' /tmp/nsched.out | tail -1)
+          echo "nsched battery line: $bl"
+          num=$(echo "$bl" | grep -oE '[0-9]+' | head -1)
+          den=$(echo "$bl" | grep -oE '[0-9]+' | tail -1)
+          [ "$den" = "21" ] || { echo "nsched: unexpected battery size $den (want 21)"; exit 1; }
+          [ "$num" -ge "$((den - 1))" ] || { echo "nsched: battery regressed to $num/$den (need >=$((den - 1)), only N5H may FAIL)"; exit 1; }
+
+  # ---------------------------------------------------------------------------
+  # SECOND ORACLE. eif-model above gates NSim (the EIF *push* design ADR-002
+  # superseded). This job gates the TWO-STAGE RIG that ADR-004 made the
+  # authoritative oracle for the *pull* datapath: reserved_composite.SimD +
+  # ackclock_sim, driven by highn_battery.py. Two simulators, two jobs, on
+  # purpose -- they model different physics (ADR-004 verified by grep: the rig
+  # imports only PKT_KB/DT/QMAX_MS/NLAG/reorder_release from nsched_model).
+  #
+  # !! WHAT A GREEN RUN HERE DOES **NOT** MEAN !!
+  # It does NOT mean the rig's absolute loss or latency numbers are validated.
+  # The rig has never been compared against a real router. ADR-004 therefore
+  # limits it to PAIRED COMPARISONS (Dc vs ewma vs pull vs oracle on identical
+  # seeds), which survive physics error, until the E1 reality anchor (ROADMAP G1)
+  # lands. rig_paired_gate.py encodes that limit: it gates the paired bars
+  # (B1/B2/B3(gp)/B3(loss)/B4a) and the weaker relative ones (B4b/B5), and never
+  # enforces an absolute threshold. Read the job log's banner, not the green tick.
+  #
+  # B3(loss) is GATED as of U11, which is a change from this job's first version.
+  # It used to be the constant "Dc loss <= 2%" and was excluded as absolute; U11
+  # replaced it with "Dc loss <= oracle loss" on paired seeds, so it now belongs
+  # to the class this job gates. The ABSOLUTE class is consequently empty. The
+  # ADR-004 limit is unchanged -- what changed is the bar, not the trust in the
+  # rig's magnitudes. Full reasoning at the top of rig_paired_gate.py.
+  #
+  # highn_battery.py always exits 0 (prints a verdict), like nsched_model.py, so
+  # the wrapper parses the verdict, asserts the battery STRUCTURE (a run that
+  # died mid-way must not read as green) and fails when the set of gated bar
+  # failures grows past the baseline re-measured against U11/U12's battery -- the same
+  # known-honest-fail shape as eif-model's N5H tolerance. Nothing is weakened.
+  #
+  # BOUNDED, AND SAYS SO: the published battery is SEEDS=24 / 733.7 s on 14 local
+  # workers (highn_u11u12.txt:200). CI runs SEEDS=6, re-measured locally against
+  # that same battery at 559.3 s / 511.9 s on 4 workers, two runs with an identical
+  # gated-fail set (the runner's core count; the 45 min
+  # step timeout leaves headroom for a slower runner). The
+  # banner prints exactly what that reduction dropped and the one bar verdict it
+  # measurably flips. The B4b timeline seed count (12) and the
+  # 6 scenarios are NOT reducible from outside -- they are hardcoded in
+  # highn_battery.py, which this job does not own.
+  rig-paired:
+    name: rig-paired (ADR-004 oracle -- PAIRED comparisons only, NOT absolute loss/latency)
+    runs-on: ubuntu-latest
+    env:
+      # Pinned: rig_paired_gate.py REFUSES to run if these drift from the config
+      # its baseline was measured at, rather than silently comparing against the
+      # wrong record.
+      SEEDS: '6'
+      T: '9.0'
+      RIG: 'mid'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: two-stage rig -- paired-bar gate (exit-code authoritative)
+        timeout-minutes: 45
+        run: WORKERS=$(nproc) python .github/scripts/rig_paired_gate.py
+
+  eq1-trace:
+    name: eq1-trace (ADR-004 condition 1 -- Go pull core vs the rig, byte-wise)
+    runs-on: ubuntu-latest
+    # U9. Two things run here that the `go` job cannot: the PYTHON side of the
+    # harness (trace completeness + the mutation kill matrix, which is the negative
+    # control for the whole comparison), and a replay against FRESHLY RECORDED
+    # canonical-length traces rather than only the committed fixtures. The `go` job
+    # already runs Arm A + Arm B against the committed fixtures as part of
+    # `go test ./...`; that is deliberate redundancy -- the fixtures are what makes
+    # the gate un-skippable, this job is what keeps them from going stale.
+    # Scope of the claim, including what it does NOT cover: p4-bondagg/sim/eq1/README.md.
+    env:
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: citation gate -- every anchor resolves, no bare line citations
+        # U9 round 1 shipped 18 file:line citations into files it does not own and
+        # ten were wrong on `dev`: U35 prepended a 52-line header to
+        # reserved_composite.py the same day and every number below it moved by
+        # +52. Nothing read them, so nothing noticed. Citations are now anchors --
+        # the source text itself -- and this resolves every one. --selftest first,
+        # because a citation gate that cannot fail is the thing it exists to stop.
+        run: |
+          python p4-bondagg/sim/eq1/eq1_citecheck.py --selftest
+          python p4-bondagg/sim/eq1/eq1_citecheck.py
+      - name: trace completeness -- independent replay reproduces the oracle outputs
+        working-directory: p4-bondagg/sim/eq1
+        # This now ENFORCES the oracle pin: the trace header carries the sha256 of
+        # the three oracle files it was recorded against, and a mismatch is fatal.
+        # Round 1 recorded that pin, declared a mismatched replay void, and never
+        # read it -- while the fixtures were already void on the merge target.
+        run: python eq1_selfcheck.py "traces/*.eq1.gz"
+      - name: mutation kill matrix -- the comparison must not be blind
+        working-directory: p4-bondagg/sim/eq1
+        # Exit 1 unless EVERY mutation is killed by at least one committed trace.
+        # A comparison nobody has tried to fool is not evidence.
+        run: python eq1_selfcheck.py --mutate-all traces/n1-cell-edge.eq1.gz traces/n2-het-edge.eq1.gz traces/n3-spot-edge.eq1.gz traces/n5-het-edge.eq1.gz traces/n5-het-mid.eq1.gz
+      - name: record fresh canonical-length traces (T=9.0, the rig's own window)
+        working-directory: p4-bondagg/sim/eq1
+        timeout-minutes: 25
+        run: |
+          mkdir -p /tmp/eq1
+          set -e
+          python eq1_record.py --scenario n2-het  --rig edge --load 1.50 --seed 5 --T 9.0 --out /tmp/eq1/ci-n2-het-edge.eq1.gz
+          python eq1_record.py --scenario n4-teth --rig edge --load 1.40 --seed 1 --T 9.0 --out /tmp/eq1/ci-n4-teth-edge.eq1.gz
+          python eq1_record.py --scenario n5-corr --rig edge --load 1.30 --seed 2 --T 9.0 --out /tmp/eq1/ci-n5-corr-edge.eq1.gz
+          ls -la /tmp/eq1
+          python eq1_selfcheck.py "/tmp/eq1/*.eq1.gz"
+      - name: replay the fresh traces through the Go pull core
+        working-directory: p4-bondagg/daemon
+        env:
+          EQ1_TRACE_DIR: /tmp/eq1
+        timeout-minutes: 25
+        # GUARDED, for the reason the `go` job's ratchet exists (see the test-count
+        # block at the top of this file). `go test -run` that matches NOTHING prints
+        # "testing: warning: no tests to run" and EXITS 0. So renaming any TestEQ1*
+        # function silently empties this step -- the fresh-trace half of this job,
+        # which is the reason the job exists -- while the `go` job's total ratchet
+        # stays satisfied, because the count of tests is unchanged. Round 1 shipped
+        # this step unguarded, in the same file that already contains the pattern.
+        #
+        # TWO floors, both pinned in the commit that changes them:
+        #   * 4 top-level TestEQ1* tests: TraceEquivalence, ReplayDetectsDivergence,
+        #     FreeRunDivergence, FreeRunDetectsV1Fake --
+        #     `grep -hc '^func TestEQ1' p4-bondagg/daemon/eq1_*_test.go`. The package
+        #     has no t.Run, so '=== RUN' lines and top-level tests are the same count.
+        #   * every trace the previous step RECORDED must be NAMED in the log. A run
+        #     that read the committed fixtures instead of /tmp/eq1 would satisfy the
+        #     count and test nothing fresh -- which is the same failure one level up.
+        run: |
+          set -o pipefail
+          go test -v -count=1 -run 'TestEQ1' ./... 2>&1 | tee /tmp/eq1-go.log
+          n=$(grep -c '^=== RUN' /tmp/eq1-go.log || true)
+          echo "ran $n top-level TestEQ1 tests"
+          if [ "$n" -lt 4 ]; then
+            echo "FAIL: only $n TestEQ1 tests ran, floor is 4. 'go test -run' that"
+            echo "matches nothing exits 0, so this step can pass having run nothing."
+            echo "Fix the -run pattern or justify lowering the floor in the commit"
+            echo "that lowers it."
+            exit 1
+          fi
+          miss=0
+          for f in /tmp/eq1/*.eq1.gz; do
+            b=$(basename "$f")
+            if grep -q "$b" /tmp/eq1-go.log; then
+              echo "replayed $b"
+            else
+              echo "FAIL: $b was recorded by the previous step but is not named in"
+              echo "the test log -- the fresh traces were not replayed."
+              miss=1
+            fi
+          done
+          [ "$miss" -eq 0 ] || exit 1
+  # ---------------------------------------------------------------------------
+  # Protects the U35 oracle/physics PIN. The rig-paired job above enforces the
+  # oracle's IDENTITY only in its own preflight (a plain sys.path import checked
+  # against expected __file__). That preflight passes even if U35's in-rig pin is
+  # deleted, because CI always runs from the one cwd/PYTHONPATH where sys.path
+  # already resolves correctly -- the exact case the pin does NOT exist to catch.
+  # The pin's teeth are the wrong-copy / moved-copy / pre-seeded-sys.modules paths
+  # that only fire in a DIFFERENT environment, and its self-test exercises them in
+  # fresh subprocesses. Without this job a regression that silently reverts the
+  # pin to `import nsched_model as M` is invisible everywhere in CI (demonstrated,
+  # U35 Fable pass). Fast (subprocess imports, no battery), so it is its own job.
+  rig-pin:
+    name: rig-pin (U35 oracle/physics pin self-tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: pin self-tests (exit-code authoritative, 9/9)
+        run: python p4-bondagg/sim/pull-study/test_rig_pin.py
+  # ---------------------------------------------------------------------------
+  # OBJ-D LATENCY BARS. `docs/INTENT.md` OBJ-D: "Nothing in the battery
+  # constrains p50/p95 today; that is why latency drifted." Latency became an
+  # objective partway through the project and nothing anywhere measured it. This
+  # job is the first gate that does. It runs SPD-1..6 and HOLD-1..4
+  # (ROADMAP U14) on the same two-stage rig ADR-004 promoted.
+  #
+  # SAME ADR-004 LIMIT AS rig-paired, and it bites HARDER here, because latency
+  # is exactly what the ADR names: "It does not gate absolute loss or latency
+  # figures." So there is no absolute class in this battery at all. Every gated
+  # bar is one of:
+  #   PAIRED     two scorings of the SAME runs, or two runs on the SAME seeds,
+  #              differing only in draw order or hold policy.
+  #   STRUCTURAL a ZERO count, or one segment of a run against another segment of
+  #              the same run. Not a magnitude.
+  #   UNIT       the ratchet formula on a synthetic trace. No rig physics in it.
+  # r1's `gp >= 0.99*offer` is an absolute loss threshold in a goodput costume
+  # and is NOT gated; it is replaced by a paired floor against an N=1 control run
+  # on the same seeds.
+  #
+  # TWO THINGS THIS JOB DOES THAT NO OTHER JOB HERE DOES:
+  #
+  # 1. IT ONLY GATES BARS WHOSE VERDICT SURVIVES A CHANGE OF STALL GEOMETRY.
+  #    U33 measured that this rig's stall schedule is hand-placed, that seeds
+  #    vary jitter and not phase, and that paired quantities move ~0.9 pt when
+  #    the phase is rotated. `p4-bondagg/sim/latency-bars/out/geometry.md` scores
+  #    every bar on canonical + four rotations; a bar that flips is REPORTED,
+  #    never gated. The split is measured, not chosen.
+  #
+  # 2. IT RUNS A MUTATION MATRIX EVERY TIME. THIS JOB RUNS EXACTLY FOUR DEFECTS,
+  #    and they are: `rank-static` (static latency rank = CPF strict priority,
+  #    refuted r1 sec 3.2), `rank-hungriest` (`speed` silently degraded into
+  #    `max`), `hold-gran` (the ratchet never learns) and `ratchet-x3` (a x3 pad
+  #    on the learned lateness). The job FAILS if a defect does not turn its
+  #    named bars RED. `latency_gate.py:MUTATIONS` is the list, and it is the
+  #    whole list.
+  #
+  #    THREE MORE defects exist in the battery and this job does NOT run them:
+  #    `rank-mid-meter` (the meter in the rank, refuted r1 sec 5) and
+  #    `warmup-max` (the ring armed at the shipped computed hold) redden only
+  #    bars that already fail on the clean tree, so they demonstrate nothing the
+  #    gate can use; `hold-quantile` takes minutes per scenario. All three are
+  #    reachable manually as DEFECT=<name> and are recorded in
+  #    `p4-bondagg/sim/latency-bars/out/mutations.md`.
+  #
+  # 3. IT PINS EVERY CHECK LINE'S MARGIN. A hash pin stops the battery being
+  #    EDITED without declaring it; a mutation matrix proves a bar can detect a
+  #    GROSS defect. NEITHER BOUNDS DILUTION, and that was measured the hard way:
+  #    four GATED bars were widened (SPD-3a 0.97 -> 0.60, HOLD-1d/HOLD-2b
+  #    burst -> 20*burst, HOLD-4a 1e-9 -> 5.0 ms), the hash pin was re-measured
+  #    exactly as the unit's own demos prescribe, and this job exited 0 with
+  #    every mutation row "-> ok". Each check line now prints ONE signed margin
+  #    and PASS is that margin's sign, and `latency_gate.py:MARGIN_PIN` pins all
+  #    31 of them. Widening a bar is now a moved number and a hard exit 1.
+  #
+  # HONEST FAILS ARE CARRIED, NOT HIDDEN. Several bars fail on the clean tree --
+  # the r1 design's own p95 claims do not all hold at the model's real 10 ms
+  # granularity (the study computed its tolerances against a 1 ms TICK constant
+  # that contradicts `nsched_model.py:62 DT = 0.010`). Those are recorded in the
+  # gate's baseline with their measured margins and printed on every run. A
+  # baseline entry that STOPS failing is also exit 1: a shrinking fail set is
+  # indistinguishable from a diluted bar.
+  #
+  # THIS JOB HAS NO `continue-on-error` AND SPD-2a IS GATED AT A MEASURED PAIRED
+  # MARGIN OF 0.046310 (0.000000 on three of the five geometries). It is
+  # deterministic, so it will not flake -- but it is a knife edge, and one
+  # adverse frame in the system under test turns the whole emulator-gate red.
+  # Stated here because it was not stated anywhere before.
+  latency-bars:
+    name: latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)
+    runs-on: ubuntu-latest
+    env:
+      # Pinned: latency_gate.py REFUSES to run if these drift from the config its
+      # baseline and its geometry study were measured at.
+      SEEDS: '6'
+      T: '9.0'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: OBJ-D latency bars + mutation matrix (exit-code authoritative)
+        timeout-minutes: 45
+        run: python .github/scripts/latency_gate.py
+
+  ladder:
+    runs-on: ubuntu-latest
+    # NON-FATAL (informational). pathsim spawns REAL UDP daemons, so per-scenario
+    # verdicts carry daemon-timing variance (goroutine/socket scheduling) -> S3/S6/S8
+    # flip run-to-run even with PYTHONHASHSEED pinned (the documented ~4/12 S3
+    # marginality; see bond-agg-p4 memory). It also encodes P4 rate-share bars that
+    # the EIF spill-aggregation datapath intentionally supersedes (functional-not-
+    # logical equivalence). The AUTHORITATIVE, DETERMINISTIC EIF datapath gate is the
+    # eif-model job (nsched battery 20/21, MODEL-VALID PASS). Ladder stays as a P4
+    # behavioral smoke-check (typically 8-9/10) but does not fail the run.
+    continue-on-error: true
+    env:
+      PYTHONHASHSEED: '0'   # pin per-scenario seeds (pathsim seeds off hash(name))
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: build daemon -> /tmp/bond-agg
+        working-directory: p4-bondagg/daemon
+        run: CGO_ENABLED=0 go build -o /tmp/bond-agg .
+      - name: full pathsim ladder (S1-S9)
+        working-directory: p4-bondagg/sim
+        timeout-minutes: 12
+        run: python pathsim.py
+
+  # Cross-compile the EIF daemon for the GL.iNet boxes (no local Go on the dev PC).
+  # MT6000 (Flint 2) + MT2500 (Brume 2) are aarch64; armv7 built as a fallback in
+  # case a box ships a 32-bit userspace (verify on-box with `uname -m`).
+  crossbuild:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: p4-bondagg/daemon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: build linux/arm64
+        run: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/bond-agg-linux-arm64 .
+      - name: build linux/armv7 (fallback)
+        run: GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/bond-agg-linux-armv7 .
+      - name: sha256
+        run: sha256sum /tmp/bond-agg-linux-arm64 /tmp/bond-agg-linux-armv7 | tee /tmp/bond-agg.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bond-agg-binaries
+          path: |
+            /tmp/bond-agg-linux-arm64
+            /tmp/bond-agg-linux-armv7
+            /tmp/bond-agg.sha256
+          retention-days: 14
+
+  # Shell-artifact integrity pin (deploy runbook §1 + §4a gate). scp of the
+  # deploy/p5 shell set can truncate / partially write; the runbook REQUIRES a
+  # MANIFEST.sha256 over the EXACT shipped tree, verified on-box (`sha256sum -c`)
+  # BEFORE any install -- so a corrupt/partial push is caught at install time,
+  # not at 3am on a live box. This job generates that pin in CI (alongside
+  # crossbuild's bond-agg.sha256, so the pin travels with the release artifacts)
+  # over exactly the shell set: bond-xctl, bondctl, bond-ecod, bond-watchdog,
+  # 97-bond, bond.dag, init.d/{bond-agg,bond-ecod,bond-watchdog}. Relative paths
+  # (working-directory deploy/p5) so `-c` resolves after scp to /tmp/p5. It first
+  # asserts the set is COMPLETE and fails LOUD on any absent artifact (e.g. the
+  # shipped canonical init.d/bond-agg) -- an incomplete package must not be
+  # pinned or shipped silently (rule 9: never game a bar).
+  manifest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/p5
+    steps:
+      - uses: actions/checkout@v4
+      - name: assert the shell artifact set is complete
+        run: |
+          missing=0
+          for f in bond-xctl bondctl bond-ecod bond-watchdog 97-bond bond.dag \
+                   init.d/bond-agg init.d/bond-ecod init.d/bond-watchdog \
+                   shape-install init.d/cake-autorate shape/cake-autorate.pin; do
+            [ -f "$f" ] || { echo "MISSING deploy/p5/$f"; missing=1; }
+          done
+          [ "$missing" = 0 ] || { echo "ABORT: deploy/p5 shell artifact set incomplete -- cannot pin/ship an incomplete package (MUST-FIX before deploy)"; exit 1; }
+      - name: generate MANIFEST.sha256 (exact shipped shell set, relative paths)
+        run: |
+          sha256sum bond-xctl bondctl bond-ecod bond-watchdog 97-bond bond.dag \
+            init.d/bond-agg init.d/bond-ecod init.d/bond-watchdog \
+            shape-install init.d/cake-autorate shape/cake-autorate.pin | tee MANIFEST.sha256
+      # U22a: E4's install half (shape-install, init.d/cake-autorate, the pin)
+      # is SHIPPED, so it is PINNED above. The vendored cake-autorate BYTES are
+      # not in that sha256sum list, and must not be until they exist: G2
+      # answered with per-file hashes and CAR_ORIGIN=NO-GIT (there is no commit
+      # on the box to pin to), so shape/cake-autorate.pin carries their
+      # integrity and the PIN is what gets manifested. This step keeps the
+      # halves consistent in every direction the installer checks, so a pin and
+      # a package cannot drift apart between here and the box.
+      - name: cake-autorate vendor pin -- pinned set, staged subset, vendored bytes
+        run: |
+          sed -n '/^BEGIN_FILES$/,/^END_FILES$/p' shape/cake-autorate.pin \
+            | grep -E '^[0-9a-f]{64}  ' > /tmp/car.pin || {
+              echo "ABORT: the pin declares no files"; exit 1; }
+          sed -n '/^BEGIN_STAGE$/,/^END_STAGE$/p' shape/cake-autorate.pin \
+            | grep -Ev '^(BEGIN|END)_STAGE$|^#|^$' > /tmp/car.stage
+          echo "pinned files: $(wc -l < /tmp/car.pin)   staged: $(wc -l < /tmp/car.stage)"
+          [ -s /tmp/car.stage ] || { echo "ABORT: the pin has no STAGE block -- which files land on the box is undeclared, and an absent block must never mean 'all of them'"; exit 1; }
+          while read -r s; do
+            grep -q "  $s\$" /tmp/car.pin || { echo "ABORT: staged but NOT pinned: $s"; exit 1; }
+          done < /tmp/car.stage
+          n=0
+          for f in shape/vendor/*; do
+            [ -f "$f" ] || continue
+            case "${f##*/}" in .gitkeep) continue ;; esac
+            n=$((n+1))
+            grep -q "  ${f##*/}\$" /tmp/car.pin || { echo "ABORT: vendored but NOT pinned: ${f##*/}"; exit 1; }
+          done
+          if [ "$n" = 0 ]; then
+            echo "NOTE: shape/vendor/ is empty -- G2's byte half is outstanding. shape-install refuses to install (exit 3); this is the declared state, not a failure."
+            echo "NOTE: the staged-set completeness check below cannot run until the bytes exist."
+            exit 0
+          fi
+          ( cd shape/vendor && sha256sum -c /tmp/car.pin ) || { echo "ABORT: vendored bytes do not match the pin"; exit 1; }
+          # STAGED-SET COMPLETENESS. setup.sh and uninstall.sh are pinned and
+          # deliberately NOT staged (a wget-from-master fetcher, and a remover
+          # that would delete P1's live /root/cake-autorate). That is only safe
+          # if nothing staged REFERS to them. Unverifiable while vendor/ is
+          # empty -- recorded as open in the pin -- and mechanised here the
+          # moment the bytes land.
+          bad=0
+          while read -r _h p; do
+            grep -qx "$p" /tmp/car.stage && continue
+            while read -r s; do
+              grep -q "$p" "shape/vendor/$s" && { echo "ABORT: staged '$s' references pinned-but-unstaged '$p'"; bad=1; }
+            done < /tmp/car.stage
+          done < /tmp/car.pin
+          [ "$bad" = 0 ] || exit 1
+          echo "staged set is self-contained"
+      - name: self-verify the manifest (the on-box §4a `sha256sum -c` gate)
+        run: sha256sum -c MANIFEST.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deploy-p5-manifest
+          path: deploy/p5/MANIFEST.sha256
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # E0 PRODUCT SKELETON (ROADMAP U25). The `manifest` job above gates the
+  # deploy/p5 shell set -- the reconciler artifacts built for the CURRENT stack.
+  # This one gates the STANDALONE P5 product tree under p5/: its on-disk
+  # contract, its single install/uninstall entry points and its version stamp.
+  #
+  # ADDITIVE. Nothing above was removed, relaxed or re-scoped. `manifest` still
+  # asserts the same nine deploy/p5 files are present and still generates and
+  # self-verifies MANIFEST.sha256 over exactly that set. U25 changed no file set
+  # that job covers; it added a tree that job does not look at.
+  #
+  # WHAT A GREEN RUN HERE DOES **NOT** MEAN. The battery exercises the shipped
+  # scripts against a temp root, so it proves the driver's REFUSALS (bad sha,
+  # unpinned payload file, a destination outside the contract or inside the old
+  # stack's namespace) and its placement mechanics. It does NOT prove an install
+  # works end to end: the payload (U28/E8) and the clean-state check (U26/E7) do
+  # not exist yet, and bar IN-8 asserts that a real run STOPS at that check. It
+  # is also not a busybox proof -- there is no busybox ash on the dev machine or
+  # on this runner, so the busybox-safety bar is a static lint.
+  #
+  # Exit-code authoritative like recon-model/recon-ecosim: run.sh prints
+  # "p5-skeleton: N passed, M failed" and exits 1 on any failure, so the step
+  # itself gates. No continue-on-error.
+  p5-skeleton:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: the battery must be PRESENT before it can be green
+        # `sh p5/test/run.sh` on a tree without p5/ prints
+        #   sh: 0: cannot open p5/test/run.sh: No such file
+        # and exits 2, which reads like a broken test. It is not: the public CI
+        # mirror does not publish p5/ (scripts/sync-public-ci.sh ALLOW), so this
+        # job is measuring a directory that was never shipped to it. That is
+        # gate G5 -- publishing p5/ to a public, permanent, indexed repo -- and
+        # it is Mo's decision, not a defect in E0.
+        #
+        # RED is the correct state and this step does NOT soften it: a battery
+        # that never ran is not a passing battery, and an absent input reading
+        # as a clean result is the exact defect this repo rejects elsewhere
+        # (see the file-count floors in shellcheck.yml). What changes here is
+        # only that the failure SAYS WHY, so nobody spends a round debugging
+        # E0 for a decision that is sitting on the roadmap.
+        run: |
+          if [ ! -f p5/test/run.sh ]; then
+            echo "::error::E0's battery is ABSENT from this tree, so it cannot be green."
+            echo "p5/ is not in scripts/sync-public-ci.sh's ALLOW list, so the public"
+            echo "mirror never receives it. This is gate G5 (publish p5/ to the public"
+            echo "mirror), which is Mo's call -- NOT a failure of E0."
+            echo
+            echo "Measured on the private tree at the same commit: 121 passed, 0 failed,"
+            echo "self-checked. Do NOT 'fix' this by making the step skip: a gate that"
+            echo "passes when it checks nothing is worse than one that is honestly red."
+            exit 1
+          fi
+          echo "p5/test/run.sh present -- the battery below is measuring a real tree."
+      - name: E0 skeleton battery (contract, entry points, stamp) -- ALL-PASS gate
+        run: sh p5/test/run.sh
+      - name: assert the battery was not silently truncated
+        # run.sh exiting 0 with zero bars run would look identical to a green
+        # run. Pin a FLOOR on the bar count, the same shape as go-server's test
+        # floor. Raise it when bars are added; never lower it to go green.
+        run: |
+          set -o pipefail
+          sh p5/test/run.sh | tee /tmp/p5-skeleton.log
+          n=$(grep -c '^PASS ' /tmp/p5-skeleton.log || true)
+          echo "passed bars: $n"
+          if [ "$n" -lt 40 ]; then
+            echo "FAIL: only $n bars passed, floor is 40. Bars were removed or the"
+            echo "battery died early. Fix, or justify lowering the floor in the commit"
+            echo "that lowers it."
+            exit 1
+          fi
+
+  # P5 reconciler gate (OBJ-2 / deploy-audit BLOCKER-2). The P4 jobs above gate
+  # only the datapath; these two HARD gates cover the level-triggered `bond-xctl
+  # reconcile` orchestration. Both are exit-code-authoritative (they exit 1 on any
+  # FAIL), so the step itself gates -- no grep needed, unlike model/eif-model which
+  # always exit 0. No continue-on-error: the reconciler must be green to merge.
+
+  # Layer-1: the offline model is the oracle (rule 3, model-first). It runs the full
+  # equivalence battery + invariants/scenarios and exits 1 unless every check passes
+  # (`raise SystemExit(1 if fails else 0)` -> the ALL-PASS gate). Stdlib-only.
+  recon-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Layer-1 reconciler model (bond_model.py) -- ALL-PASS gate
+        run: python orchestration/bond_model.py
+
+  # Layer-2: the shell artifacts (bond-xctl/bondctl/bond-watchdog/bond-ecod) run under
+  # hermetic shims. run.sh is POSIX sh, no extra deps; it prints "Layer-2: N passed,
+  # M failed" and exits 1 unless 58/58 (`[ "$fail" = 0 ] || exit 1`).
+  recon-ecosim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Layer-2 reconciler artifacts (run.sh) -- 58/58 gate
+        run: bash orchestration/ecosim/p5/run.sh

@@ -1,0 +1,350 @@
+name: busybox
+
+# U67. The boxes run busybox ash. NOTHING in CI has ever run busybox:
+#   grep -rc busybox .github/workflows/emulator-gate.yml  ->  0   (measured 2026-08-31)
+#   emulator-gate.yml: `run: bash orchestration/ecosim/p5/run.sh`
+# So the Layer-2 harness -- the gate standing behind all the shipped shell -- has only
+# ever executed under bash, and "busybox-safe" has been a property asserted by lint and
+# by reading, never by execution. A bashism that bash accepts and ash rejects passes
+# every gate in this repo and fails on the router.
+#
+# The runner is Ubuntu and busybox installs in seconds, so this needs no hardware.
+#
+# Its own workflow file, per U60/U61: emulator-gate.yml has several concurrent writers,
+# and adding a step there is exactly how U61 put unparseable shell onto dev.
+
+on:
+  # RETARGETED BY scripts/sync-public-ci.sh. The SOURCE is workflow_dispatch-only so the
+  # PRIVATE repo (paid Actions minutes) starts nothing; the mirror is public and free, and
+  # carries ONE BRANCH PER UNIT under test, so it fires on all of them. A unit whose branch
+  # triggered no run reads as NO EVIDENCE, which is the state that made five units
+  # unverifiable at once.
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  parity:
+    # PAIRED, not absolute -- the discipline ADR-004 forces on the rig. The claim is not
+    # "busybox passes N bars", it is "busybox and bash AGREE". A difference is the
+    # finding, in whichever direction it goes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install busybox
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y busybox-static
+          busybox 2>&1 | head -1
+          echo "applets: $(busybox --list | wc -l)"
+
+      - name: bash arm
+        run: |
+          bash orchestration/ecosim/p5/run.sh > /tmp/bash.log 2>&1 || true
+          echo "bash arm exit: $?"
+          tail -3 /tmp/bash.log
+
+      - name: what busybox actually serves as an applet
+        # U69 probe: `sh` is a busybox APPLET name, so `sh "$P5/bond-xctl"` inside
+        # run.sh changes the reconciler's interpreter while a direct exec (shebang
+        # #!/bin/sh -> dash on this runner) does not. Print which names busybox
+        # takes over, because that is the whole variable.
+        run: |
+          for n in sh diff sleep awk grep sed; do
+            echo "$n -> $(busybox ash -c "command -v $n")"
+          done
+          busybox ash -c 'sleep --help 2>&1 | head -1' || true
+          echo "busybox diff format:"; busybox diff /etc/hostname /etc/hostname || true
+          echo "--- what command -v answers under busybox ash (U67g) ---"
+          for n in tc sha256sum ping fping bash sh; do
+            printf %-12s "$n"
+            busybox ash -c "command -v $n" || echo "(absent)"
+          done
+
+      - name: busybox ash arm
+        # THIRD iteration on this instrumentation, and the first two both failed SILENTLY,
+        # which is the whole point of the bar. Recorded so it is not re-derived:
+        #   1. plain `timeout 600` sends SIGTERM; the busybox tree SURVIVED it and the step ran
+        #      29 minutes until the JOB timeout killed everything. No handler ran.
+        #   2. `timeout -k 30 600` does kill it -- measured, at exactly 630s -- but a
+        #      SIGKILLed child makes timeout exit 137 (128+9), NOT 124, and the handler tested
+        #      only for 124. Worse, GitHub runs this with `shell: bash -e`, so the step DIED on
+        #      the timeout command itself before `_rc=$?` was ever read.
+        # So: capture the status with `|| _rc=$?` (the -e-safe idiom), ALWAYS print the tail,
+        # and decide afterwards. A hang must leave a LOCATION behind, not just a red square.
+        run: |
+          _rc=0
+          timeout -k 30 420 busybox ash orchestration/ecosim/p5/run.sh > /tmp/ash.log 2>&1 || _rc=$?
+          echo "ash arm exit: $_rc"
+          echo "----- last 30 lines of the ash arm -----"
+          tail -30 /tmp/ash.log || true
+          echo "----------------------------------------"
+          case "$_rc" in
+            0) ;;
+            124|137)
+              echo "::error::busybox ash arm HUNG (420s, killed). The LAST BAR ABOVE is where it stopped."
+              exit 1 ;;
+            *)
+              echo "::error::busybox ash arm exited $_rc"
+              exit 1 ;;
+          esac
+
+      - name: busybox ash arm, SHEBANG route (U69 decisive experiment)
+        # If the 13 lifecycle bars go green here, the interpreter is proven to be
+        # the entire variable: same shell running run.sh, only difference is that
+        # bond-xctl is exec'd via its shebang instead of via busybox's `sh` applet.
+        # Copy first -- never mutate the checkout.
+        run: |
+          cp -a . /tmp/shebang
+          sed -i 's|sh "$P5/bond-xctl"|"$P5/bond-xctl"|g; s|sh "$P5/bondctl"|"$P5/bondctl"|g'             /tmp/shebang/orchestration/ecosim/p5/run.sh
+          echo "rewritten call sites:"
+          grep -nE '^(xctl|node|hook|bctl)\(\)' /tmp/shebang/orchestration/ecosim/p5/run.sh
+          cd /tmp/shebang && timeout -k 30 420 busybox ash orchestration/ecosim/p5/run.sh > /tmp/shebang.log 2>&1
+          _rc=$?; [ "$_rc" != 124 ] || { echo "::error::shebang arm HUNG (600s)"; tail -25 /tmp/shebang.log; exit 1; }
+          tail -3 /tmp/shebang.log
+
+      - name: compare
+        run: |
+          # Count PASS/FAIL lines rather than trusting a summary line either arm might
+          # never reach: an arm that DIES early would otherwise report zero failures and
+          # look clean. That absent-reads-as-clean shape is what U22a was rejected for
+          # and what U65's file floor exists to stop.
+          bp=$(grep -c '^PASS' /tmp/bash.log || true)
+          bf=$(grep -c '^FAIL' /tmp/bash.log || true)
+          ap=$(grep -c '^PASS' /tmp/ash.log  || true)
+          af=$(grep -c '^FAIL' /tmp/ash.log  || true)
+          sp=$(grep -c '^PASS' /tmp/shebang.log || true)
+          sf=$(grep -c '^FAIL' /tmp/shebang.log || true)
+          echo "bash             : $bp pass, $bf fail"
+          echo "busybox (sh)     : $ap pass, $af fail"
+          echo "busybox (shebang): $sp pass, $sf fail   <-- U69: if this matches bash,"
+          echo "                                            the interpreter IS the variable"
+
+          if [ "$bp" -eq 0 ]; then
+            echo "FAIL: the bash arm produced ZERO PASS lines, so the harness did not run"
+            echo "at all and 'parity' here would be two empty results agreeing."
+            tail -30 /tmp/bash.log
+            exit 1
+          fi
+          if [ "$ap" -ne "$bp" ] || [ "$af" -ne "$bf" ]; then
+            echo "FAIL: busybox ash and bash DISAGREE. This is the finding, not a flake:"
+            echo "the shipped shell targets busybox, so wherever they differ bash is the"
+            echo "wrong answer. First divergences:"
+            diff <(grep -E '^(PASS|FAIL)' /tmp/bash.log) \
+                 <(grep -E '^(PASS|FAIL)' /tmp/ash.log)
+            echo "--- every FAIL in the ash arm (the first cut truncated at 20 and hid 6) ---"
+            grep '^FAIL' /tmp/ash.log
+            echo "--- tail of the ash arm ---"
+            tail -20 /tmp/ash.log
+            exit 1
+          fi
+          if [ "$af" -ne 0 ]; then
+            echo "FAIL: $af bar(s) failed under busybox."
+            grep '^FAIL' /tmp/ash.log
+            exit 1
+          fi
+          echo "busybox and bash agree: $ap pass, 0 fail"
+
+  bisect:
+    # U69. The parity job says the arms DISAGREE. This job says WHY, by cutting the
+    # variable in half: the sh-applet arm changes TWO things at once, and only one of
+    # them is a shell.
+    #   (a) bond-xctl is interpreted by busybox ash instead of dash/bash; and
+    #   (b) busybox ash on this runner is a STANDALONE shell, so every command name
+    #       that is a busybox applet is served by busybox INSTEAD of $PATH -- awk,
+    #       sed, grep, sort, cmp are then busybox's, not GNU's.
+    # Arm C isolates (b) from (a): bash, with busybox applets first on PATH. If arm C
+    # reproduces the ash arm, the construct is a UTILITY difference and the shell is
+    # innocent. Never continue-on-error: this job either produces the cut or is red.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: install busybox + dash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y busybox-static dash
+          busybox 2>&1 | head -1
+
+      - name: applet census — which PATH shims busybox takes over
+        # The ecosim shims live on PATH. A standalone busybox shell prefers its own
+        # applet to anything on PATH, so a shim whose name is an applet is BYPASSED
+        # inside bond-xctl in the ash arm and honoured in the dash arm. That would be
+        # a harness artefact, not a router bug, so it has to be measured, not assumed.
+        run: |
+          busybox --list | sort > /tmp/applets
+          echo "applets: $(wc -l < /tmp/applets)"
+          B="$PWD/orchestration/ecosim/p5/bin"
+          printf '%-10s %-8s %-28s %s\n' NAME APPLET 'busybox-ash resolves' 'dash resolves'
+          for n in $(ls "$B") awk sed grep sort cmp tr wc head cut ls cat diff sh; do
+            a=no; grep -qx "$n" /tmp/applets && a=YES
+            r1=$(PATH="$B:$PATH" busybox ash -c "command -v $n" 2>/dev/null || echo NONE)
+            r2=$(PATH="$B:$PATH" dash       -c "command -v $n" 2>/dev/null || echo NONE)
+            printf '%-10s %-8s %-28s %s\n' "$n" "$a" "$r1" "$r2"
+          done
+
+      - name: stage probe — source discovery, one intermediate at a time
+        run: |
+          for arm in bash dash "busybox ash"; do
+            tag=$(echo "$arm" | tr ' ' '-')
+            U69_ARM="$arm" U69_WORK=/tmp/w.$tag \
+              $arm orchestration/ecosim/p5/u69-probe.sh > /tmp/probe.$tag.log 2>&1 || true
+          done
+          echo "=================== bash ==================="; cat /tmp/probe.bash.log
+          echo "=================== dash ==================="; cat /tmp/probe.dash.log
+          echo "================ busybox ash ==============="; cat /tmp/probe.busybox-ash.log
+          echo "=========== diff: dash vs busybox ash ======"
+          diff /tmp/probe.dash.log /tmp/probe.busybox-ash.log || true
+
+      - name: arm C — bash shell, busybox UTILITIES
+        # Isolates the utility set from the shell. The ecosim shims stay ahead of the
+        # busybox symlinks (run.sh prepends its own bin), so this swaps ONLY the
+        # unshimmed utilities (awk/sed/grep/sort/cmp/...) for busybox's. sh/ash/bash
+        # are removed from the symlink dir so the SHELL stays bash/dash -- otherwise
+        # `sh "$P5/bond-xctl"` would silently make this the ash arm again.
+        run: |
+          mkdir -p /tmp/bbin
+          busybox --install -s /tmp/bbin
+          rm -f /tmp/bbin/sh /tmp/bbin/ash /tmp/bbin/bash /tmp/bbin/hush /tmp/bbin/busybox
+          echo "busybox symlinks: $(ls /tmp/bbin | wc -l)"
+          timeout -k 30 420 env PATH=/tmp/bbin:$PATH bash orchestration/ecosim/p5/run.sh > /tmp/armC.log 2>&1 || true
+          timeout -k 30 420 env PATH=/tmp/bbin:$PATH busybox ash orchestration/ecosim/p5/run.sh > /tmp/armD.log 2>&1 || true
+
+      - name: the cut
+        run: |
+          bash orchestration/ecosim/p5/run.sh > /tmp/bash.log 2>&1 || true
+          busybox ash orchestration/ecosim/p5/run.sh > /tmp/ash.log 2>&1 || true
+          for f in bash ash armC armD; do
+            p=$(grep -c '^PASS' /tmp/$f.log || true)
+            q=$(grep -c '^FAIL' /tmp/$f.log || true)
+            echo "$f: $p pass, $q fail"
+          done
+          echo "--- arm C (bash + busybox utilities) FAILs ---"
+          grep '^FAIL' /tmp/armC.log || echo "    none"
+          echo "--- ash arm FAILs ---"
+          grep '^FAIL' /tmp/ash.log || echo "    none"
+          echo "--- diff armC vs ash ---"
+          diff <(grep -E '^(PASS|FAIL)' /tmp/armC.log) \
+               <(grep -E '^(PASS|FAIL)' /tmp/ash.log) || true
+
+      - name: SEEDED FAILURE — put the U69 defect back and require it goes red
+        # A gate nobody has seen fail is a gate nobody validated (U46). Two seeds,
+        # each reverting exactly ONE half of the fix, each required to redden. If a
+        # seed stays green the gate has stopped measuring and this job fails.
+        run: |
+          rc=0
+          RUNSH=orchestration/ecosim/p5/run.sh
+          seed() {   # $1 = name; the tree is already seeded in /tmp/seed
+            ( cd /tmp/seed && busybox ash orchestration/ecosim/p5/run.sh ) \
+                > /tmp/seed.log 2>&1 || true
+            f=$(grep -c '^FAIL' /tmp/seed.log || true)
+            p=$(grep -c '^PASS' /tmp/seed.log || true)
+            if [ "$p" -eq 0 ]; then
+              echo "SEED '$1': INVALID — zero PASS lines, the seeded tree did not run"
+              tail -20 /tmp/seed.log; rc=1; return
+            fi
+            if [ "$f" -eq 0 ]; then
+              echo "SEED '$1': NOT DETECTED — $p pass, 0 fail. The gate is blind."
+              rc=1
+            else
+              echo "SEED '$1': detected — $p pass, $f fail"
+              grep '^FAIL' /tmp/seed.log | sed 's/^/    /'
+            fi
+          }
+          # seed 1: make the fixture's ip/ping UNREACHABLE from inside bond-xctl under
+          #         a standalone busybox shell. It now takes BOTH halves, and that is a
+          #         result, not a convenience: U69 delivered the fixture by INJECTION
+          #         (run.sh exports absolute paths), U67h made the shipped file resolve
+          #         bare names by an explicit $PATH walk, and either one alone still
+          #         delivers it. Measured 2026-09-01: dropping the injection ALONE now
+          #         leaves 405 pass / 0 fail -- the old one-half seed had stopped
+          #         measuring anything, which is exactly the blindness this step exists
+          #         to catch, and it caught itself.
+          rm -rf /tmp/seed; cp -a . /tmp/seed
+          sed -i '/^    export IP=/d; /^    export PING=/d' /tmp/seed/$RUNSH
+          sed -i 's|.*_tool ip;.*|IP="${IP:-ip}"|; s|.*_tool ping;.*|PING="${PING:-ping}"|' \
+              /tmp/seed/deploy/p5/bond-xctl
+          if grep -q 'export IP=' /tmp/seed/$RUNSH; then echo "seed 1a did not apply"; exit 1; fi
+          if ! grep -q '^IP="${IP:-ip}"$' /tmp/seed/deploy/p5/bond-xctl; then
+            echo "seed 1b did not apply"; exit 1
+          fi
+          if ! grep -q '^PING="${PING:-ping}"$' /tmp/seed/deploy/p5/bond-xctl; then
+            echo "seed 1c did not apply"; exit 1
+          fi
+          seed "drop the IP/PING injection AND the \$PATH walk"
+
+          # seed 2: undo the diff-format fix -> AGG-L12 counts 0 under busybox diff.
+          rm -rf /tmp/seed; cp -a . /tmp/seed
+          awk '/^NLINES=/ { print "NLINES=$(diff -r \"$P5\" \"$MUTD\" 2>/dev/null | grep -c \x27^[<>]\x27)"; next } { print }' \
+              /tmp/seed/$RUNSH > /tmp/seed/run.sh.new && mv /tmp/seed/run.sh.new /tmp/seed/$RUNSH
+          if grep -q 'diff -ru' /tmp/seed/$RUNSH; then echo "seed 2 did not apply"; exit 1; fi
+          grep -n '^NLINES=' /tmp/seed/$RUNSH
+          seed "restore the GNU-only diff format"
+
+          # seed 3 (U67h): undo the explicit $PATH walk for `tc` in the SHIPPED
+          #         reconciler and put the bare name back. `tc` is a busybox applet,
+          #         so a standalone busybox shell serves its own tc, shape_now() can
+          #         never see cake, and every SH-* bar plus SH-1's restart count go
+          #         red. This is the seed that keeps U67h's fix from regressing
+          #         silently: the whole defect was one bare name, and a bare name is
+          #         exactly what a later "simplification" would put back.
+          rm -rf /tmp/seed; cp -a . /tmp/seed
+          sed -i 's|.*_tool tc.*|TC="${TC:-tc}"|' /tmp/seed/deploy/p5/bond-xctl
+          if ! grep -q '^TC="${TC:-tc}"$' /tmp/seed/deploy/p5/bond-xctl; then
+            echo "seed 3 did not apply"; exit 1
+          fi
+          seed "restore the bare-name tc (U67h)"
+
+          exit "$rc"
+
+  syntax:
+    # `ash -n` parses without executing. It catches bashisms shellcheck can miss, and
+    # unlike the parity job it covers the SHIPPED files, which no harness executes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: install busybox
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y busybox-static
+      - name: ash -n every shipped shell file
+        run: |
+          : > /tmp/files
+          for d in deploy/p5 orchestration; do
+            [ -d "$d" ] || continue
+            find "$d" -type f ! -path '*/.git/*' -print | while read -r f; do
+              # Same two defects as shellcheck.yml's selector, fixed here too rather
+              # than in one file only (U65a fixed CRLF in that file and not this one,
+              # which is the partial-fix-wearing-the-defect's-shape pattern):
+              #   tr -d '\r'  -- a CRLF shebang ends in "sh\r" and never matches
+              #   if/fi       -- under `bash -e`, a non-matching LAST file makes grep
+              #                  exit 1, which becomes the loop's status and kills the
+              #                  step before it prints anything.
+              if head -1 "$f" | tr -d '\r' \
+                   | grep -qE '^#!.*/(ba)?(da)?(a)?sh( |$)'; then
+                echo "$f" >> /tmp/files
+              fi
+            done
+          done
+          sort -u /tmp/files -o /tmp/files
+          n=$(wc -l < /tmp/files)
+          echo "shell files: $n"
+          # Same floor as U65's shellcheck gate, same reason: an empty list makes every
+          # loop below a no-op and this job green while checking nothing.
+          if [ "$n" -lt 28 ]; then
+            echo "FAIL: only $n shell files found, floor is 28 -- the selector broke."
+            exit 1
+          fi
+          rc=0
+          while read -r f; do
+            if ! busybox ash -n "$f" 2>/tmp/err; then
+              echo "FAIL $f"
+              sed 's/^/    /' /tmp/err
+              rc=1
+            fi
+          done < /tmp/files
+          if [ "$rc" -eq 0 ]; then echo "all $n files parse under busybox ash"; fi
+          exit "$rc"
