@@ -1,0 +1,191 @@
+VERIFY reorder_release_z ...
+  edge-v2: hold>0 byte-identical (1/43/343ms); hold=0 terminated 0.03s (rel=68071 skips=14666)
+  mid-g0: hold>0 byte-identical (1/43/343ms); hold=0 terminated 0.04s (rel=28141 skips=35767)
+  .. speed CALL S3   3k seed 1/6 act=[0] sp=0 j=1 ratch=1 (0s)
+  .. speed CALL S3   3k seed 2/6 act=[0] sp=0 j=1 ratch=1 (0s)
+  .. speed CALL S3   3k seed 3/6 act=[0] sp=0 j=1 ratch=1 (0s)
+  .. speed CALL S3   3k seed 4/6 act=[0] sp=0 j=1 ratch=1 (0s)
+  .. speed CALL S3   3k seed 5/6 act=[0] sp=0 j=1 ratch=1 (0s)
+  .. speed CALL S3   3k seed 6/6 act=[0] sp=0 j=1 ratch=1 (0s)
+== speed CALL S3   3k  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1      2996    0.00     11     11     11  100.0     10      0    0.0
+   zero       0/   0/   0      2996    0.00     11     11     11  100.0     10      0      -
+   tick       1/   1/   1      2996    0.00     11     11     11  100.0     10      0      -
+   spread     1/   1/   1      2996    0.00     11     11     11  100.0     10      0      -
+   sp+1j      1/   1/   1      2996    0.00     11     11     11  100.0     10      0      -
+   sp+2j      2/   2/   2      2996    0.00     11     11     11  100.0     10      0      -
+   sp+3j      3/   3/   3      2996    0.00     11     11     11  100.0     10      0      -
+   ratchet    1/   1/   1      2996    0.00     11     11     11  100.0     10      0      -
+   343      343/ 343/ 343      2996    0.00     11     11     11  100.0     10      0      -
+  .. speed CALL S4   3k seed 1/6 act=[0, 1] sp=6 j=28 ratch=1 (0s)
+  .. speed CALL S4   3k seed 2/6 act=[0, 1] sp=6 j=28 ratch=1 (0s)
+  .. speed CALL S4   3k seed 3/6 act=[0, 1] sp=6 j=28 ratch=1 (0s)
+  .. speed CALL S4   3k seed 4/6 act=[0, 1] sp=6 j=28 ratch=1 (0s)
+  .. speed CALL S4   3k seed 5/6 act=[0, 1] sp=6 j=28 ratch=1 (0s)
+  .. speed CALL S4   3k seed 6/6 act=[0, 1] sp=6 j=28 ratch=1 (0s)
+== speed CALL S4   3k  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1      2996    0.00     12     13     13  100.0     11      0    0.0
+   zero       0/   0/   0      2996    0.00     12     13     13  100.0     11      0      -
+   tick       1/   1/   1      2996    0.00     12     13     13  100.0     11      0      -
+   spread     6/   6/   6      2996    0.00     12     13     13  100.0     11      0      -
+   sp+1j     34/  34/  34      2996    0.00     12     13     13  100.0     11      0      -
+   sp+2j     62/  62/  62      2996    0.00     12     13     13  100.0     11      0      -
+   sp+3j     90/  90/  90      2996    0.00     12     13     13  100.0     11      0      -
+   ratchet    1/   1/   1      2996    0.00     12     13     13  100.0     11      0      -
+   343      343/ 343/ 343      2996    0.00     12     13     13  100.0     11      0      -
+  .. speed CALL mid  3k seed 1/6 act=[1] sp=0 j=1 ratch=31 (0s)
+  .. speed CALL mid  3k seed 2/6 act=[1] sp=0 j=1 ratch=8 (0s)
+  .. speed CALL mid  3k seed 3/6 act=[1] sp=0 j=1 ratch=14 (0s)
+  .. speed CALL mid  3k seed 4/6 act=[1] sp=0 j=1 ratch=38 (0s)
+  .. speed CALL mid  3k seed 5/6 act=[1] sp=0 j=1 ratch=35 (0s)
+  .. speed CALL mid  3k seed 6/6 act=[1] sp=0 j=1 ratch=37 (0s)
+== speed CALL mid  3k  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1      2996    0.00     18     20     20  100.0     11      0   28.1
+   zero       0/   0/   0      2156   28.02     18     19     20   72.0     11      0      -
+   tick       1/   1/   1      2213   26.14     18     19     20   73.9     11      1      -
+   spread     1/   1/   1      2213   26.14     18     19     20   73.9     11      1      -
+   sp+1j      1/   1/   1      2213   26.14     18     19     20   73.9     11      1      -
+   sp+2j      2/   2/   2      2334   22.08     18     20     20   77.9     11      2      -
+   sp+3j      3/   3/   3      2293   23.45     18     19     20   76.6     11      2      -
+   ratchet    8/  33/  38      2785    7.05     18     20     20   93.0     12      3      -
+   343      343/ 343/ 343      2972    0.80     18     20     21   99.2     13      3      -
+  .. speed edge S3  90k seed 1/6 act=[0, 1] sp=7 j=8 ratch=8 (1s)
+  .. speed edge S3  90k seed 2/6 act=[0, 1] sp=7 j=8 ratch=8 (2s)
+  .. speed edge S3  90k seed 3/6 act=[0, 1] sp=7 j=8 ratch=8 (3s)
+  .. speed edge S3  90k seed 4/6 act=[0, 1] sp=7 j=8 ratch=8 (4s)
+  .. speed edge S3  90k seed 5/6 act=[0, 1] sp=7 j=8 ratch=8 (5s)
+  .. speed edge S3  90k seed 6/6 act=[0, 1] sp=7 j=8 ratch=8 (6s)
+== speed edge S3  90k  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1     89888    0.00     11     14     21  100.0      7      0   17.7
+   zero       0/   0/   0     73177   18.59     11     14     14   81.4     10      0      -
+   tick       1/   1/   1     73177   18.59     11     14     15   81.4     10      1      -
+   spread     7/   7/   7     80432   10.52     11     14     20   89.5     10      7      -
+   sp+1j     15/  15/  15     86518    3.75     11     16     21   96.3     10      7      -
+   sp+2j     23/  23/  23     86995    3.22     11     21     21   96.8     10      7      -
+   sp+3j     31/  31/  31     87787    2.34     11     21     21   97.7     10      7      -
+   ratchet    8/   8/   8     80518   10.42     11     15     21   89.6     10      7      -
+   343      343/ 343/ 343     89692    0.22     11     21     21   99.8      7      7      -
+  .. speed mid  N2 0.65 seed 1/6 act=[1] sp=0 j=1 ratch=63 (1s)
+  .. speed mid  N2 0.65 seed 2/6 act=[1] sp=0 j=1 ratch=62 (2s)
+  .. speed mid  N2 0.65 seed 3/6 act=[1] sp=0 j=1 ratch=75 (3s)
+  .. speed mid  N2 0.65 seed 4/6 act=[1] sp=0 j=1 ratch=64 (4s)
+  .. speed mid  N2 0.65 seed 5/6 act=[1] sp=0 j=1 ratch=69 (4s)
+  .. speed mid  N2 0.65 seed 6/6 act=[1] sp=0 j=1 ratch=74 (5s)
+== speed mid  N2 0.65  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1     69361    0.15     19     49     58   96.6      9      0   54.1
+   zero       0/   0/   0     31365   54.85     18     48     48   45.0     23      0      -
+   tick       1/   1/   1     41384   40.42     19     48     49   59.5     23      1      -
+   spread     1/   1/   1     41384   40.42     19     48     49   59.5     23      1      -
+   sp+1j      1/   1/   1     41384   40.42     19     48     49   59.5     23      1      -
+   sp+2j      2/   2/   2     55267   20.44     20     50     50   79.2     23      2      -
+   sp+3j      3/   3/   3     49988   28.04     20     48     50   71.0     23      3      -
+   ratchet   62/  66/  75     67724    2.50     20     56     70   87.0     45     53      -
+   343      343/ 343/ 343     69071    0.56     20     60     77   86.9     50     63      -
+  .. speed mid  N2 0.85 seed 1/6 act=[0, 1] sp=18 j=25 ratch=475 (1s)
+  .. speed mid  N2 0.85 seed 2/6 act=[0, 1] sp=18 j=25 ratch=445 (2s)
+  .. speed mid  N2 0.85 seed 3/6 act=[0, 1] sp=18 j=25 ratch=444 (3s)
+  .. speed mid  N2 0.85 seed 4/6 act=[0, 1] sp=18 j=25 ratch=453 (5s)
+  .. speed mid  N2 0.85 seed 5/6 act=[0, 1] sp=18 j=25 ratch=462 (6s)
+  .. speed mid  N2 0.85 seed 6/6 act=[0, 1] sp=18 j=25 ratch=413 (7s)
+== speed mid  N2 0.85  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1     87397    3.79     58    309    322   44.9     17      0   72.5
+   zero       0/   0/   0     21389   76.45     48    260    305   12.0     20      0      -
+   tick       1/   1/   1     26893   70.39     59    239    306   14.1     19      1      -
+   spread    18/  18/  18     54175   40.36     58    294    320   19.9     20     18      -
+   sp+1j     43/  43/  43     71757   21.00     66    317    334   15.5     43     43      -
+   sp+2j     68/  68/  68     77550   14.63     76    322    345   13.2     67     68      -
+   sp+3j     93/  93/  93     80173   11.74     81    327    350   11.8     92     93      -
+   ratchet  413/ 449/ 475     85787    5.56     95    371    542    9.1    445    446      -
+   343      343/ 343/ 343     85549    5.82     92    349    445    9.3    336    337      -
+  .. max   edge S3  90k seed 1/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (1s)
+  .. max   edge S3  90k seed 2/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (2s)
+  .. max   edge S3  90k seed 3/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (3s)
+  .. max   edge S3  90k seed 4/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (4s)
+  .. max   edge S3  90k seed 5/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (5s)
+  .. max   edge S3  90k seed 6/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (6s)
+== max   edge S3  90k  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1     89888    0.00     11     14     14  100.0      7      0   43.6
+   zero       0/   0/   0     51103   43.15     11     11     11   56.9     10      0      -
+   tick       1/   1/   1     51103   43.15     11     12     12   56.9     10      1      -
+   spread    18/  18/  18     86053    4.27     14     14     14   95.7     10     11      -
+   sp+1j     43/  43/  43     87633    2.51     14     14     14   97.5     24     27      -
+   sp+2j     68/  68/  68     88562    1.48     14     14     14   98.5     10     11      -
+   sp+3j     93/  93/  93     88843    1.16     14     14     16   98.8     22     25      -
+   ratchet  412/ 412/ 412     89741    0.16     14     14    197   97.1    263    266      -
+   343      343/ 343/ 343     89630    0.29     14     14     22   99.6     52     55      -
+  .. max   edge S3 140k seed 1/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (2s)
+  .. max   edge S3 140k seed 2/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (3s)
+  .. max   edge S3 140k seed 3/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (5s)
+  .. max   edge S3 140k seed 4/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (6s)
+  .. max   edge S3 140k seed 5/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (8s)
+  .. max   edge S3 140k seed 6/6 act=[0, 1, 2] sp=18 j=25 ratch=412 (10s)
+== max   edge S3 140k  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1    136336    2.50     21    244    261   55.3      7      0   49.0
+   zero       0/   0/   0     69202   50.51     11    222    251   30.4     10      0      -
+   tick       1/   1/   1     69202   50.51     12    222    252   30.4     10      1      -
+   spread    18/  18/  18    121374   13.20     14    234    254   51.5     18     18      -
+   sp+1j     43/  43/  43    128785    7.90     22    244    264   52.7     37     39      -
+   sp+2j     68/  68/  68    131715    5.80     22    244    264   53.5     51     53      -
+   sp+3j     93/  93/  93    132920    4.94     24    244    264   53.7     84     87      -
+   ratchet  412/ 412/ 412    135819    2.86     33    254    325   51.3    281    284      -
+   343      343/ 343/ 343    135200    3.31     24    254    264   53.9    268    270      -
+  .. max   edge S4  50k seed 1/6 act=[0, 1, 2] sp=11 j=30 ratch=430 (1s)
+  .. max   edge S4  50k seed 2/6 act=[0, 1, 2] sp=11 j=30 ratch=430 (1s)
+  .. max   edge S4  50k seed 3/6 act=[0, 1, 2] sp=11 j=30 ratch=430 (2s)
+  .. max   edge S4  50k seed 4/6 act=[0, 1, 2] sp=11 j=30 ratch=430 (2s)
+  .. max   edge S4  50k seed 5/6 act=[0, 1, 2] sp=11 j=30 ratch=430 (3s)
+  .. max   edge S4  50k seed 6/6 act=[0, 1, 2] sp=11 j=30 ratch=430 (3s)
+== max   edge S4  50k  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1     48031    3.82     23    252    292   58.5     10      0   46.9
+   zero       0/   0/   0     26127   47.68     13    243    272   35.8     11      0      -
+   tick       1/   1/   1     26127   47.68     13    243    273   35.8     11      1      -
+   spread    11/  11/  11     35358   29.20     13    243    283   50.0     11     11      -
+   sp+1j     41/  41/  41     42577   14.74     23    248    286   54.6     41     41      -
+   sp+2j     71/  71/  71     44950    9.99     23    253    298   55.5     71     71      -
+   sp+3j    101/ 101/ 101     45692    8.50     23    253    298   54.1     99    100      -
+   ratchet  430/ 430/ 430     47485    4.91     43    422    612   48.9    399    419      -
+   343      343/ 343/ 343     47172    5.54     53    283    376   47.0    325    326      -
+  .. max   mid  N2 0.65 seed 1/6 act=[0, 1] sp=18 j=25 ratch=81 (1s)
+  .. max   mid  N2 0.65 seed 2/6 act=[0, 1] sp=18 j=25 ratch=94 (2s)
+  .. max   mid  N2 0.65 seed 3/6 act=[0, 1] sp=18 j=25 ratch=87 (3s)
+  .. max   mid  N2 0.65 seed 4/6 act=[0, 1] sp=18 j=25 ratch=82 (4s)
+  .. max   mid  N2 0.65 seed 5/6 act=[0, 1] sp=18 j=25 ratch=82 (5s)
+  .. max   mid  N2 0.65 seed 6/6 act=[0, 1] sp=18 j=25 ratch=81 (6s)
+== max   mid  N2 0.65  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1     69349    0.16     19     49     50   98.9     17      0   56.0
+   zero       0/   0/   0     29971   56.85     18     48     48   43.1     17      0      -
+   tick       1/   1/   1     38475   44.61     19     39     48   55.4     17      1      -
+   spread    18/  18/  18     63609    8.43     20     50     58   85.9     18     18      -
+   sp+1j     43/  43/  43     66527    4.23     21     58     76   85.5     43     41      -
+   sp+2j     68/  68/  68     67523    2.79     21     62     84   85.8     64     66      -
+   sp+3j     93/  93/  93     68277    1.71     21     68     94   86.0     61     80      -
+   ratchet   81/  82/  94     68004    2.10     21     67     91   85.8     70     71      -
+   343      343/ 343/ 343     69032    0.62     21     73     99   85.8    223    254      -
+  .. max   mid  N2 0.85 seed 1/6 act=[0, 1] sp=18 j=25 ratch=594 (1s)
+  .. max   mid  N2 0.85 seed 2/6 act=[0, 1] sp=18 j=25 ratch=604 (2s)
+  .. max   mid  N2 0.85 seed 3/6 act=[0, 1] sp=18 j=25 ratch=586 (4s)
+  .. max   mid  N2 0.85 seed 4/6 act=[0, 1] sp=18 j=25 ratch=583 (5s)
+  .. max   mid  N2 0.85 seed 5/6 act=[0, 1] sp=18 j=25 ratch=616 (6s)
+  .. max   mid  N2 0.85 seed 6/6 act=[0, 1] sp=18 j=25 ratch=594 (7s)
+== max   mid  N2 0.85  (seeds=6)
+   policy   hold mn/md/mx        gp   loss%    p50    p95    p99   dl50    frz   wmax    ooo
+   arrival   -1/  -1/  -1     87384    3.80     58    328    338   45.8     13      0   70.7
+   zero       0/   0/   0     24135   73.43     58    265    325   12.6     13      0      -
+   tick       1/   1/   1     30002   66.97     59    249    316   14.2     13      1      -
+   spread    18/  18/  18     59209   34.82     64    320    338   15.9     18     18      -
+   sp+1j     43/  43/  43     72787   19.87     72    333    354   10.2     43     43      -
+   sp+2j     68/  68/  68     77462   14.72     82    340    365    8.7     68     68      -
+   sp+3j     93/  93/  93     80456   11.43     90    346    369    7.6     93     93      -
+   ratchet  583/ 594/ 616     86222    5.08    137    488    732    4.4    594    591      -
+   343      343/ 343/ 343     85412    5.97    129    367    455    4.3    343    342      -
+TOTAL 52s

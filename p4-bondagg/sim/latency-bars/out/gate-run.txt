@@ -1,0 +1,236 @@
+# LOCAL GATE RUN (Mo's PC, Windows, Python 3.12), commit 04378a7 + evidence.
+# SEEDS=6 T=9.0 PYTHONHASHSEED=0 python .github/scripts/latency_gate.py
+# Exit code is the last line. The RUNNER's own answer is out/ci-run.txt --
+# repo state is not runner state, and this file is the weaker of the two.
+
+====================================================================================================
+OBJ-D LATENCY GATE -- SPD-1..6 / HOLD-1..4   (U14)
+====================================================================================================
+  battery : p4-bondagg/sim/latency-bars/latency_battery.py
+  ratchet : p4-bondagg/sim/latency-bars/ratchet.py  (the derived hold, implemented here for the first time)
+  physics : p4-bondagg/sim/nsched_model.py + pull-study/03-reserved-composite
+  config  : SEEDS=6 T=9.0 GEO=canonical PYTHONHASHSEED=0
+
+  GATED    HOLD-1d, HOLD-2b, HOLD-4a, HOLD-4b, HOLD-4c, SPD-1a, SPD-1b, SPD-2a, SPD-2b, SPD-2c, SPD-3a, SPD-5a, SPD-6a, SPD-6b, SPD-6c
+  REPORTED HOLD-1a, HOLD-1b, HOLD-1c, HOLD-2a, HOLD-3a, HOLD-3b, SPD-1c, SPD-1d, SPD-3b, SPD-4a, SPD-4b, SPD-5b, SPD-5c
+           -- demoted for ONE of two MEASURED reasons, never for convenience:
+              (a) the verdict FLIPS across stall geometry (out/geometry.md), so
+                  the canonical point does not establish it; or
+              (b) NO defect injection can turn it RED (out/mutations.md), so it
+                  is not a gate at all. Each carries the reason it cannot fail.
+
+  ADR-004: no absolute loss or latency threshold is asserted against this
+  rig anywhere in this battery. Every gated bar is PAIRED (two scorings of
+  the same runs, or two runs on the same seeds), STRUCTURAL (a zero count,
+  or one segment of a run against another), or UNIT (the ratchet formula on
+  a synthetic trace, with no rig physics in it at all).
+  A green run says the ORDERING held. It says nothing about magnitudes, and
+  nothing about hardware: the rig has never been compared to a real router.
+
+  WHAT A GREEN RUN HERE DOES NOT CONSTRAIN -- printed every run, not buried:
+   1. The system under test is expF_marginal.VSim / expG_mid.GSim, the r2 STUDY
+      simulators (draw keys v0/v1/v2, g0/g2/g2m). NOT nsched_model.py's
+      scheduler and NOT p4-bondagg/daemon/. This gate constrains a research
+      prototype's draw order; it constrains no shipping code.
+   2. This job has no continue-on-error and SPD-2a is GATED at a measured
+      paired margin of 0.046310 (0.000000 on 3 of the 5 geometries).
+      Deterministic, so it will not flake -- but it is a knife edge.
+   3. Every run here is GEO=canonical. The geometry study that produced the
+      GATED/REPORTED split is NOT re-run by this job (out/RUNME.sh does it by
+      hand), so a bar that becomes geometry-unstable will not be noticed here.
+   4. Rig sizes are N in {1,2,3}. The wire ceiling is 256.
+   5. The model tick is 10 ms; the shipped ring ticks at PingIval = 100 ms
+      (daemon/main.go). Every HOLD bar is scored 10x finer than the daemon
+      resolves. r1 sec 8 asks for equality; it does not hold.
+====================================================================================================
+  preflight: battery 18977c65a09d | ratchet 543c068778e2 | rig 03-reserved-composite | physics nsched_model.py
+
+----------------------------------------------------------------------------------------------------
+RUN 1 of 2 -- the tree as it stands, SEEDS=6 GEO=canonical
+----------------------------------------------------------------------------------------------------
+====================================================================================================
+OBJ-D LATENCY BARS -- SPD-1..6, HOLD-1..4   (U14)
+====================================================================================================
+  seeds=6 T=9.0s gran=10.0ms rig=edge+mid geo=canonical defect=none
+  physics : nsched_model.py
+  rig     : pull-study\03-reserved-composite\reserved_composite.py
+  gran    : 10.0 ms from nsched_model.py source DT, <=10 ms asserted (r1 sec 8 limb 2)
+  go tick : 100 ms -- daemon/main.go PingIval, the cadence that calls ring.Tick(now).
+            r1 sec 8 also asks for gran == the Go ticker period. MEASURED, and it
+            does NOT hold: 10 ms model vs 100 ms shipped ring. Recorded as an
+            open finding, not asserted away -- every HOLD bar here is scored at a
+            granularity 10x finer than the shipped ring can resolve.
+  DEFECT  : no injection -- the tree as it stands
+  ADR-004: every bar below is PAIRED, STRUCTURAL or UNIT. No absolute
+  loss or latency threshold is asserted against this rig anywhere.
+
+#   SPD-1  S3 edge offer=60000  speed vs the N=1 eth control  nominal_agg=60000
+  SPD-1a  spotty-class share == 0 (structural)                 PASS  share=0.0000
+  MARGIN SPD-1a | spotty-class share == 0 (structural) | 0
+  SPD-1b  out-of-order arrivals == 0 (structural)              PASS  late_arrivals=0
+  MARGIN SPD-1b | out-of-order arrivals == 0 (structural) | 0
+  SPD-1c  paired p95 <= p95(N=1 eth control) + 2*gran          PASS  p95=11 ctl=11 tol=20
+  MARGIN SPD-1c | paired p95 <= p95(N=1 eth control) + 2*gran | 20
+  SPD-1d  paired gp >= gp(N=1 eth control)                     PASS  gp=59926 ctl=59926
+  MARGIN SPD-1d | paired gp >= gp(N=1 eth control) | 0
+
+#   SPD-2  S3 edge offer=90000  speed vs max, identical seeds  nominal_agg=90000
+  SPD-2a  paired gp >= gp(max)                                 PASS  gp=89888 max=89847
+  MARGIN SPD-2a | paired gp >= gp(max) | 0.0463095384
+  SPD-2b  paired p95 <= p95(max)                               FAIL  p95=21 max=14
+  MARGIN SPD-2b | paired p95 <= p95(max) | -7
+  SPD-2c  spotty-class share == 0 at spill (structural)        PASS  share=0.0000 max_share=0.1243
+  MARGIN SPD-2c | spotty-class share == 0 at spill (structural) | 0
+
+#   SPD-3  S3 edge offer=140000  speed vs max, saturation  nominal_agg=140000
+  SPD-3a  paired gp >= 0.99 * gp(max)  [measured ratio]        PASS  ratio=0.9993 bar=0.99
+  MARGIN SPD-3a | paired gp >= 0.99 * gp(max)  [measured ratio] | 0.927219142
+  SPD-3b  paired p95 <= 1.03 * p95(max)  [measured ratio]      PASS  ratio=1.0276 bar=1.03
+  MARGIN SPD-3b | paired p95 <= 1.03 * p95(max)  [measured ratio] | 0.244094488
+
+#   SPD-4  S4 edge offer=50000  all-spotty, speed vs max  nominal_agg=50000
+  SPD-4a  paired gp >= gp(max)                                 PASS  gp=47828 max=47827
+  MARGIN SPD-4a | paired gp >= gp(max) | 0.00255872269
+  SPD-4b  paired p95 <= p95(max)                               FAIL  p95=334.000 max=334.000
+  MARGIN SPD-4b | paired p95 <= p95(max) | -3.97903932e-13
+
+#   SPD-5  N2 mid cellA+eth  speed-key vs Dc(hungriest)  nominal_agg=107000
+  SPD-5a  load=0.65 paired gp >= gp(Dc)                        FAIL  gp=69321 Dc=69349
+  MARGIN SPD-5a | load=0.65 paired gp >= gp(Dc) | -0.0405865641
+  SPD-5b  load=0.65 paired p95 <= p95(Dc)                      PASS  p95=59 Dc=77
+  MARGIN SPD-5b | load=0.65 paired p95 <= p95(Dc) | 23.2778204
+  SPD-5c  load=0.65 paired late-discard <= late(Dc)            FAIL  late=33 Dc=0
+  MARGIN SPD-5c | load=0.65 paired late-discard <= late(Dc) | -33
+  SPD-5a  load=0.85 paired gp >= gp(Dc)                        FAIL  gp=87212 Dc=87252
+  MARGIN SPD-5a | load=0.85 paired gp >= gp(Dc) | -0.0448817296
+  SPD-5b  load=0.85 paired p95 <= p95(Dc)                      PASS  p95=373 Dc=436
+  MARGIN SPD-5b | load=0.85 paired p95 <= p95(Dc) | 14.4476038
+  SPD-5c  load=0.85 paired late-discard <= late(Dc)            FAIL  late=150 Dc=108
+  MARGIN SPD-5c | load=0.85 paired late-discard <= late(Dc) | -42
+
+#   SPD-6  S3 edge STEP 30k->90k->30k  share follows demand  nominal_agg=90000
+  SPD-6a  share rises or holds into the 90k step (no starvation) PASS  seg1=0.0000 seg2=0.0000
+  MARGIN SPD-6a | share rises or holds into the 90k step (no starvation) | 0
+  SPD-6b  share RETURNS to the fits-load value after the step  PASS  seg3=0.0000 seg1=0.0000
+  MARGIN SPD-6b | share RETURNS to the fits-load value after the step | 0
+  SPD-6c  no residual pinning: seg3 share <= seg2 share        PASS  seg3=0.0000 seg2=0.0000
+  MARGIN SPD-6c | no residual pinning: seg3 share <= seg2 share | 0
+
+#   HOLD-1 N2 edge cellA+eth load=0.85  ratchet vs fixed-343  nominal_agg=107000
+  HOLD-1a edge p50(ratchet) <= p50(343) + 2*gran               PASS  p50=12 fixed=12 tol=20
+  MARGIN HOLD-1a | edge p50(ratchet) <= p50(343) + 2*gran | 20
+  HOLD-1b edge p95(ratchet) <= p95(343) + 2*gran               PASS  p95=242 fixed=232 tol=20
+  MARGIN HOLD-1b | edge p95(ratchet) <= p95(343) + 2*gran | 10
+  HOLD-1c edge p99(ratchet) <= p99(343) + 2*gran               FAIL  p99=323 fixed=261 tol=20
+  MARGIN HOLD-1c | edge p99(ratchet) <= p99(343) + 2*gran | -42
+  HOLD-1d edge late(ratchet) <= late(343) + one event burst    PASS  late=24 fixed=390 burst=137
+  MARGIN HOLD-1d | edge late(ratchet) <= late(343) + one event burst | 503
+  HOLD-3a edge p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran PASS  warm_p95=12 overall=242 tol=20
+  MARGIN HOLD-3a | edge p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran | 250
+
+#   HOLD-2 N2 mid cellA+eth load=0.85  ratchet vs fixed-343  nominal_agg=107000
+  HOLD-2a mid p50(ratchet) <= p50(343) + 2*gran                FAIL  p50=152 fixed=129 tol=20
+  MARGIN HOLD-2a | mid p50(ratchet) <= p50(343) + 2*gran | -2.33304608
+  HOLD-2b mid late(ratchet) <= late(343) + one event burst     PASS  late=108 fixed=1612 burst=104
+  MARGIN HOLD-2b | mid late(ratchet) <= late(343) + one event burst | 1607
+  HOLD-3b mid p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran PASS  warm_p95=40 overall=436 tol=20
+  MARGIN HOLD-3b | mid p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran | 415.28712
+
+#   HOLD-4 unit derivation of the ratchet   (no rig, no seeds)
+  HOLD-4a zero observations => hold == gran                    PASS  hold=10.000 gran=10.000
+  MARGIN HOLD-4a | zero observations => hold == gran | 1
+  HOLD-4b injected gap g => hold == g + gran                   PASS  hold=147.000 want=147.000
+  MARGIN HOLD-4b | injected gap g => hold == g + gran | 0
+  HOLD-4c membership change => hold == spread(D) + gran        PASS  hold=33.000 want=33.000
+  MARGIN HOLD-4c | membership change => hold == spread(D) + gran | 1
+
+----------------------------------------------------------------------------------------------------
+8 BAR FAILURE(S):
+  FAIL SPD-2b paired p95 <= p95(max): p95=21 max=14
+  FAIL SPD-4b paired p95 <= p95(max): p95=334.000 max=334.000
+  FAIL SPD-5a load=0.65 paired gp >= gp(Dc): gp=69321 Dc=69349
+  FAIL SPD-5c load=0.65 paired late-discard <= late(Dc): late=33 Dc=0
+  FAIL SPD-5a load=0.85 paired gp >= gp(Dc): gp=87212 Dc=87252
+  FAIL SPD-5c load=0.85 paired late-discard <= late(Dc): late=150 Dc=108
+  FAIL HOLD-1c edge p99(ratchet) <= p99(343) + 2*gran: p99=323 fixed=261 tol=20
+  FAIL HOLD-2a mid p50(ratchet) <= p50(343) + 2*gran: p50=152 fixed=129 tol=20
+elapsed 86s
+
+----------------------------------------------------------------------------------------------------
+STRUCTURE CHECK -- a battery that died mid-run prints fewer check lines and
+would otherwise read as green.
+  HOLD-1a   got  1  want  1  -> ok
+  HOLD-1b   got  1  want  1  -> ok
+  HOLD-1c   got  1  want  1  -> ok
+  HOLD-1d   got  1  want  1  -> ok
+  HOLD-2a   got  1  want  1  -> ok
+  HOLD-2b   got  1  want  1  -> ok
+  HOLD-3a   got  1  want  1  -> ok
+  HOLD-3b   got  1  want  1  -> ok
+  HOLD-4a   got  1  want  1  -> ok
+  HOLD-4b   got  1  want  1  -> ok
+  HOLD-4c   got  1  want  1  -> ok
+  SPD-1a    got  1  want  1  -> ok
+  SPD-1b    got  1  want  1  -> ok
+  SPD-1c    got  1  want  1  -> ok
+  SPD-1d    got  1  want  1  -> ok
+  SPD-2a    got  1  want  1  -> ok
+  SPD-2b    got  1  want  1  -> ok
+  SPD-2c    got  1  want  1  -> ok
+  SPD-3a    got  1  want  1  -> ok
+  SPD-3b    got  1  want  1  -> ok
+  SPD-4a    got  1  want  1  -> ok
+  SPD-4b    got  1  want  1  -> ok
+  SPD-5a    got  2  want  2  -> ok
+  SPD-5b    got  2  want  2  -> ok
+  SPD-5c    got  2  want  2  -> ok
+  SPD-6a    got  1  want  1  -> ok
+  SPD-6b    got  1  want  1  -> ok
+  SPD-6c    got  1  want  1  -> ok
+
+----------------------------------------------------------------------------------------------------
+MARGIN PIN -- every check line's measured margin against the recorded
+baseline. A widened tolerance IS a moved margin: this is what the hash pin
+and the mutation matrix between them do NOT bound.
+----------------------------------------------------------------------------------------------------
+  31 check lines, 31 pinned, 0 moved, 0 unpinned, 0 pinned-but-absent
+----------------------------------------------------------------------------------------------------
+BAR FAILURES BY CLASS  (8 reported by the battery)
+----------------------------------------------------------------------------------------------------
+  NOT GATED [geometry-unstable] -- reported only:
+    (reported) SPD-4b    paired p95 <= p95(max)
+    (reported) SPD-5c    load=0.65 paired late-discard <= late(Dc)
+    (reported) SPD-5c    load=0.85 paired late-discard <= late(Dc)
+    (reported) HOLD-1c   edge p99(ratchet) <= p99(343) + 2*gran
+    (reported) HOLD-2a   mid p50(ratchet) <= p50(343) + 2*gran
+  GATED, in the recorded baseline -- honest known fails, NOT weakened away:
+    (known)    SPD-2b    paired p95 <= p95(max)
+    (known)    SPD-5a    load=0.65 paired gp >= gp(Dc)
+    (known)    SPD-5a    load=0.85 paired gp >= gp(Dc)
+
+----------------------------------------------------------------------------------------------------
+RUN 2 of 2 -- MUTATION MATRIX, SEEDS=2. FOUR defects, each of which must
+turn a named set of bars RED. Each is a real design error from this project
+record. A hash pin stops the battery being EDITED; this stops it being
+HOLLOW; the MARGIN PIN above is what bounds how far it can be DILUTED.
+NOT run here: rank-mid-meter and warmup-max (they redden only bars that
+already fail on the clean tree) and hold-quantile (minutes per scenario).
+----------------------------------------------------------------------------------------------------
+  hold-gran        expects RED: HOLD-1d, HOLD-2b, SPD-3a                 -> ok
+  rank-hungriest   expects RED: SPD-1a, SPD-1b, SPD-2c, SPD-6a, SPD-6b, SPD-6c -> ok
+  rank-static      expects RED: SPD-2a                                   -> ok
+  ratchet-x3       expects RED: HOLD-4a, HOLD-4b, HOLD-4c                -> ok
+
+  BARS WITH NO DEMONSTRATED FAILURE MODE -- reported, deliberately NOT gated:
+    (no red demo) HOLD-1a
+    (no red demo) HOLD-1b
+    (no red demo) HOLD-3a
+    (no red demo) HOLD-3b
+    (no red demo) SPD-1c
+    (no red demo) SPD-1d
+
+====================================================================================================
+GATE PASS -- every gated bar held outside the recorded baseline, and every
+gated bar was demonstrated RED under its pre-registered defect in this run.
+Reminder: this says NOTHING about absolute latency, and nothing about hardware.
+GATE_RC=0
