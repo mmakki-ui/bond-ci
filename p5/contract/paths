@@ -1,0 +1,206 @@
+# p5/contract/paths -- THE ON-DISK CONTRACT: every path P5 owns.
+#
+# This is the DESIGN-TIME inventory, and it is the SINGLE SOURCE from which the
+# shipped code derives. It bounds what P5 may put on a box; it is read at run
+# time by p5-common.sh, and everything else is derived from it:
+#
+#   what the installer may place   p5_check_dest consults it LAST, so a path
+#                                  inside the namespace that nobody declared
+#                                  here is refused (exit 4).
+#   what the installer records     the installer's own file set is checked
+#                                  against the `install` rows below and ABORTS
+#                                  on divergence in either direction.
+#   which directories are recorded a created directory enters installed.dirs
+#                                  only if it is a `dir` row here. Shared system
+#                                  directories the install had to create
+#                                  (/usr/sbin, /etc/init.d) are NOT rows here,
+#                                  so they can never be recorded and E7 can
+#                                  never try to remove them.
+#   what "clean" means             the P5-half clean predicate probes EVERY
+#                                  non-staging row below. Adding a row extends
+#                                  the predicate automatically.
+#   what --remove removes          the removal plan is the install-time record
+#                                  RE-VALIDATED against this file, plus the
+#                                  post-install states below removed by the
+#                                  mechanism that created them.
+#
+# Before this was derived, the removal list and the clean predicate were two
+# hand-written lists. Both were wrong in the same way and neither could see the
+# other: a clean install placed 9 files and recorded 6, and a root carrying
+# seven declared P5 paths reported CLEAN. Deriving both from this file is the
+# fix; patching the two lists would have left the defect class alive.
+#
+# WHAT REMAINS HAND-MAINTAINED, stated so nobody has to go looking:
+#   1. This file. A human adds a row. Bars NS-2/NS-3/NS-4/NS-5 constrain its
+#      shape, its disjointness from contract/foreign and its agreement with
+#      contract/namespace, but nothing can invent the row itself.
+#   2. p5-install's source->destination->mode map for the product's OWN files.
+#      The contract is about destinations; it cannot carry "copied from where,
+#      with what mode". That map plus the installer's list of files it
+#      SYNTHESISES (the stamp and the two records) must together equal exactly
+#      the `install`-state file rows below -- p5-install asserts set equality in
+#      BOTH directions and aborts on any divergence (bar IN-14/IN-15).
+#   3. contract/namespace's patterns. NS-4 asserts every row here is admitted by
+#      one, so the two cannot drift into different spellings of the same claim.
+# Nothing else is a list. In particular there is no hand-written removal list
+# and no hand-written clean predicate any more.
+#
+# It is still NOT what E7 removes VERBATIM. Removal is driven by
+# /usr/lib/p5/installed.files + installed.dirs, the INSTALL-TIME record of what
+# this particular install actually placed, RE-VALIDATED row by row against this
+# file before anything is unlinked. Two levels on purpose --
+#
+#   design-time (this file)   what P5 is ALLOWED to own. A path absent here is
+#                             not P5's, so removal must not touch it, and the
+#                             installer refuses to write it (contract/namespace
+#                             is the coarse machine-checked form of the same
+#                             rule; this file is the exact one).
+#   install-time (the record) what P5 DID own on THIS box at THIS version.
+#                             Exact, per-file sha256, survives version skew.
+#
+# The re-validation is what makes version skew safe. A record written by an
+# older, buggier installer can name a path this file does not declare; the
+# remover REFUSES THE WHOLE REMOVAL and names the offending rows rather than
+# trusting the record. That is the mechanism that makes "rm -rf a directory P5
+# does not exclusively own" impossible rather than unlikely.
+#
+# Anything E7 removes that is NOT in the install-time record is old-stack
+# removal, which is a different list with a different owner (U26) and a
+# different justification (contract/foreign enumerates it).
+#
+# FORMAT: kind|role|path|owner|state|note
+#   kind   dir | file | glob | staging | uci
+#   role   client | server | both
+#   owner  the epic/unit that puts it there (E0 = this unit)
+#   state  WHO creates it and WHEN. This is what decides whether the
+#          install-time record can possibly cover it:
+#          install   placed by p5-install itself, every install, unconditional,
+#                    and RECORDED
+#          payload   placed by p5-install FROM THE PACKAGE FILEMAP (U28 builds
+#                    the filemap; the file exists only if the package ships it)
+#          reserved  declared so removal's scope is known, NOTHING writes it yet
+#          transient written by p5-install or p5-uninstall DURING a run and
+#                    removed before it exits. Never recorded -- its PRESENCE is
+#                    the signal that a run died half way (see below)
+#          runtime   created by P5 while running, not by the installer
+#          enable    created AFTER install, by procd, when a service is enabled
+#          uci       a named UCI object, not a filesystem path
+#   note   why it exists / what it holds
+#
+# `reserved` rows are the point of this file: removal is being written before
+# E5/E6 have shipped their files, so it needs the SHAPE of the final install,
+# not just today's. A reserved row is a claim on a path, not a promise that a
+# file appears there. Its owner unit either fills it or deletes the row.
+#
+# THE STATES THAT THE INSTALL-TIME RECORD CANNOT COVER, and why they exist.
+# The record is written by the installer, so it is structurally incapable of
+# containing anything created after the installer exits. Four classes:
+#   transient /usr/lib/p5/{install,remove}.inprogress -- the INTENT records.
+#            Written and synced BEFORE the first destructive step, unlinked
+#            after the last. A completion stamp written afterwards cannot do
+#            this job: between the first write and the stamp there is a window
+#            in which the box carries P5 files and no record of them, and that
+#            window is exactly where "wedged against its own reinstall" lives.
+#   runtime  /var/run/p5 (tmpfs, cleared by reboot) and /etc/p5/* (E6's facts,
+#            written on the box by E6's fact-writer, never by the installer --
+#            an installer that seeds configuration is an installer that ships a
+#            constant).
+#   enable   /etc/rc.d/[SK]??p5-* -- `/etc/init.d/<svc> enable` writes these
+#            symlinks. The deployed stack already treats that flag as lifecycle
+#            STATE in writing (p2-engarde/bondctl:15 "State owners: engagement
+#            = rc.d flag", p1-autorate/autoratectl:11, 98-wg-autorate:9,
+#            99-tether-autorate:49). E5 ships /etc/init.d/p5-datapath and
+#            /etc/init.d/p5-server, so P5 WILL create them.
+#   uci      a named object inside a config file P5 does not own.
+# Removal must not look for these in installed.files. It removes them by the
+# mechanism that created them -- `disable` for rc.d, `uci delete` for a uci
+# object, a bounded sweep of the declared glob for anything left over -- and
+# the P5-half clean predicate probes them all, so a leftover is visible.
+
+# ---- product metadata root (the thing that makes a box interrogable) --------
+dir |both  |/usr/lib/p5                     |E0 |install |product metadata root
+file|both  |/usr/lib/p5/stamp               |E0 |install |version + provenance stamp; what `p5-version` prints
+file|both  |/usr/lib/p5/installed.files     |E0 |install |sha256sum-format record of every file this install placed, ITSELF INCLUDED (one self-referential row)
+file|both  |/usr/lib/p5/installed.dirs      |E0 |install |directories this install CREATED and OWNS, and which are declared `dir` rows here (so removal rmdirs only those)
+file|both  |/usr/lib/p5/p5-common.sh        |E0 |install |shared sh library sourced by the on-box entry points
+file|both  |/usr/lib/p5/contract-namespace  |E0 |install |the shipped copy of contract/namespace, so an installed box can re-check its own scope offline
+file|both  |/usr/lib/p5/contract-foreign    |E0 |install |the shipped copy of contract/foreign, for the same reason
+file|both  |/usr/lib/p5/contract-paths      |E0 |install |the shipped copy of THIS file. The on-box entry points derive the clean predicate and the removal plan from it, and it is what a stale record is re-validated against
+
+# ---- the intent records: how a half-finished run stays finishable ----------
+# Written before the first destructive step of the run they name, removed after
+# the last. They are NOT in installed.files (they are gone by the time it is
+# written) and they are NOT the stamp (the stamp says a run FINISHED; these say
+# a run STARTED). Their presence is a box state the tools name and act on.
+file|both  |/usr/lib/p5/install.inprogress  |E0 |transient|the install plan, synced before the first file is placed. Present => an install died half way; the plan it carries is what --remove undoes
+file|both  |/usr/lib/p5/remove.inprogress   |E0 |transient|the removal plan, synced before the first unlink. Present => a removal died half way; re-running --remove resumes from it
+
+# ---- on-box entry points ---------------------------------------------------
+# p5-install is NOT installed: it belongs to the package, not to the box. A box
+# with no package cannot install; a box with no package MUST still be able to
+# describe, protect and remove itself, which is why the other three ARE
+# installed.
+file|both  |/usr/sbin/p5-uninstall          |E0 |install |single uninstall entry point. The P5 half (--check/--list/--remove) is E0's and is implemented; --purge, the old-stack half, is U26/E7's
+file|both  |/usr/sbin/p5-version            |E0 |install |provenance/interrogation entry point
+file|both  |/usr/sbin/p5-deadman            |E0 |install |the automatic-rollback primitive any step that can cut the management path must arm before it runs. Deadline-based, so the timer, the boot check and a manual fire are ONE code path
+
+# ---- configuration and runtime roots ---------------------------------------
+dir |both  |/etc/p5                         |E0 |install |P5 fact/config root; E6's fact-writer populates it
+dir |both  |/etc/p5/deadman                 |E0 |install |armed deadman records. On persistent storage on purpose: a deadman that only exists in a running process does not survive the power loss it is there to protect against
+glob|both  |/etc/p5/deadman/*               |E0 |runtime |one file per armed deadman: deadline, restore command, label. Created by `p5-deadman arm`, removed by `confirm` or by firing. Never installed
+dir |both  |/var/run/p5                     |E0 |runtime |tmpfs runtime state; created by P5 while running, so it can NEVER be in installed.dirs. Removal clears it by the declared literal path from THIS file, never from the record, and a reboot clears it anyway
+
+# ---- payload: shipped by the package, placed from the filemap --------------
+file|client|/usr/sbin/p5-datapath           |E2 |reserved|the pull-core client daemon (U7). Built as p4-bondagg/daemon -> CI artifact bond-agg-linux-<arch>; installs under a p5-* name because /usr/sbin/bond-agg is on the OLD stack's removal list (contract/foreign)
+file|server|/usr/sbin/p5-server             |E3 |reserved|the thin server daemon (U16). Built as p4-bondagg/server -> CI artifact bondsrv-linux-arm64
+file|both  |/usr/sbin/p5                    |E5 |reserved|the operator CLI. Name and verbs are E5's; E0 only reserves the path
+file|client|/etc/init.d/p5-datapath         |E5 |reserved|procd service for the client daemon. START/STOP priorities are E5's to derive -- E0 ships no init script and invents no priority
+file|server|/etc/init.d/p5-server           |E5 |reserved|procd service for the server daemon
+glob|client|/etc/hotplug.d/iface/[0-9][0-9]-p5 |E5 |reserved|netifd hook. kind=glob because the two-digit priority is deliberately UNSET here -- choosing it is choosing an ordering against netifd's other hooks, which is E5's derivation to make and justify. See contract/namespace note 3
+file|both  |/etc/config/p5                  |E5 |reserved|UCI config, IF E5 chooses UCI over plain files in /etc/p5. If it does not, delete this row and the matching namespace pattern rather than leaving an unused claim
+
+# ---- created AFTER install, by procd, when a service is enabled ------------
+# `/etc/init.d/<svc> enable` writes /etc/rc.d/S<pri><svc> and the matching
+# K<pri> symlink. The installer cannot record these: it enables nothing, and
+# they do not exist while it runs. Declared as ONE glob rather than four rows
+# because the priority digits are E5's derivation (same reason as the hotplug
+# hook) and because the service SET is E5's to extend.
+glob|both  |/etc/rc.d/[SK][0-9][0-9]p5-*    |E5 |enable  |procd start/stop flags for the P5 services. Created by `enable`, removed by `disable` -- removal calls `stop` then `disable` BEFORE it unlinks the init script, or the flag outlives its target and points at nothing. The P5-half clean predicate probes this glob, so a stale flag is visible
+
+# ---- facts written on the box (E6's stateless fact-writer) -----------------
+# Enumerated as a glob, not per-file: the fact SET is E6's to define, and
+# guessing filenames here would be inventing the fact model.
+#
+# state=runtime, NOT reserved, and that is a real gate and not bookkeeping:
+# E6's fact-writer runs ON THE BOX, so the installer must never be able to
+# place a file under /etc/p5. An installer that seeds configuration is an
+# installer that ships a constant -- the /etc/bond/agg_w 20000,15000 defect
+# (removed in 52a76d3) is exactly this shape. Bar IN-16 packages a file into
+# /etc/p5 and asserts exit 4.
+glob|both  |/etc/p5/*                       |E6 |runtime |discovered facts (WG identity, the N sources, spotty-class). Names are E6's. Written on the box, never by the installer
+
+# ---- named UCI objects P5 owns inside files it does NOT own ----------------
+# See contract/foreign for the full argument. Short form: the unit of ownership
+# for a UCI config file is the named OBJECT, not the file. /etc/config/firewall
+# is GL native and stays on the foreign list, so nothing may ever INSTALL a
+# file there; but the server cannot receive on the bonded UDP port unless
+# something opens it, and the old stack's answer -- one named rule object,
+# p2-engarde/bootstrap-bond-server.sh:57-63 `uci set firewall.engarde...` --
+# is removable by name, which is exactly why the handover's removal list names
+# the object (`its firewall rule (firewall.engarde)`,
+# p5-execution-handover.md:80) and not the file. P5 takes the same shape under
+# its own name. The port itself is NOT here and is not E0's: it is a value the
+# owning unit must carry, not a constant this file invents.
+#
+# THIS ROW IS THE ONE PLACE P5 TOUCHES THE MANAGEMENT PATH, and it is why
+# p5-deadman exists. Creating or deleting a firewall object and committing it
+# reloads the firewall; on the server, the operator's own SSH session rides
+# that firewall. E5 (create) and E7 (delete) MUST arm a deadman first. E0
+# neither creates nor deletes it, which is asserted by bar MG-1.
+uci |server|firewall.p5                     |E5 |uci     |the one named firewall rule that admits the bonded UDP port on the server. Created by E5's server bootstrap with `uci set firewall.p5...; uci commit firewall`, removed with `uci delete firewall.p5; uci commit firewall`. NOTHING writes it yet. P5 owns this OBJECT and no other object in that file
+
+# ---- package staging (transient, NOT part of the removal contract) ---------
+# tmpfs, cleared by reboot. The installer cleans it on success. Listed so that
+# a reader looking for "where does the package land" finds the answer here and
+# does not conclude removal must handle it.
+staging|both|/tmp/p5-pkg                    |E8 |reserved|unpacked package staging dir; tmpfs, not persistent, not removed

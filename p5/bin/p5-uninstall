@@ -1,0 +1,877 @@
+#!/bin/sh
+# p5-uninstall -- THE single uninstall entry point for the P5 product.
+#
+#   p5-uninstall --check [--scope p5|old|both] [--role client|server]
+#   p5-uninstall --list                            what did this install place?
+#   p5-uninstall --remove [--dry-run] [--recover]  remove P5 itself
+#   p5-uninstall --purge                           remove P5 AND the old stack
+#
+# SCOPE. The P5 half -- --check, --list and --remove -- is E0's and is
+# IMPLEMENTED here. The OLD-STACK half (--purge, and --check --scope old) is
+# U26/E7's and returns exit 6 naming its owner.
+#
+# That split moved. Round 1 left --remove unimplemented too, and the result was
+# a box that could be wedged against both its own reinstall AND its own
+# removal: a crashed or partial install left /usr/lib/p5 populated, the clean
+# predicate said NOT CLEAN forever, the next install refused with exit 5, and
+# the only verb that could have cleared it returned "not implemented". On a box
+# with no physical access that is not a bug, it is the loss of the box. The P5
+# half of removal is fully determined by the install-time record and the shipped
+# contract -- it needs nothing from the old package -- so it belongs here, where
+# it can be written against the record that E0 itself defines.
+#
+# WHAT MAKES THE REMOVAL SET SAFE. Four gates, all needed, none sufficient:
+#
+#  1. RECORD SIDE. installed.dirs can only ever contain the contract's
+#     install-state `dir` rows, because the installer's only writer for it is a
+#     loop over exactly those rows (p5-install step 9). There is no code path in
+#     which a `dirname` result reaches it -- that single line is what put
+#     /usr/sbin and /etc/init.d into a removal list.
+#
+#  2. RE-DERIVATION AT REMOVAL TIME. The record is data on disk: it can have
+#     been written by an older installer carrying the bug above, or edited. So
+#     nothing in it is trusted. Every entry is re-validated against the SHIPPED
+#     contract (p5_removable), and ONE bad entry refuses the WHOLE removal and
+#     names it. Bar RM-6 hand-writes /usr/sbin and /etc/init.d into
+#     installed.dirs and asserts nothing is unlinked.
+#
+#  3. rmdir, NEVER rm -rf, on the recorded directories. `rmdir` on a non-empty
+#     directory fails and is reported; it cannot take a subtree with it. The one
+#     place a recursive removal happens is a declared `dir` row with
+#     state=runtime -- today exactly /var/run/p5, a tmpfs directory P5 creates
+#     itself -- and it is reached only through four independent gates: declared
+#     as a runtime dir in the contract, inside the namespace, clear of
+#     contract/foreign, and its basename anchored to `p5`.
+#
+#  4. CONTRACT SIDE, and it was missing until now. The rows the CONTRACT
+#     expands to -- enable globs, runtime globs, runtime dirs -- became
+#     UNLINK/RMTREE with NO check, while the record beside them was validated
+#     row by row. A `../../` row therefore produced a real unlink of
+#     /etc/dropbear/authorized_keys and executed it, which on the server is the
+#     box. contract-paths on a box is a file on disk exactly like the record,
+#     so it goes through the same p5_removable, and p5_removable now also
+#     resolves symlinks: a hit SPELLED inside the namespace that LANDS outside
+#     it is refused, which no lexical check could ever see. Bars PS-1..PS-5
+#     attempt the five escapes and assert the refusal; PS-6 stubs the physical
+#     check out and asserts the symlink escape comes back.
+#
+#  5. AND AT THE POINT OF USE, IN EVERY DESTRUCTIVE ARM. A gate that runs only
+#     while the plan is being BUILT is a gate on a snapshot: the plan is then
+#     written to a file under a shared /tmp and read back to be executed, and an
+#     ancestor of a planned path can become a symlink in between. The UNLINK and
+#     RMTREE arms re-check (B1). SELFDROP did not -- it predates that doctrine
+#     and ran rm -f on the recovery toolchain of a box with no console carrying
+#     only the plan-time gate, and no bar covered it. It re-checks now, through
+#     the same p5_removable, and PS-7 swaps a toolchain path out from under the
+#     plan MID-RUN while MU-PS7 neutralises that one guard and shows the same
+#     run deletes a file outside the namespace.
+#
+# AND IT IS INTERRUPTIBLE. The plan is written to
+# /usr/lib/p5/remove.inprogress and synced BEFORE the first unlink, and the
+# files under /usr/lib/p5 are unlinked LATE, so the record outlives almost
+# everything it describes. Re-running --remove resumes from the plan. Every
+# step is idempotent: unlinking an absent file, rmdir-ing an absent directory
+# and disabling an absent service are all successes.
+#
+# AND THE VERB OUTLIVES WHAT IT UNDOES. Round 2 got the record ordering right
+# and the TOOL ordering wrong: /usr/sbin/p5-uninstall was sorted into the
+# middle of the payload pass -- action 5 of 17 on the battery's client fixture,
+# and the exact index is fixture-dependent, so MU-RCV re-measures it rather
+# than this comment asserting it -- so from there on the box had no
+# uninstaller, and p5-install's refusal printed "Remedy: p5-uninstall
+# --remove" -- the file that run had just deleted. Recovery meant re-uploading
+# the package to a box with no console. Now the whole recovery toolchain --
+# the library, the three contract copies and the entry point itself, listed by
+# p5_self_toolchain -- goes in ONE final SELFDROP action after everything
+# else, so a kill before ANY action leaves a box that can still remove itself
+# with no package present. Bar RCV-1 kills before every index and proves it;
+# MU-RCV drops the entry point from that list and shows the bar goes red.
+#
+# CONDITION CARRIED FOR U26 (ROADMAP U26, from the U6 review): a pre-existing
+# /etc/bond/agg_w must be removed or quarantined. A stale file there becomes
+# live unmeasured per-source weights, and a provenance check inside
+# agg_weights() is unverifiable from shell -- so install/uninstall is the only
+# correct enforcement point. It is on the foreign list here (origin p3, pattern
+# /etc/bond/*) so the installer can never write it; REMOVING it is E7's.
+#
+# BUSYBOX-SAFE POSIX sh.
+
+set -u
+
+P5_TAG="p5-uninstall"
+
+# On the box the library sits at /usr/lib/p5; from the package it is ../lib.
+# Try the installed location first: an uninstaller must work on a box that no
+# longer has the package.
+# WHERE THE LIBRARY COMES FROM, and the order matters.
+# The SIBLING copy wins. Running from an unpacked package, ../lib is the
+# package's own library and is the right one. Running from the box, this
+# script sits at /usr/sbin, so ../lib is /usr/lib -- which holds no
+# p5-common.sh -- and the box copy under /usr/lib/p5 is used instead. So the
+# sibling-first order costs nothing on a real box and buys one thing that
+# matters: a box whose /usr/lib/p5/p5-common.sh is CORRUPT can still be
+# inspected and cleaned up from the package, instead of every tool sourcing
+# the broken library and dying. A damaged box must stay reachable by its own
+# repair tools.
+_self_dir=$(dirname "$0")
+if [ -r "$_self_dir/../lib/p5-common.sh" ] || [ -n "${P5_LIB_SRC:-}" ]; then
+    _lib_src="${P5_LIB_SRC:-$_self_dir/../lib}"
+else
+    _lib_src="${P5_ROOT:-}/usr/lib/p5"
+fi
+if [ -r "$_self_dir/../contract/paths" ]; then
+    _con_dir="$_self_dir/../contract"; _con_pfx=""
+else
+    _con_dir="${P5_ROOT:-}/usr/lib/p5"; _con_pfx="contract-"
+fi
+[ -r "$_lib_src/p5-common.sh" ] || {
+    echo "p5-uninstall: ERROR: cannot find p5-common.sh under $_lib_src" >&2
+    exit 5
+}
+. "$_lib_src/p5-common.sh"
+# Prefer the box's own shipped contract copies. If they are missing -- which is
+# itself a damaged box -- fall back to the package's, loudly, rather than dying
+# with exit 5 and leaving the operator no verb that can clean up. A tool that
+# refuses to run because the thing it is supposed to remove is broken is the
+# wedge this file exists to prevent.
+if [ -r "$_con_dir/${_con_pfx}paths" ]; then
+    p5_contract_dir "$_con_dir" "$_con_pfx"
+elif [ -r "$_self_dir/../contract/paths" ]; then
+    echo "p5-uninstall: ERROR: the box's own contract copies are missing under $_con_dir; falling back to the package's" >&2
+    p5_contract_dir "$_self_dir/../contract" ""
+else
+    p5_contract_dir "$_con_dir" "$_con_pfx"
+fi
+
+usage() {
+    cat >&2 <<'EOF'
+usage: p5-uninstall --check|--list|--remove|--purge [options]
+
+  --check   read-only. Is this box clean enough for a fresh P5 install?
+            --scope p5    the P5 half only. Implemented here.
+            --scope old   the P1/P2/P3/P4 half only.        U26/E7, exit 6.
+            --scope both  (default) both halves.
+  --list    read-only. Print the files and directories this install placed.
+  --remove  remove P5 itself, from the install-time record, re-validated
+            against the shipped contract. Add --dry-run to print the exact
+            plan and change nothing. Add --recover to remove a box whose
+            record is gone, deriving the set from the contract instead.
+  --purge   remove P5 and the old P1/P2/P3/P4 stack.                U26/E7.
+
+exit codes: 0 clean/ok | 1 not clean / removal incomplete | 2 usage
+            4 the record names something the contract does not allow removing
+            5 precondition (box state refused, or a deadman is armed)
+            6 the logic for this verb belongs to another unit (named on stderr)
+EOF
+    exit "$P5_EX_USAGE"
+}
+
+VERB=""; ROLE=""; SCOPE=both; DRY=0; RECOVER=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check|--list|--remove|--purge)
+            [ -z "$VERB" ] || { echo "p5-uninstall: one verb at a time" >&2; usage; }
+            VERB="$1"; shift ;;
+        --role)  [ $# -ge 2 ] || usage; ROLE="$2"; shift 2 ;;
+        --scope) [ $# -ge 2 ] || usage; SCOPE="$2"; shift 2 ;;
+        --dry-run) DRY=1; shift ;;
+        --recover) RECOVER=1; shift ;;
+        -h|--help) usage ;;
+        *) echo "p5-uninstall: unknown argument: $1" >&2; usage ;;
+    esac
+done
+[ -n "$VERB" ] || usage
+case "${ROLE:-}" in ''|client|server) : ;; *) echo "p5-uninstall: --role must be client or server" >&2; usage ;; esac
+case "$SCOPE" in p5|old|both) : ;; *) echo "p5-uninstall: --scope must be p5, old or both" >&2; usage ;; esac
+# --role is OPTIONAL on this command line and MANDATORY to the row filters, and
+# until U25's adjudication pass the two were reconciled by RROLE="${ROLE:-both}"
+# -- written as if `both` meant "any role". It does not. p5_declared and p5_rows
+# (p5-common.sh) treat `both` as a literal row VALUE:
+#
+#     [ "$row_role" = both ] || [ "$row_role" = "$arg_role" ] || continue
+#
+# so RROLE=both matched ONLY rows tagged `both` and EXCLUDED every client row and
+# every server row. Measured end to end on a real client install, before this
+# change: `--remove` exited 4 having unlinked NOTHING, `--remove --dry-run`
+# exited 4 printing no plan at all, `--remove --recover` exited 4 -- while
+# `--remove --role client` exited 0 and cleaned the box. The refusal text
+# misdiagnosed it as the version-skew guard ("a record written by an older or
+# modified installer cannot be trusted") when the record was correct and current
+# and the filter was wrong.
+#
+# That was the DOCUMENTED invocation: p5-install's three Remedy strings, its
+# closing line, p5-version's two remedies and CONTRACT.md's own signature all
+# spell `p5-uninstall --remove` with no --role. It was invisible to the battery
+# because all 53 --remove call sites in p5/test/run.sh pass --role explicitly.
+#
+# Resolved here, once, and deliberately NOT by widening the row filters: those
+# filters are shared with p5_check_dest on the install side, where a wildcard
+# role would let the installer place any role's payload on any box. Instead the
+# role is resolved from the box itself, in one place, with an explicit refusal
+# when the box cannot answer:
+#
+#   1. an explicit --role wins, always;
+#   2. otherwise READ IT OFF THE BOX -- p5-install has always written P5_ROLE
+#      into the stamp and this file had never read it (its single P5_ROLE
+#      occurrence was the WRITE into the remove intent record);
+#   3. otherwise leave it unresolved, and let the verbs that consume it refuse
+#      by name (require_role) rather than silently filtering everything out.
+#
+# Rule 2 is also what repairs a wrong-role install: a box given the client
+# payload under `--role client` carries P5_ROLE=client in its stamp, so the bare
+# `--remove` the product prints now removes exactly what was placed.
+if [ -n "${ROLE:-}" ]; then
+    RROLE="$ROLE"; RROLE_SRC=flag
+else
+    RROLE=$(p5_stamp_get P5_ROLE 2>/dev/null) || RROLE=""
+    case "$RROLE" in
+        client|server) RROLE_SRC=stamp ;;
+        *) RROLE=""; RROLE_SRC=none ;;
+    esac
+fi
+
+# require_role -- called by every verb that consumes RROLE. A verb that filters
+# rows by a role it does not have removes nothing and reports a fault in the
+# wrong place, so this refuses with the flag's own name instead.
+require_role() {
+    [ -n "$RROLE" ] && {
+        [ "$RROLE_SRC" = stamp ] && p5_log "no --role given; using role=$RROLE from the install stamp"
+        return 0
+    }
+    p5_err "no --role was given and this box cannot supply one: there is no readable install"
+    p5_err "stamp at $(p5_unroot "$P5_STAMP") to read P5_ROLE from."
+    p5_err "Re-run naming the role explicitly:  p5-uninstall $VERB --role client|server"
+    p5_err "This refusal is deliberate. A removal filtered by a role nobody supplied would match"
+    p5_err "no contract row, unlink nothing, and report the fault against your install record."
+    exit "$P5_EX_USAGE"
+}
+
+p5_announce_overrides
+p5_require_contracts
+
+# Scratch. One directory, one trap, same reasoning as p5-install.
+# EXCLUSIVE, never adopted. $P5_WORK/ordered IS the removal plan, so a second process
+# adopting this directory could change the plan between the gate and the rm (U82).
+P5_WORK=$(p5_workdir p5-uninstall) || { echo "p5-uninstall: ERROR: cannot create an exclusive scratch directory under ${TMPDIR:-/tmp}" >&2; exit 5; }
+trap 'rm -rf "$P5_WORK"' EXIT INT TERM
+P5_TMPLIST="$P5_WORK/list"
+P5_PLANF="$P5_WORK/files"; P5_PLAND="$P5_WORK/dirs"
+P5_PLANBAD="$P5_WORK/bad"; P5_PLANO="$P5_WORK/ordered"; P5_SELFF="$P5_WORK/self"
+
+# SNAPSHOT THE CONTRACT BEFORE TOUCHING ANYTHING, and use the snapshot for the
+# rest of the run. This is not belt-and-braces: /usr/lib/p5/contract-paths is
+# ITSELF on the removal list, and every derived thing in this product -- the
+# clean predicate, the removal-plan re-validation, the box state machine --
+# reads it live. Without the snapshot the predicate goes BLIND at exactly the
+# moment it matters: the run unlinks the inventory, then asks "is anything
+# declared still present?", gets an unreadable inventory, sees nothing declared,
+# and reports CLEAN over a tree it has not finished removing. Measured on the
+# first end-to-end run: /usr/lib/p5 was left standing and --remove exited 0
+# calling the box clean.
+cp "$P5_CONTRACT_NS" "$P5_WORK/namespace" 2>/dev/null && P5_CONTRACT_NS="$P5_WORK/namespace"
+cp "$P5_CONTRACT_FOREIGN" "$P5_WORK/foreign" 2>/dev/null && P5_CONTRACT_FOREIGN="$P5_WORK/foreign"
+cp "$P5_CONTRACT_PATHS" "$P5_WORK/paths" 2>/dev/null && P5_CONTRACT_PATHS="$P5_WORK/paths"
+p5_require_contracts
+
+# --- read-only: what this install placed ------------------------------------
+do_list() {
+    if [ ! -r "$P5_FILEREC" ] && [ ! -r "$P5_DIRREC" ]; then
+        echo "$P5_TAG: no install record on this box (nothing at $(p5_unroot "$P5_FILEREC"))"
+        return "$P5_EX_OK"
+    fi
+    echo "# files (sha256  production-path) -- from $P5_FILEREC"
+    [ -r "$P5_FILEREC" ] && cat "$P5_FILEREC"
+    echo "# directories created by the install -- from $P5_DIRREC"
+    [ -r "$P5_DIRREC" ] && cat "$P5_DIRREC"
+    return "$P5_EX_OK"
+}
+
+# --- read-only: the P5 half of "clean" --------------------------------------
+# DERIVED, not written. It probes every non-staging row in contract/paths via
+# p5_present_paths, so it cannot check 4 of 12 the way the hand-written version
+# did: adding a row to the inventory extends this predicate with no code change
+# here. It also reports what it could NOT probe, so a CLEAN verdict always
+# carries the size of its own blind spot.
+p5_half_clean() {
+    _pc_dirty=0
+    p5_box_state "$RROLE"
+    case "$P5_STATE" in
+        clean) : ;;
+        *) echo "$P5_TAG: NOT CLEAN: box state is $P5_STATE -- $P5_STATE_WHY"; _pc_dirty=1 ;;
+    esac
+    p5_present_paths "$RROLE" | while IFS='|' read -r k s p; do
+        echo "$P5_TAG: NOT CLEAN: $p exists (declared kind=$k state=$s)"
+    done > "$P5_TMPLIST" 2>/dev/null
+    cat "$P5_TMPLIST"
+    [ -s "$P5_TMPLIST" ] && _pc_dirty=1
+    p5_unprobed_paths "$RROLE" | while IFS='|' read -r k s p; do
+        echo "$P5_TAG: UNPROBED: $p (kind=$k) -- a UCI object cannot be relocated by a test root, so this run could not decide about it"
+    done
+    [ "$_pc_dirty" = 0 ]
+}
+
+do_check() {
+    require_role
+    _dc_rc=0
+    if [ "$SCOPE" = p5 ] || [ "$SCOPE" = both ]; then
+        if p5_half_clean; then
+            echo "$P5_TAG: P5 half: CLEAN (no declared P5 path is present, box state clean)"
+        else
+            echo "$P5_TAG: P5 half: NOT CLEAN -- run --remove (add --dry-run first to see the exact set)"
+            return "$P5_EX_FAIL"
+        fi
+    fi
+    if [ "$SCOPE" = old ] || [ "$SCOPE" = both ]; then
+        p5_err "old-stack scan is NOT IMPLEMENTED. Owner: U26 (E7 uninstaller)."
+        p5_err "It must detect and remove the deployed P1/P2/P3 stack and the P4 push daemon,"
+        p5_err "deriving its artifact list from that package's OWN teardown -- not from"
+        p5_err "p5/contract/foreign, which is a refusal list for the installer and a SUBSET."
+        p5_err "This gate belongs BEFORE the switch (enable/start), not before the install:"
+        p5_err "P5's paths are disjoint from the old stack's (bar NS-3), so both can be resident."
+        return "$P5_EX_NOTIMPL"
+    fi
+    return "$_dc_rc"
+}
+
+# --- the removal plan -------------------------------------------------------
+# Built, validated in full, printed, and only then executed. --dry-run stops
+# after printing, which is what lets the whole set be read on a box nobody can
+# walk up to before anything is unlinked.
+build_plan() {
+    : > "$P5_PLANF"; : > "$P5_PLAND"; : > "$P5_PLANBAD"
+
+    # 1. file paths: the union of everything that claims to know what was placed
+    {
+        [ -r "$P5_FILEREC" ] && awk '{ if (NF >= 2) print $2 }' "$P5_FILEREC"
+        [ -r "$P5_INPROG_INSTALL" ] && grep '^file|' "$P5_INPROG_INSTALL" | cut -d'|' -f2
+        [ -r "$P5_INPROG_REMOVE" ] && grep '^file|' "$P5_INPROG_REMOVE" | cut -d'|' -f2
+        if [ "$RECOVER" = 1 ]; then
+            p5_present_paths "$RROLE" | grep -v '^dir|' | grep -v '^uci|' | cut -d'|' -f3
+        fi
+        # The transient records themselves, and any staged .p5-incoming left by
+        # a killed atomic write. Neither is in installed.files -- by the time it
+        # is written they are gone -- so they are added from the CONTRACT.
+        p5_rows "$RROLE" file transient | cut -d'|' -f3
+    } 2>/dev/null | grep '^/' | sort -u > "$P5_PLANF.raw"
+
+    # 2. directories
+    {
+        [ -r "$P5_DIRREC" ] && grep '^/' "$P5_DIRREC"
+        [ -r "$P5_INPROG_INSTALL" ] && grep '^dir|' "$P5_INPROG_INSTALL" | cut -d'|' -f2
+        [ -r "$P5_INPROG_REMOVE" ] && grep '^dir|' "$P5_INPROG_REMOVE" | cut -d'|' -f2
+        if [ "$RECOVER" = 1 ]; then
+            p5_rows "$RROLE" dir install | cut -d'|' -f3
+        fi
+    } 2>/dev/null | grep '^/' | sort -u > "$P5_PLAND.raw"
+
+    # 3. RE-VALIDATE EVERY ENTRY against the shipped contract. This is the gate
+    #    that does not trust the record. One failure refuses the whole removal.
+    while read -r p; do
+        [ -n "$p" ] || continue
+        if p5_removable "$RROLE" "$p" file; then
+            echo "$p" >> "$P5_PLANF"
+        else
+            echo "file|$p" >> "$P5_PLANBAD"
+        fi
+    done < "$P5_PLANF.raw"
+    while read -r p; do
+        [ -n "$p" ] || continue
+        if p5_removable "$RROLE" "$p" dir; then
+            echo "$p" >> "$P5_PLAND"
+        else
+            echo "dir|$p" >> "$P5_PLANBAD"
+        fi
+    done < "$P5_PLAND.raw"
+    [ -s "$P5_PLANBAD" ] && return 1
+    return 0
+}
+
+# plan_gate KIND PATH -> 0 if PATH may become a destructive action.
+#
+# THE ROUND-2 SERVER-LOSS PATH CLOSED AT ITS ROOT. build_plan re-validates every
+# entry of the install RECORD against the contract; the rows the CONTRACT itself
+# expands to -- the enable globs, the runtime globs, the runtime dirs -- went
+# straight to UNLINK/RMTREE with no check. A `../../` row therefore produced a
+# real unlink of /etc/dropbear/authorized_keys and executed it.
+# The contract is data on disk exactly like the record, so it is now checked
+# exactly like the record, through the same p5_removable -- which is also where
+# the physical, symlink-resolving check lives, because a lexical check cannot
+# see that a correctly-spelled /etc/p5/* hit landed in /etc/dropbear.
+# A refusal is RECORDED, never skipped: one bad row refuses the WHOLE removal,
+# the same rule the record side already follows.
+plan_gate() {
+    p5_removable "$RROLE" "$2" "$1" && return 0
+    echo "$1|$2" >> "$P5_PLANBAD"
+    return 1
+}
+
+# emit_plan -> the ordered action list, one ACTION|ARG per line.
+# The order is the safety property: services down before their init scripts go,
+# the metadata under /usr/lib/p5 unlinked late so the record outlives what it
+# describes, directories rmdir-ed deepest-first once they are empty, the intent
+# records dropped before the rmdir pass so an interrupted removal resumes, and
+# the RECOVERY TOOLCHAIN dead last, in one action, so every index before it
+# leaves a box that can still remove itself.
+emit_plan() {
+    # The recovery toolchain, intersected with what this plan is actually
+    # allowed to remove. Written to a file so every step below can exclude it
+    # with one `grep -vxF -f`, and so the exclusion cannot drift between the
+    # step that skips it and the step that finally takes it.
+    : > "$P5_SELFF"
+    p5_self_toolchain | while read -r s; do
+        grep -qxF "$s" "$P5_PLANF" 2>/dev/null && echo "$s" >> "$P5_SELFF"
+    done
+    [ -s "$P5_SELFF" ] || echo '/dev/null/never-matches' > "$P5_SELFF"
+    # a. post-install states, removed by the mechanism that created them.
+    p5_rows "$RROLE" glob enable | cut -d'|' -f3 | while read -r g; do
+        [ -n "$g" ] || continue
+        for hit in $(p5_glob_hits "$g"); do
+            plan_gate file "$hit" || continue
+            # The service name is spliced into a path that is then EXECUTED, so
+            # it is anchored to the p5 namespace as tightly as the path is: a
+            # hit that does not reduce to a p5-* service name refuses the run
+            # rather than running /etc/init.d/<whatever the sed left behind>.
+            svc=$(echo "$hit" | sed 's:.*/[SK][0-9][0-9]::')
+            case "$svc" in
+                p5|p5-*) echo "SVCDOWN|$svc" ;;
+                *) echo "svc|$hit -> '$svc'" >> "$P5_PLANBAD"; continue ;;
+            esac
+            echo "UNLINK|$hit"
+        done
+    done
+    # b. every recorded file that is NOT product metadata and NOT part of the
+    #    recovery toolchain. /usr/sbin/p5-uninstall used to go here, sorted
+    #    into the middle of the payload -- action 5 of 17 on the battery's
+    #    client fixture -- which is what left the box with no verb. MU-RCV
+    #    removes it from p5_self_toolchain, which puts it back exactly here,
+    #    and prints the index it lands at rather than trusting this number.
+    grep -v '^/usr/lib/p5/' "$P5_PLANF" 2>/dev/null | grep -vxF -f "$P5_SELFF" | sort | while read -r p; do
+        [ -n "$p" ] && echo "UNLINK|$p"
+    done
+    # c. runtime globs P5 owns (facts, armed deadman records) -- file hits only.
+    p5_rows "$RROLE" glob runtime | cut -d'|' -f3 | while read -r g; do
+        [ -n "$g" ] || continue
+        for hit in $(p5_glob_hits "$g"); do
+            [ -d "${P5_ROOT}${hit}" ] && continue
+            plan_gate file "$hit" || continue
+            echo "UNLINK|$hit"
+        done
+    done
+    # d. runtime directories P5 creates itself. The ONLY recursive removal in
+    #    the product, and the only path that reaches it is a declared runtime
+    #    dir row whose basename is anchored to p5.
+    p5_rows "$RROLE" dir runtime | cut -d'|' -f3 | while read -r d; do
+        [ -n "$d" ] || continue
+        [ -d "${P5_ROOT}${d}" ] || continue
+        plan_gate dir "$d" || continue
+        echo "RMTREE|$d"
+    done
+    # e. named UCI objects P5 owns inside files it does not own. REPORTED, NOT
+    #    EXECUTED, and that is the point: `uci delete firewall.p5; uci commit
+    #    firewall` reloads the firewall, and on the server the operator's own
+    #    SSH session rides that firewall. It is the one action in this whole
+    #    file that could cut the branch the operator is sitting on, so E0
+    #    refuses to take it: it prints the exact command and stops. Whoever runs
+    #    it must arm p5-deadman first (CONTRACT.md section 6). Nothing writes
+    #    firewall.p5 yet, so this costs nothing today and removes a live hazard
+    #    from the executor before anything does.
+    p5_rows "$RROLE" uci uci | cut -d'|' -f3 | while read -r o; do
+        [ -n "$o" ] && echo "UCIMANUAL|$o"
+    done
+    # f. product metadata, late, so the record survives as long as possible --
+    #    minus the library and the contract copies, which the recovery verb
+    #    needs in order to run and which therefore go with it in step i.
+    grep '^/usr/lib/p5/' "$P5_PLANF" 2>/dev/null | grep -v 'inprogress$' | grep -vxF -f "$P5_SELFF" | sort | while read -r p; do
+        [ -n "$p" ] && echo "UNLINK|$p"
+    done
+    # g. the intent records, BEFORE the rmdir pass and not after it. They live
+    #    in /usr/lib/p5, which is itself an owned directory: dropping them last
+    #    left that directory non-empty at rmdir time, so it survived, and the
+    #    run then reported success over a box that was not clean. Measured on
+    #    the first end-to-end run.
+    #    The cost of this ordering is named rather than hidden: a crash between
+    #    here and the rmdirs leaves EMPTY declared directories and no record, so
+    #    the box reads `damaged` and needs `--remove --recover` (which p5-install
+    #    and p5-version --state both name). That is a remedy, not a wedge, and
+    #    CR-1 counts how often it is the one that is needed.
+    echo "DROPINTENT|both intent records"
+    # h. owned directories, deepest-first. `sort -r` puts /etc/p5/deadman ahead
+    #    of /etc/p5, which is the ordering rmdir needs. /usr/lib/p5 is held
+    #    back: it still holds the library and the contract copies, and it goes
+    #    in step i between them and the entry point.
+    sort -r "$P5_PLAND" 2>/dev/null | grep -vx '/usr/lib/p5' | while read -r d; do
+        [ -n "$d" ] && echo "RMDIR|$d"
+    done
+    # i. LAST, AND ON PURPOSE: the recovery toolchain, as ONE action.
+    #    Up to here every action leaves /usr/sbin/p5-uninstall and everything
+    #    it reads intact, so a kill before ANY of them leaves a box that can
+    #    still remove itself with no package present -- which is the whole
+    #    property, and bar RCV-1 kills before every index to prove it. The set
+    #    and its order are printed in the arg, so --dry-run still shows the
+    #    exact removal set. Splitting it into separate actions would put the
+    #    hole back one index further along; keeping it as one makes the
+    #    residual window a mid-action SIGKILL, which is named in
+    #    p5_self_toolchain and covered by the package copy (RCV-3/RCV-4).
+    #    The entry point is the LAST line of p5_self_toolchain, read from there
+    #    rather than spelled again here: two copies of the same path is how a
+    #    later edit moves one and not the other.
+    #    The directory comes from P5_LIBDIR for the same reason.
+    _sdverb=$(p5_self_toolchain | tail -1)
+    _sdlib=$(p5_unroot "$P5_LIBDIR")
+    _sd=""
+    while read -r s; do
+        [ -n "$s" ] || continue
+        [ "$s" = "$_sdverb" ] && continue
+        _sd="$_sd UNLINK:$s"
+    done < "$P5_SELFF"
+    grep -qx "$_sdlib" "$P5_PLAND" 2>/dev/null && _sd="$_sd RMDIR:$_sdlib"
+    grep -qxF "$_sdverb" "$P5_SELFF" 2>/dev/null && _sd="$_sd UNLINK:$_sdverb"
+    [ -n "$_sd" ] && echo "SELFDROP|${_sd# }"
+    return 0
+}
+
+# one_rmdir DIR -> 0 if the directory is gone or was never there. rmdir, never
+# rm -rf. Factored out because SELFDROP has to take /usr/lib/p5 with exactly
+# the same refusal behaviour as the ordinary RMDIR pass -- a non-empty owned
+# directory is REPORTED, and holding the library back must not turn that
+# report into a forced recursive delete.
+one_rmdir() {
+    [ -d "${P5_ROOT}${1}" ] || return 0
+    rmdir "${P5_ROOT}${1}" 2>/dev/null && return 0
+    p5_err "NOT EMPTY, left in place: $1"
+    p5_err "  rmdir is deliberate. Forcing it would mean rm -rf on a directory whose"
+    p5_err "  contents this product did not place, which is the failure this design"
+    p5_err "  exists to make impossible. Inspect it and remove the contents by hand."
+    return 1
+}
+
+do_remove() {
+    require_role
+    p5_box_state "$RROLE"
+    case "$P5_STATE" in
+        clean)
+            p5_log "nothing to remove: $P5_STATE_WHY"
+            return "$P5_EX_OK" ;;
+        installed|incomplete) : ;;
+        damaged)
+            if [ "$RECOVER" != 1 ]; then
+                p5_err "the box carries P5 paths with no stamp and no intent record ($P5_STATE_WHY)."
+                p5_err "There is no record to remove FROM, so removing anything would be a guess, and this"
+                p5_err "box cannot afford one. Two ways forward, both explicit:"
+                p5_err "  p5-uninstall --check          list exactly what is present"
+                p5_err "  p5-uninstall --remove --recover --dry-run"
+                p5_err "                                derive the set from the contract instead of the"
+                p5_err "                                record, and print it without changing anything"
+                return "$P5_EX_PRECOND"
+            fi
+            p5_err "--recover: the removal set is being derived from contract/paths, NOT from an install"
+            p5_err "record. It is therefore everything P5 is ALLOWED to own that is present, which may be"
+            p5_err "more than this box actually installed. Read the plan before running it without --dry-run." ;;
+        future)
+            p5_err "$P5_STATE_WHY"
+            p5_err "Refusing to remove a layout this build does not understand: it would leave behind"
+            p5_err "exactly the paths it does not know about. Use the p5-uninstall that shipped with it."
+            return "$P5_EX_PRECOND" ;;
+        *)
+            p5_err "unrecognised box state '$P5_STATE' -- refusing."
+            return "$P5_EX_PRECOND" ;;
+    esac
+
+    # A deadman is a rollback that is OWED. Tearing down the product while one
+    # is armed removes the thing that would execute it. Fail closed.
+    if p5_deadman_armed > "$P5_TMPLIST" 2>/dev/null; then
+        p5_err "a deadman is ARMED and removal would delete the thing that fires it:"
+        sed 's/^/    /' "$P5_TMPLIST" >&2
+        p5_err "Resolve it first: 'p5-deadman status', then 'p5-deadman confirm' (you are reachable)"
+        p5_err "or 'p5-deadman fire' (roll back now). Then re-run --remove."
+        return "$P5_EX_PRECOND"
+    fi
+
+    if ! build_plan; then
+        p5_err "REFUSING THE ENTIRE REMOVAL. The install record names paths that the shipped"
+        p5_err "contract does not permit removing. Nothing has been unlinked. Offending entries:"
+        sed 's/^/    /' "$P5_PLANBAD" >&2
+        p5_err "This is the version-skew guard: a record written by an older or modified installer"
+        p5_err "cannot be trusted, so it is checked against contract/paths rather than obeyed."
+        return "$P5_EX_CONTRACT"
+    fi
+
+    emit_plan > "$P5_PLANO"
+    if [ -s "$P5_PLANBAD" ]; then
+        p5_err "REFUSING THE ENTIRE REMOVAL. Rows in the on-box contract expand to paths the"
+        p5_err "contract itself does not permit removing. NOTHING HAS BEEN UNLINKED. Offending:"
+        sed 's/^/    /' "$P5_PLANBAD" >&2
+        p5_err "contract-paths on a box is a file on disk exactly like the install record, so it is"
+        p5_err "re-validated the same way: lexically, AND with every symlink on the way to the path"
+        p5_err "resolved. A row that is spelled inside the namespace but lands outside it is refused."
+        p5_err "Fix the row (or the symlink) and re-run; --dry-run prints the plan without acting."
+        return "$P5_EX_CONTRACT"
+    fi
+    echo "# p5-uninstall removal plan, in execution order. Actions:"
+    echo "#   SVCDOWN  /etc/init.d/<svc> stop; /etc/init.d/<svc> disable"
+    echo "#   UNLINK   rm -f on one file (absent is success)"
+    echo "#   RMTREE   rm -rf on ONE declared runtime directory P5 creates itself"
+    echo "#   UCIMANUAL  REPORTED ONLY. Deleting a UCI object commits a config"
+    echo "#            reload; on the server the SSH session rides the firewall, so"
+    echo "#            E0 prints the command and refuses to run it unattended"
+    echo "#   RMDIR    rmdir, NEVER rm -rf. A non-empty directory is reported, not forced"
+    echo "#   SELFDROP the LAST action, always: the recovery toolchain -- the library,"
+    echo "#            the contract copies and /usr/sbin/p5-uninstall itself. Held to"
+    echo "#            the end so that a kill before any earlier action leaves a box"
+    echo "#            that can still remove itself with no package present"
+    echo "#   DROPINTENT  unlink the install/removal intent records, so the owned"
+    echo "#            directory holding them can then be rmdir-ed"
+    cat "$P5_PLANO"
+    echo "# end of plan: $(grep -c . "$P5_PLANO") action(s)"
+    echo "# NOT in this plan, and never will be: any directory P5 does not exclusively own."
+    echo "# /usr/sbin, /etc/init.d and /etc/hotplug.d/iface may have been CREATED by the"
+    echo "# install; they are not contract dir rows, so they cannot be recorded or removed."
+
+    if [ "$DRY" = 1 ]; then
+        p5_log "--dry-run: nothing above was executed."
+        return "$P5_EX_OK"
+    fi
+
+    # The removal intent record, synced before the first unlink, so an
+    # interrupted removal resumes instead of stranding a half-removed tree.
+    mkdir -p "$P5_LIBDIR" 2>/dev/null
+    {
+        echo "# P5 removal intent record -- written BEFORE the first unlink."
+        echo "# Its presence means a removal started and did not finish. Re-run --remove."
+        echo "P5_CONTRACT_VERSION=$P5_CONTRACT_VERSION"
+        echo "P5_ROLE=$RROLE"
+        sed 's/^/file|/' "$P5_PLANF"
+        sed 's/^/dir|/' "$P5_PLAND"
+    } | p5_atomic_write "$P5_INPROG_REMOVE" 644 \
+        || { p5_err "cannot write the removal intent record; refusing to unlink anything"; return "$P5_EX_FAIL"; }
+
+    left=0
+    while IFS='|' read -r act arg; do
+        case "$act" in '#'*|'') continue ;; esac
+        # One fault point per ACTION, so P5_FAULT_AFTER=k reproduces "the power
+        # went out just before action k" for every k in the plan. The install
+        # side has had this since round 2 (bar CR-1); removal did not, so the
+        # claim that an interrupted removal is survivable was an argument. Now
+        # bar RCV-1 kills at every index and checks the box comes back.
+        p5_fault_point
+        case "$act" in
+            SVCDOWN)
+                case "$arg" in
+                    p5|p5-*) : ;;
+                    *) p5_err "REFUSED SVCDOWN on '$arg' -- a service name outside the p5-* namespace"
+                       left=$((left + 1)); continue ;;
+                esac
+                if [ -x "${P5_ROOT}/etc/init.d/$arg" ]; then
+                    "${P5_ROOT}/etc/init.d/$arg" stop >/dev/null 2>&1
+                    "${P5_ROOT}/etc/init.d/$arg" disable >/dev/null 2>&1
+                    p5_log "stopped and disabled $arg"
+                fi ;;
+            UNLINK)
+                # B1: re-checked here at the point of use, not trusted from the
+                # planner -- the same doctrine RMTREE already followed. The
+                # plan is written to disk between the two, and the parent of
+                # this path can become a symlink after the plan was built.
+                if p5_removable "$RROLE" "$arg" file; then
+                    rm -f "${P5_ROOT}${arg}" 2>/dev/null
+                    # B3: ... and the stage that a run killed between staging
+                    # and renaming would have left beside it. Derived, never
+                    # spelled: in an activation directory that leftover is not
+                    # litter, it is a live hook nobody enabled. The staging path
+                    # comes from p5_incoming_of -- the one place that naming
+                    # lives -- so the dot-prefixed, unglobbable form is removed,
+                    # not the old DEST+suffix form.
+                    # NOT GATED, and said out loud rather than left reading as
+                    # covered: the check above judged $arg, and this is a path
+                    # DERIVED from it that the plan never named. It is a
+                    # separate open defect of this tree, recorded in README.md.
+                    rm -f "${P5_ROOT}$(p5_incoming_of "$arg")" 2>/dev/null
+                else
+                    p5_err "REFUSED UNLINK on $arg -- it did not pass the removal gate at the point of use"
+                    left=$((left + 1))
+                fi ;;
+            DROPINTENT)
+                rm -f "$P5_INPROG_REMOVE" "$P5_INPROG_INSTALL" 2>/dev/null
+                p5_sync ;;
+            RMTREE)
+                # Re-checked here at the point of use rather than trusted from
+                # the planner. p5_removable carries what used to be three of
+                # the four gates spelled out here (namespace, foreign, and now
+                # also lexical sanity and the physical symlink-resolved
+                # location); `dir runtime` keeps this the RUNTIME dirs only, so
+                # the install-state dirs stay rmdir-only; the basename anchor
+                # stays as the fourth.
+                if p5_removable "$RROLE" "$arg" dir \
+                   && p5_declared "$RROLE" "$arg" dir runtime \
+                   && case "$(basename "$arg")" in p5|p5-*|p5.*) true ;; *) false ;; esac
+                then
+                    rm -rf "${P5_ROOT}${arg}" 2>/dev/null
+                else
+                    p5_err "REFUSED RMTREE on $arg -- it did not pass all four gates at the point of use"
+                    left=$((left + 1))
+                fi ;;
+            UCIMANUAL)
+                if [ -z "$P5_ROOT" ] && command -v uci >/dev/null 2>&1 && uci -q get "$arg" >/dev/null 2>&1; then
+                    p5_err "NOT REMOVED, and deliberately so: the UCI object $arg still exists."
+                    p5_err "  Deleting it means 'uci delete $arg; uci commit ${arg%%.*}', which RELOADS"
+                    p5_err "  the firewall. On the server the operator's SSH session rides that firewall,"
+                    p5_err "  so this is the one step in a removal that can cut the branch it is standing"
+                    p5_err "  on. E0 will not take it unattended. Do it like this, from a session you can"
+                    p5_err "  afford to lose:"
+                    p5_err "    p5-deadman arm --after <seconds you need> --restore '<the command that puts it back>'"
+                    p5_err "    uci delete $arg && uci commit ${arg%%.*}"
+                    p5_err "    <re-prove you are reachable>"
+                    p5_err "    p5-deadman confirm"
+                    left=$((left + 1))
+                else
+                    p5_log "no UCI object $arg to remove (absent, no uci, or running under a test root)"
+                fi ;;
+            RMDIR)
+                one_rmdir "$arg" || left=$((left + 1)) ;;
+            SELFDROP)
+                # The one action that removes the thing doing the removing.
+                # Safe here and only here: this shell sourced p5-common.sh at
+                # start and snapshotted the contract into $P5_WORK above, so
+                # unlinking the on-box copies cannot blind the run that is
+                # doing it -- and nothing after this line needs them.
+                # AND IT DECIDES BEFORE IT CUTS. A failed rmdir means something
+                # P5 did not place is still in an owned directory, so the
+                # operator has work left and needs a RUNNABLE verb -- which is
+                # the whole toolchain, not just the entry point. Keeping only
+                # the entry point after its library is already unlinked hands
+                # back the round-2 problem by a different route: the file is
+                # there and it exits 5 the moment it is run. So the emptiness
+                # of the directory is settled FIRST, against what this action
+                # is itself about to unlink, and if anything else is in there
+                # the entire SELFDROP is skipped and the toolchain survives
+                # WHOLE. Bar RCV-5 runs the survivor to prove it.
+                sd_fail=0; sd_verb=$(p5_self_toolchain | tail -1)
+                sd_dir=""
+                for step in $arg; do
+                    case "$step" in RMDIR:*) sd_dir="${step#RMDIR:}" ;; esac
+                done
+                sd_extra=0; sd_names=""
+                if [ -n "$sd_dir" ] && [ -d "${P5_ROOT}${sd_dir}" ]; then
+                    for sd_f in "${P5_ROOT}${sd_dir}"/* "${P5_ROOT}${sd_dir}"/.??*; do
+                        [ -e "$sd_f" ] || continue
+                        sd_u=$(p5_unroot "$sd_f")
+                        # A staged .p5-incoming beside a path this action is
+                        # already unlinking is swept by the same step, so it is
+                        # not a stranger. CR-4 covers that leftover class.
+                        # B3 MERGE: the staging name is a DOT-PREFIXED SIBLING
+                        # (dir/.p5-incoming.NAME), not a suffixed twin, so the
+                        # map back to the destination strips a prefix off the
+                        # BASENAME. The suffix form this line carried was
+                        # written before B3 and can never match, which would
+                        # have counted every leftover stage as a stranger and
+                        # skipped SELFDROP for good.
+                        sd_c="$sd_u"; sd_b="${sd_u##*/}"
+                        case "$sd_b" in
+                            "$P5_INCOMING".*) sd_c="${sd_u%/*}/${sd_b#"$P5_INCOMING".}" ;;
+                        esac
+                        case " $arg " in *" UNLINK:$sd_c "*) continue ;; esac
+                        sd_extra=$((sd_extra + 1)); sd_names="$sd_names $sd_u"
+                    done
+                fi
+                if [ "$sd_extra" != 0 ]; then
+                    p5_err "NOT EMPTY, left in place: $sd_dir"
+                    p5_err "  rmdir is deliberate. Forcing it would mean rm -rf on a directory whose"
+                    p5_err "  contents this product did not place, which is the failure this design"
+                    p5_err "  exists to make impossible. Inspect it and remove the contents by hand."
+                    for sd_u in $sd_names; do
+                        p5_err "  not placed by P5: $sd_u"
+                    done
+                    p5_err "  KEEPING THE WHOLE RECOVERY TOOLCHAIN -- library, contract copies and"
+                    p5_err "  $sd_verb -- so the verb that finishes this is still RUNNABLE, not just"
+                    p5_err "  present. Clear $sd_dir, then run --remove again."
+                    left=$((left + 1))
+                    p5_sync
+                    continue
+                fi
+                for step in $arg; do
+                    sd_p="${step#*:}"
+                    case "$step" in
+                        UNLINK:*)
+                            # B2/U75: THE SAME POINT-OF-USE GATE THE ORDINARY
+                            # UNLINK ARM HAS. This arm predates B1 and was left
+                            # inheriting only the plan-time gate, which is not
+                            # enough for exactly the reason B1 gives: the plan
+                            # is written to DISK (P5_PLANO, under a shared
+                            # /tmp) between the gate and this rm, and an
+                            # ancestor of a toolchain path can become a symlink
+                            # while the run is in flight -- an earlier SVCDOWN
+                            # in this very plan executes a script on the box,
+                            # so "in flight" is not hypothetical. Nothing
+                            # covered it, and this is the arm that runs rm -f
+                            # on the recovery toolchain of a box with no
+                            # console. The predicate is p5_removable, spelled
+                            # here exactly as the ordinary UNLINK arm above
+                            # spells it (anchored to that arm, not to a line
+                            # number, because line numbers rot), so there is one
+                            # gate and everything destructive passes it.
+                            # NOT gated here, and said out loud: the derived
+                            # p5_incoming_of stage below. It is a path DERIVED
+                            # from a gated path, which is a separate open
+                            # defect of this tree recorded in README.md, and
+                            # closing it belongs to that unit, not this one.
+                            if ! p5_removable "$RROLE" "$sd_p" file; then
+                                p5_err "REFUSED UNLINK on $sd_p -- it did not pass the removal gate at the point of use"
+                                p5_err "  The plan naming it was written to disk BEFORE this line ran, so what the"
+                                p5_err "  path resolves to now is not what it resolved to when the plan was built."
+                                p5_err "  KEEPING it rather than unlinking something that now lands outside the P5"
+                                p5_err "  namespace. Inspect $sd_dir, then run --remove again."
+                                left=$((left + 1)); sd_fail=1
+                            elif [ "$sd_p" = "$sd_verb" ] && [ "$sd_fail" != 0 ]; then
+                                # Only reachable if the rmdir failed DESPITE the
+                                # emptiness pre-check above -- a race, or a bug.
+                                # Say plainly that what is kept may not be
+                                # runnable, and name the copy that is.
+                                p5_err "KEEPING $sd_p: this removal did not finish, so the box still needs a"
+                                p5_err "  verb that can clean it up. Its library may already be gone, in which"
+                                p5_err "  case run bin/p5-uninstall --remove --recover from the PACKAGE instead."
+                                p5_err "  Resolve what is reported above, then run it again."
+                            else
+                                rm -f "${P5_ROOT}${sd_p}" 2>/dev/null
+                                # B3 MERGE: staging path from p5_incoming_of --
+                                # the one place that naming lives. The
+                                # DEST+suffix form here predates B3 and removed
+                                # a file that no longer exists, leaving the real
+                                # dot-prefixed stage behind.
+                                rm -f "${P5_ROOT}$(p5_incoming_of "$sd_p")" 2>/dev/null
+                            fi ;;
+                        RMDIR:*)
+                            one_rmdir "$sd_p" || { left=$((left + 1)); sd_fail=1; } ;;
+                        *) p5_err "unknown SELFDROP step '$step' -- skipped, and that is a bug"; left=$((left + 1)); sd_fail=1 ;;
+                    esac
+                done
+                p5_sync ;;
+            *) p5_err "unknown plan action '$act' -- skipped, and that is a bug"; left=$((left + 1)) ;;
+        esac
+    done < "$P5_PLANO"
+
+    rm -f "$P5_INPROG_REMOVE" "$P5_INPROG_INSTALL"
+    p5_sync
+
+    if p5_half_clean >/dev/null 2>&1; then
+        p5_log "removed. The P5 half of this box is now CLEAN."
+        return "$P5_EX_OK"
+    fi
+    p5_err "removal ran but the box is still not clean ($left action(s) reported a problem):"
+    p5_half_clean >&2
+    return "$P5_EX_FAIL"
+}
+
+case "$VERB" in
+    --list)   do_list; exit $? ;;
+    --check)  do_check; exit $? ;;
+    --remove) do_remove; exit $? ;;
+    --purge)
+        p5_err "--purge is NOT IMPLEMENTED. Owner: U26 (E7 uninstaller)."
+        p5_err "It is --remove (implemented here) plus the old-stack teardown, whose artifact list"
+        p5_err "must come from the old package's OWN teardown -- bond-rollback.sh, autoratectl off,"
+        p5_err "bondctl revert, engarde stop (p5-execution-handover.md:80) -- and which carries the"
+        p5_err "/etc/bond/agg_w quarantine condition described in the header of this file."
+        p5_err "THE OLD STACK CARRIES THE SERVER'S MANAGEMENT PATH. Removing engarde and its firewall"
+        p5_err "rule can cut the SSH session running the removal. E7 must arm p5-deadman first."
+        exit "$P5_EX_NOTIMPL" ;;
+esac
+usage

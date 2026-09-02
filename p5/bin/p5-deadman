@@ -1,0 +1,281 @@
+#!/bin/sh
+# p5-deadman -- the automatic-rollback primitive.
+#
+#   p5-deadman arm --after SECONDS --restore CMD [--label L] [--no-timer]
+#   p5-deadman check                fire every record whose deadline has passed
+#   p5-deadman confirm [--label L]  the operator is still reachable: disarm
+#   p5-deadman fire    [--label L]  roll back NOW
+#   p5-deadman status               what is armed, and how long is left
+#
+# WHY THIS EXISTS. The server (GL-MT2500, ${SERVER_PC_IP}) has no console, no
+# recovery button and no power-cycle into failsafe (ROADMAP, STANDING
+# CONSTRAINT). Every deploy step reaches it over SSH, and several of the steps
+# the product needs -- `uci commit firewall` after touching firewall.p5,
+# restarting the network, stopping the service that carries the tunnel the
+# session rides -- can cut the branch the operator is sitting on. Those steps
+# cannot be made safe by checking a path list: they write nothing forbidden,
+# they just change the running state of something the session depends on.
+#
+# So the answer is the classic shape: schedule an unconditional "put it back"
+# that only a confirmed-still-reachable operator cancels. E0 owns the primitive
+# and the rule; E5 and E7 own the steps that must use it, and CONTRACT.md
+# states the rule that binds them.
+#
+# THE SCHEDULING MECHANISM MUST SURVIVE WHAT IT PROTECTS AGAINST, which is the
+# part that is usually got wrong. A background `sleep && rollback` inside the
+# SSH session dies with the session -- and the session dying is precisely the
+# event it is supposed to notice. Worse, it does not survive a power cut, and
+# "power lost between two steps" is on the list of failures that must not lose
+# the box. So the armed state is a FILE ON PERSISTENT STORAGE carrying an
+# ABSOLUTE DEADLINE, and firing is a pure function of (that file, the clock).
+# Three independent things can call it, and they are the SAME code path:
+#
+#   the timer  a detached `sleep N; p5-deadman check`, disowned from the
+#              session (setsid where busybox provides it, nohup otherwise), so
+#              it outlives the SSH connection that armed it.
+#   the boot   `p5-deadman check` from a boot hook. This is the limb that
+#              survives power loss: if the box reboots with a record still
+#              armed, the rollback runs before anything else needs the network.
+#              E5 owns the hook (it owns init scripts and their priorities);
+#              until it lands, this limb is armed-state-only -- see OPEN below.
+#   the human  `p5-deadman fire`.
+#
+# Because all three are one code path, testing `check` against a record with a
+# deadline in the past tests the timer and the boot limb too -- there is no
+# second implementation to diverge. Bars DM-1..DM-8.
+#
+# NO ARBITRARY CONSTANTS. --after has NO DEFAULT and arm refuses without it.
+# How long an operator needs to prove reachability is not derivable from
+# physics or from anything this product can measure; it depends on the link, the
+# step and the person. So it is supplied explicitly every time and recorded in
+# the armed record, rather than invented here (bar DM-2).
+#
+# OPEN, and it is a real gap rather than a caveat: the boot limb needs a hook
+# that calls `p5-deadman check` early in boot. E0 ships no init script and
+# invents no procd priority -- choosing one is choosing an ordering against
+# every other service, which is E5's derivation to make and justify. Until E5
+# wires it, a power cut while armed leaves the record armed and un-fired: the
+# state is preserved and `check` will roll back the moment anything calls it,
+# but nothing calls it automatically. `status` says so out loud on every run.
+#
+# BUSYBOX-SAFE POSIX sh.
+
+set -u
+
+P5_TAG="p5-deadman"
+
+# WHERE THE LIBRARY COMES FROM, and the order matters.
+# The SIBLING copy wins. Running from an unpacked package, ../lib is the
+# package's own library and is the right one. Running from the box, this
+# script sits at /usr/sbin, so ../lib is /usr/lib -- which holds no
+# p5-common.sh -- and the box copy under /usr/lib/p5 is used instead. So the
+# sibling-first order costs nothing on a real box and buys one thing that
+# matters: a box whose /usr/lib/p5/p5-common.sh is CORRUPT can still be
+# inspected and cleaned up from the package, instead of every tool sourcing
+# the broken library and dying. A damaged box must stay reachable by its own
+# repair tools.
+_self_dir=$(dirname "$0")
+if [ -r "$_self_dir/../lib/p5-common.sh" ] || [ -n "${P5_LIB_SRC:-}" ]; then
+    _lib_src="${P5_LIB_SRC:-$_self_dir/../lib}"
+else
+    _lib_src="${P5_ROOT:-}/usr/lib/p5"
+fi
+if [ -r "$_self_dir/../contract/paths" ]; then
+    _con_dir="$_self_dir/../contract"; _con_pfx=""
+else
+    _con_dir="${P5_ROOT:-}/usr/lib/p5"; _con_pfx="contract-"
+fi
+[ -r "$_lib_src/p5-common.sh" ] || {
+    echo "p5-deadman: ERROR: cannot find p5-common.sh under $_lib_src" >&2
+    exit 5
+}
+. "$_lib_src/p5-common.sh"
+p5_contract_dir "$_con_dir" "$_con_pfx"
+
+usage() {
+    cat >&2 <<'EOF'
+usage: p5-deadman arm --after SECONDS --restore CMD [--label L] [--no-timer]
+       p5-deadman check | confirm [--label L] | fire [--label L] | status
+
+  arm       record a rollback that runs unless it is confirmed in time.
+            --after   REQUIRED, no default. Seconds until the deadline.
+            --restore REQUIRED. The command that puts the box back.
+            --label   names this record so several can be armed at once.
+            --no-timer  arm the record without spawning the sleeper (for a
+                        caller that drives `check` itself, and for tests).
+  check     fire every armed record whose deadline has passed. This is what
+            the sleeper runs, what a boot hook must run, and what a test calls.
+  confirm   the operator is still reachable: disarm without firing.
+  fire      run the rollback now, regardless of the deadline.
+  status    what is armed, how long is left, and what would run.
+
+exit codes: 0 ok | 1 a rollback ran, or one failed | 2 usage | 5 precondition
+EOF
+    exit "$P5_EX_USAGE"
+}
+
+VERB="${1:-}"; [ -n "$VERB" ] || usage; shift 2>/dev/null || true
+AFTER=""; RESTORE=""; LABEL="default"; TIMER=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --after)   [ $# -ge 2 ] || usage; AFTER="$2"; shift 2 ;;
+        --restore) [ $# -ge 2 ] || usage; RESTORE="$2"; shift 2 ;;
+        --label)   [ $# -ge 2 ] || usage; LABEL="$2"; shift 2 ;;
+        --no-timer) TIMER=0; shift ;;
+        -h|--help) usage ;;
+        *) echo "p5-deadman: unknown argument: $1" >&2; usage ;;
+    esac
+done
+case "$LABEL" in
+    *[!A-Za-z0-9._-]*|'') echo "p5-deadman: --label must be [A-Za-z0-9._-]+" >&2; usage ;;
+esac
+
+p5_announce_overrides
+
+now() { date -u '+%s' 2>/dev/null || echo 0; }
+recf() { echo "$P5_DEADDIR/$1"; }
+
+do_arm() {
+    [ -n "$AFTER" ] || { p5_err "--after is REQUIRED and has no default. How long you need to prove you are still reachable is not derivable from anything this product can measure, so it is not invented here."; exit "$P5_EX_USAGE"; }
+    case "$AFTER" in *[!0-9]*|'') p5_err "--after must be a whole number of seconds, got '$AFTER'"; exit "$P5_EX_USAGE" ;; esac
+    [ -n "$RESTORE" ] || { p5_err "--restore is REQUIRED: a deadman with no rollback command is a timer, not a safety net."; exit "$P5_EX_USAGE"; }
+
+    mkdir -p "$P5_DEADDIR" || p5_die "$P5_EX_PRECOND" "cannot create $P5_DEADDIR"
+    _a_now=$(now)
+    [ "$_a_now" != 0 ] || p5_die "$P5_EX_PRECOND" "no usable clock (date -u +%s failed); a deadline cannot be set without one"
+    _a_file=$(recf "$LABEL")
+    # Arming is idempotent by REPLACEMENT: re-arming the same label moves the
+    # deadline and keeps exactly one record. Two records for one step would mean
+    # two rollbacks, and the second would undo the first one's repair.
+    {
+        echo "# P5 deadman record. Fires unless 'p5-deadman confirm' arrives first."
+        echo "P5_DM_LABEL=$LABEL"
+        echo "P5_DM_ARMED_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo unknown)"
+        echo "P5_DM_AFTER=$AFTER"
+        echo "P5_DM_DEADLINE=$((_a_now + AFTER))"
+        echo "P5_DM_RESTORE=$RESTORE"
+    } | p5_atomic_write "$_a_file" 600 || p5_die "$P5_EX_FAIL" "cannot write the armed record at $_a_file"
+    p5_log "ARMED '$LABEL': in ${AFTER}s this box will run: $RESTORE"
+    p5_log "Confirm you are still reachable with: p5-deadman confirm --label $LABEL"
+
+    if [ "$TIMER" = 1 ]; then
+        # Detached from this session on purpose: the session dying is the event
+        # the deadman exists to notice, so a child of it is useless. The record
+        # on disk is what actually carries the decision -- this only wakes
+        # `check` up. If the spawn fails, the record still stands and the boot
+        # limb and a manual `check` still fire it.
+        if command -v setsid >/dev/null 2>&1; then
+            setsid sh -c "sleep $AFTER; \"$0\" check" >/dev/null 2>&1 &
+        else
+            nohup sh -c "sleep $AFTER; \"$0\" check" >/dev/null 2>&1 &
+        fi
+        p5_log "timer detached (pid $!). The armed record on disk is authoritative; the timer only wakes 'check'."
+    else
+        p5_log "--no-timer: no sleeper spawned. Something else must call 'p5-deadman check'."
+    fi
+    return "$P5_EX_OK"
+}
+
+# fire_one FILE -> run the recorded rollback. Idempotent: a record that fires
+# successfully is removed, so a second call is a no-op. A record whose rollback
+# FAILS is KEPT armed and said so loudly -- dropping it would silently retire a
+# rollback that never happened.
+fire_one() {
+    _f_lbl=$(p5_deadman_field P5_DM_LABEL "$1" || echo "?")
+    _f_cmd=$(p5_deadman_field P5_DM_RESTORE "$1" || echo "")
+    if [ -z "$_f_cmd" ]; then
+        p5_err "armed record $1 carries no P5_DM_RESTORE -- KEEPING it armed rather than dropping it"
+        return 1
+    fi
+    p5_err "DEADMAN FIRING '$_f_lbl': running the recorded rollback: $_f_cmd"
+    if sh -c "$_f_cmd"; then
+        rm -f "$1"
+        p5_sync
+        p5_err "DEADMAN '$_f_lbl': rollback returned 0; record cleared"
+        return 0
+    fi
+    p5_err "DEADMAN '$_f_lbl': THE ROLLBACK FAILED. The record is being KEPT armed so the next"
+    p5_err "  'check' -- timer, boot hook or hand -- tries again. Do not delete it by hand"
+    p5_err "  until the box is known good."
+    return 1
+}
+
+do_check() {
+    _c_now=$(now); _c_fired=0; _c_bad=0; _c_any=0
+    p5_deadman_armed > "$P5_DMLIST" 2>/dev/null
+    while read -r f; do
+        [ -n "$f" ] || continue
+        _c_any=1
+        _c_dl=$(p5_deadman_field P5_DM_DEADLINE "$f" || echo "")
+        case "$_c_dl" in
+            ''|*[!0-9]*)
+                p5_err "armed record $f has no usable deadline -- FIRING IT NOW. An unreadable deadline"
+                p5_err "  must not mean 'never': that is the one reading that loses the box."
+                fire_one "$f" || _c_bad=$((_c_bad + 1))
+                _c_fired=$((_c_fired + 1)); continue ;;
+        esac
+        if [ "$_c_now" -ge "$_c_dl" ]; then
+            fire_one "$f" || _c_bad=$((_c_bad + 1))
+            _c_fired=$((_c_fired + 1))
+        fi
+    done < "$P5_DMLIST"
+    [ "$_c_any" = 0 ] && { p5_log "nothing armed"; return "$P5_EX_OK"; }
+    [ "$_c_fired" = 0 ] && { p5_log "armed, none past its deadline"; return "$P5_EX_OK"; }
+    p5_log "check: $_c_fired record(s) fired, $_c_bad rollback(s) failed and are still armed"
+    # Non-zero whenever a rollback ran. A caller that treats 0 as "all well"
+    # must not read "the box was rolled back under me" as all well.
+    return "$P5_EX_FAIL"
+}
+
+do_fire() {
+    _fi_f=$(recf "$LABEL")
+    [ -f "$_fi_f" ] || { p5_err "nothing armed under label '$LABEL'"; return "$P5_EX_PRECOND"; }
+    fire_one "$_fi_f" || return "$P5_EX_FAIL"
+    return "$P5_EX_OK"
+}
+
+do_confirm() {
+    _co_f=$(recf "$LABEL")
+    if [ -f "$_co_f" ]; then
+        rm -f "$_co_f"; p5_sync
+        p5_log "CONFIRMED '$LABEL': disarmed. No rollback will run."
+        return "$P5_EX_OK"
+    fi
+    p5_log "nothing armed under label '$LABEL' (already confirmed, or it already fired)"
+    return "$P5_EX_OK"
+}
+
+do_status() {
+    _s_now=$(now); _s_any=0
+    p5_deadman_armed > "$P5_DMLIST" 2>/dev/null
+    while read -r f; do
+        [ -n "$f" ] || continue
+        _s_any=1
+        _s_l=$(p5_deadman_field P5_DM_LABEL "$f" || echo "?")
+        _s_d=$(p5_deadman_field P5_DM_DEADLINE "$f" || echo "")
+        _s_c=$(p5_deadman_field P5_DM_RESTORE "$f" || echo "")
+        case "$_s_d" in
+            ''|*[!0-9]*) echo "ARMED $_s_l  deadline=UNREADABLE (next check fires it)  restore=$_s_c" ;;
+            *) echo "ARMED $_s_l  deadline=$_s_d  remaining=$((_s_d - _s_now))s  restore=$_s_c" ;;
+        esac
+    done < "$P5_DMLIST"
+    [ "$_s_any" = 0 ] && echo "$P5_TAG: nothing armed"
+    echo "$P5_TAG: NOTE -- the boot limb is not wired yet. E5 owns the hook that must run"
+    echo "$P5_TAG: 'p5-deadman check' early in boot; until it lands, a power cut while armed"
+    echo "$P5_TAG: leaves the record armed and UN-FIRED until something calls check."
+    return "$P5_EX_OK"
+}
+
+# EXCLUSIVE, never adopted (U82).
+P5_DMWORK=$(p5_workdir p5-deadman) || { echo "p5-deadman: ERROR: cannot create an exclusive scratch directory under ${TMPDIR:-/tmp}" >&2; exit 5; }
+trap 'rm -rf "$P5_DMWORK"' EXIT INT TERM
+P5_DMLIST="$P5_DMWORK/armed"
+
+case "$VERB" in
+    arm)     do_arm; exit $? ;;
+    check)   do_check; exit $? ;;
+    confirm) do_confirm; exit $? ;;
+    fire)    do_fire; exit $? ;;
+    status)  do_status; exit $? ;;
+    *) echo "p5-deadman: unknown verb: $VERB" >&2; usage ;;
+esac

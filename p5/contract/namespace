@@ -1,0 +1,79 @@
+# p5/contract/namespace -- the ON-DISK NAMESPACE P5 MAY OWN.
+#
+# This file is a RULE, not an inventory. `contract/paths` is the inventory.
+# The installer refuses any destination that does not match a line here
+# (exit 4), so a later unit's packaging cannot silently claim a path outside
+# the product's namespace. That refusal is the enforcement point named in
+# ROADMAP U26 ("install/uninstall is the only correct enforcement point").
+#
+# FORMAT: role|pattern
+#   role      client | server | both   (which box the pattern applies to)
+#   pattern   POSIX `case` glob, absolute, PRODUCTION path (no test-root prefix).
+#             In `case`, `*` matches `/` too, so `/etc/p5/*` covers nesting.
+#
+# WHY THESE PATTERNS AND NOT OTHERS -- every one is derived, none is a taste call:
+#
+#  1. OpenWrt/GL.iNet stock filesystem layout decides the ROOTS: executables in
+#     /usr/sbin, product data + libraries in /usr/lib, configuration in /etc,
+#     procd services in /etc/init.d, netifd hooks in /etc/hotplug.d/iface,
+#     volatile runtime state in /var/run (tmpfs).
+#
+#  2. The `p5` INFIX is forced by the standalone-product requirement
+#     (p5-execution-handover.md:8 "cleanly UNINSTALL the old package, then
+#     install P5 fresh"). E7 must be able to remove exactly P5 and exactly the
+#     old stack, with no path claimed by both -- otherwise "remove precisely
+#     those and nothing else" is undecidable, and a rollback to the frozen
+#     P1-P3 baseline cannot be reasoned about. The old stack occupies
+#     /etc/bond, /usr/sbin/{bond-*,bondctl,engarde-*}, /etc/init.d/{bond-*,
+#     engarde-*,cake-autorate,sqm}, /etc/hotplug.d/iface/{97-bond,
+#     98-wg-autorate,99-tether-autorate}, /etc/wg-*, /root/cake-autorate,
+#     /var/run/bond (enumerated in contract/foreign). Disjointness from that
+#     set is the requirement; the `p5` infix is the cheapest way to satisfy it.
+#     CONSEQUENCE, stated so it is not discovered later: the datapath binary
+#     CANNOT install as /usr/sbin/bond-agg, because that path is on the old
+#     stack's removal list. It installs under a p5-* name.
+#
+#  3. The hotplug priority is a WILDCARD `[0-9][0-9]`, not a number. Choosing a
+#     number is choosing an ordering against netifd's other hooks; that is a
+#     derivation the owning unit (E5/E6) must make and justify. E0 refuses to
+#     invent one. The same wildcard rule covers the procd rc.d flags below.
+#
+#  4. /etc/rc.d IS in the namespace, because P5 CREATES paths there. On OpenWrt
+#     `/etc/init.d/<svc> enable` writes /etc/rc.d/S<pri><svc> and K<pri>
+#     symlinks, and E5 ships /etc/init.d/p5-datapath and /etc/init.d/p5-server
+#     (contract/paths). The deployed stack already treats that flag as
+#     lifecycle STATE in writing (p2-engarde/bondctl:15 "State owners:
+#     engagement = rc.d flag", p1-autorate/autoratectl:11,
+#     98-wg-autorate:9, 99-tether-autorate:49). Leaving the pattern out did not
+#     stop P5 from creating those symlinks; it only stopped anything from
+#     knowing about them, so E7 would have left stale flags pointing at deleted
+#     init scripts. They are created AFTER the installer exits, so they can
+#     never reach installed.files -- contract/paths carries them with
+#     state=enable and E7 removes them with `disable`, the mechanism that made
+#     them. The name is anchored to `p5-` so the pattern cannot reach a flag
+#     belonging to any other service on the box.
+#
+# NOT owned, deliberately:
+#   /var/log/*   -- OpenWrt logging is syslog via `logger`; a P5 log file is a
+#                   decision no one has made. If a unit needs one it adds the
+#                   pattern here with its reason.
+#   /root/*      -- the old stack scattered binaries and helpers there. P5 does
+#                   not, so nothing of P5's is ever in an operator's home dir.
+#   /etc/config/*-- UCI. Whether P5's facts are UCI or plain files is E5/E6's
+#                   call, so /etc/config/p5 is listed in contract/paths as
+#                   `reserved` and is admitted by the pattern below only if
+#                   that unit keeps it. If E5 chooses plain files, delete the
+#                   pattern rather than leaving an unused claim standing.
+
+both|/usr/sbin/p5
+both|/usr/sbin/p5-*
+both|/usr/lib/p5
+both|/usr/lib/p5/*
+both|/etc/p5
+both|/etc/p5/*
+both|/etc/config/p5
+both|/etc/init.d/p5-*
+both|/etc/rc.d/[SK][0-9][0-9]p5-*
+both|/var/run/p5
+both|/var/run/p5/*
+client|/etc/hotplug.d/iface/[0-9][0-9]-p5
