@@ -1,0 +1,18 @@
+#!/bin/sh
+# fake ping. Tunnel-verify pings (76.76.2.0) succeed iff the server is
+# engarde-capable ($ECOSIM_STATE/capable=1). Raw path pings (-I <if>) succeed
+# iff $ECOSIM_STATE/health != 0. Emits a time= line ecod can parse.
+# U66/SC2034: `TARGET` was captured from the argv scan and never read -- the raw/tunnel
+# split is decided entirely by the -I test in the loop below. A dead capture read
+# as if the shim discriminated on address; it does not. Removed rather than annotated.
+S="$ECOSIM_STATE"; RAW=0
+for a in "$@"; do
+    case "$a" in -I) RAW=1 ;; esac
+done
+if [ "$RAW" = 1 ]; then
+    [ "$(cat "$S/health" 2>/dev/null || echo 1)" = 0 ] && exit 1
+    echo "64 bytes from x: seq=0 ttl=54 time=20.0 ms"; exit 0
+fi
+# tunnel path
+[ "$(cat "$S/capable" 2>/dev/null || echo 1)" = 1 ] || exit 1
+echo "64 bytes from x: seq=0 ttl=54 time=30.0 ms"; exit 0

@@ -1,0 +1,51 @@
+################################################################################
+# ATTACK 1  EDGE vs MID-NETWORK bottleneck.  seeds=16  offer=85% mean-total
+################################################################################
+
+== A. SANITY/EDGE: spotty cap on the LOCAL socket (study's assumption) ==
+   pull SHOULD win here (socket occupancy == true bottleneck).
+  config                         gp   loss%    p50    p95   tdrop   tshr
+  edge pull                   90182     0.7     21    242       0   0.22
+  edge push                   89436     1.6     40    291       0   0.20
+  edge oracle                 90374     0.5     12    242       0   0.22
+
+== B. MID-NET, hard dropouts downstream (carrier taildrops @300ms) ==
+   spotty cap moved DOWNSTREAM; local socket drains fast (lm=20). 
+  config                         gp   loss%    p50    p95   tdrop   tshr
+  mid-drop pull               78915    13.1     87    215    4997   0.25
+  mid-drop push               87008     4.2    101    325    1367   0.21
+  mid-drop oracle             88166     3.0    102    301      40   0.21
+
+== C. MID-NET, carrier SHAPING (throttle to 4Mb, NO full outage) ==
+   the purest hidden bottleneck: bytes always leave the socket. 
+  config                         gp   loss%    p50    p95   tdrop   tshr
+  mid-shape pull              79007    13.0     86    214    4635   0.25
+  mid-shape push              88001     3.1    108    289       0   0.21
+  mid-shape oracle            88186     2.9    101    290       0   0.21
+
+== D. MID-NET + BACKPRESSURE spectrum (phone flow-controls USB) ==
+   bp=1.0 -> local==down (full edge recovery); bp large -> mid. 
+  config                         gp   loss%    p50    p95   tdrop   tshr
+  mid-bp1.0 pull              88386     2.7     92    300       0   0.22
+  mid-bp1.0 push              88722     2.3    100    338       0   0.20
+  mid-bp1.0 oracle            88446     2.6     91    300       0   0.22
+
+  mid-bp1.2 pull              66184    27.1    108    290       0   0.18
+  mid-bp1.2 push              88097     3.0    120    341       0   0.20
+  mid-bp1.2 oracle            88247     2.9     99    304       0   0.21
+
+  mid-bp1.5 pull              68460    24.6    105    288     240   0.18
+  mid-bp1.5 push              88178     2.9    118    342       0   0.20
+  mid-bp1.5 oracle            88199     2.9     99    305       0   0.21
+
+  mid-bp3.0 pull              75113    17.3     99    282    1493   0.21
+  mid-bp3.0 push              88342     2.8    113    342       0   0.20
+  mid-bp3.0 oracle            88205     2.9     99    305       0   0.21
+
+== E. MID-NET BUFFERBLOAT (deep 2000ms carrier buffer, drops->delay) ==
+   loss stays low, LATENCY explodes: pull's other failure mode. 
+  config                         gp   loss%    p50    p95   tdrop   tshr
+  mid-bloat pull              76813    15.4     91    224    2760   0.25
+  mid-bloat push              87008     4.2    101    325    1367   0.21
+  mid-bloat oracle            88166     3.0    102    301      40   0.21
+

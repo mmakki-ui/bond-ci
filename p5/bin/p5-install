@@ -1,0 +1,621 @@
+#!/bin/sh
+# p5-install -- THE single install entry point for the P5 product.
+#
+#   p5-install --package DIR --role client|server [--dry-run]
+#
+# There is exactly one of these. Nothing else installs P5, and this script
+# installs nothing that is not declared in the package's filemap and admitted
+# by the on-disk contract. It runs FROM the unpacked package (it is not itself
+# installed on the box), because a box with no package has nothing to install
+# -- while a box with no package must still be able to describe, protect and
+# remove itself, which is why p5-version, p5-uninstall and p5-deadman ARE
+# installed.
+#
+# ============================================================================
+# THE SERVER CANNOT BE PHYSICALLY REACHED. This script is written for that.
+# ============================================================================
+# ROADMAP, STANDING CONSTRAINT: the GL-MT2500 at ${SERVER_PC_IP} has no console, no
+# recovery button and no power-cycle into failsafe. A step that leaves it
+# unreachable loses the box. Four properties follow, and each is a mechanism
+# with a bar behind it rather than an intention:
+#
+#  1. IT NEVER TOUCHES THE MANAGEMENT PATH. Every destination is judged against
+#     contract/foreign BEFORE contract/namespace, and contract/foreign carries
+#     an explicit management-path class (dropbear, network, firewall and their
+#     boot flags). No filemap row, no packaging mistake and no widened namespace
+#     can put a P5 file on one. Bar MG-1 packages a file at each of those
+#     destinations and asserts exit 4.
+#
+#  2. IT IS ADDITIVE, AND IT SWITCHES NOTHING. Nothing is enabled, nothing is
+#     started, no service is stopped, no config is committed. The old stack, if
+#     present, keeps running throughout and afterwards. This is install-new-
+#     then-switch: at no point does the box carry neither stack.
+#
+#  3. AN INTERRUPTED RUN IS A NAMED STATE WITH A COMPLETE UNDO. The install
+#     plan is written to /usr/lib/p5/install.inprogress and synced BEFORE the
+#     first file is placed, and unlinked only after the last record is written.
+#     Its presence means "an install started and did not finish"; the plan it
+#     carries is exactly what `p5-uninstall --remove` undoes. A completion stamp
+#     written at the end cannot do this: between the first write and the stamp
+#     there is a window where the box carries P5 files and no record of them.
+#     Bar CR-1 kills this process at EVERY write, for every N, and asserts the
+#     tree comes back byte-identical and the next install exits 0.
+#
+#  4. EVERY WRITE IS ATOMIC. Files are staged beside their destination, synced,
+#     and renamed. Power loss never leaves a truncated record, a truncated stamp
+#     or a truncated binary at a live path.
+#
+# WHY IT DOES NOT REQUIRE THE OLD STACK TO BE GONE FIRST, which is a departure
+# from p5-execution-handover.md:8 ("cleanly UNINSTALL the old package, then
+# install P5 fresh") and is deliberate. That requirement exists to make "remove
+# precisely those and nothing else" decidable. E0 satisfies it a different and
+# stronger way -- DISJOINTNESS, machine-checked by bar NS-3: no path is claimed
+# by both P5 and P1/P2/P3/P4/GL. Given disjointness, placing P5's files cannot
+# disturb the old stack, so requiring a removal FIRST buys nothing and costs the
+# thing that must never be spent: a window in which the unreachable server has
+# had its working stack removed and its replacement not yet installed. The
+# old-stack half of "clean" is still required -- but before the SWITCH, which is
+# E5's `enable`/`start` and E7's teardown, not before the install.
+# `p5-uninstall --check --scope both` is that gate and still returns 6 (U26).
+# If U26 or Mo disagrees, the change is one line here; the reasoning is above.
+#
+# WHAT IT DELIBERATELY DOES NOT DO:
+#   - it does not enable or start anything. Files land DISABLED. (Adopted from
+#     docs/deploy-p5-runbook.md:60 -- the one part of the old procedure that is
+#     right regardless of which stack is being installed.)
+#   - it does not seed configuration. Seeding /etc/bond/agg_w with an invented
+#     20000,15000 is exactly how the old runbook silently defeated U6 (removed
+#     in 52a76d3). /etc/p5/* is declared state=runtime precisely so the
+#     installer CANNOT write a fact; E6's fact-writer discovers them on the box.
+#   - it does not choose an architecture. Which binary is right for the box is
+#     a packaging decision (U28) expressed as filemap rows.
+#
+# BUSYBOX-SAFE POSIX sh.
+
+set -u
+
+P5_TAG="p5-install"
+
+# Locate the library. From an unpacked package it sits next to us in lib/;
+# P5_LIB_SRC overrides for the test harness and for an out-of-tree layout.
+_self_dir=$(dirname "$0")
+# NOTE the leading underscore. These MUST NOT be written into P5_LIB_SRC /
+# P5_CONTRACT_SRC: p5-common.sh captures the override set by testing which of
+# those names are SET, before any default is applied, and a script that assigns
+# its own default to one of them makes "the operator pointed this elsewhere"
+# indistinguishable from "we defaulted it" -- which is exactly the ambiguity the
+# capture exists to remove.
+_lib_src="${P5_LIB_SRC:-$_self_dir/../lib}"
+_con_src="${P5_CONTRACT_SRC:-$_self_dir/../contract}"
+
+[ -r "$_lib_src/p5-common.sh" ] || {
+    echo "p5-install: ERROR: cannot find p5-common.sh under $_lib_src" >&2
+    exit 5
+}
+. "$_lib_src/p5-common.sh"
+# The contract copies used for THIS run are the package's own, not the box's:
+# an install must be judged against the contract it shipped with.
+p5_contract_dir "$_con_src" ""
+
+# --- THE TRANSPORT SECRET (U115) -------------------------------------------
+# The bonded frame's MAC is keyed with one 32-byte secret that must be the same
+# 32 bytes at each end (p4-bondagg/daemon/auth.go:117-120). When the file is
+# absent the daemon logs the failure and RUNS ON with authentication off, which
+# is byte-for-byte the pre-U31 wire -- so an install that does not place this
+# file ships the forgeable framing U31 exists to close. It is placed here, and
+# it is never carried in the package: the bytes are read from /dev/urandom on
+# this box, or adopted from a file the operator names.
+#
+# THIS PATH IS WRITTEN OUT HERE AND CROSS-CHECKED, NOT TRUSTED. It is added to
+# SYNTHMAP below, and step 6 asserts SYNTHMAP plus COPYMAP equals exactly the
+# contract's install-state file rows in both directions (bars IN-14/IN-15), so
+# this literal and the contract row cannot drift apart without an abort.
+P5_KEYFILE=/etc/p5/transport.key
+
+# key_wellformed FILE -> 0 if FILE holds exactly one 64-hex-character line.
+# IT NEVER PRINTS WHAT IT READ. Every caller's message names the path only.
+key_wellformed() {
+    [ -f "$1" ] || return 1
+    _kw_n=$(grep -c . "$1" 2>/dev/null) || return 1
+    [ "$_kw_n" = 1 ] || return 1
+    grep -qxE '[0-9a-f]{64}' "$1" 2>/dev/null || return 1
+    return 0
+}
+
+# key_make DEST -- put the secret at DEST (a scratch path), mode 600 from the
+# moment it exists. `umask 077` in the subshell is what makes that true at
+# CREATION: chmod-after-write leaves a window in which the bytes are on disk
+# world-readable, and on the one file where that matters it is the whole point.
+# The value never reaches a variable or an argument list, so it cannot appear
+# in `ps`, in a log, or in this script's own stdout.
+key_make() {
+    if [ -n "$TKSRC" ]; then
+        ( umask 077; cat "$TKSRC" > "$1" ) || return 1
+    else
+        ( umask 077; od -An -v -tx1 -N32 /dev/urandom 2>/dev/null | tr -d ' \n' > "$1" && echo >> "$1" ) || return 1
+    fi
+    key_wellformed "$1"
+}
+
+usage() {
+    cat >&2 <<'EOF'
+usage: p5-install --package DIR --role client|server [--dry-run]
+                  [--transport-key FILE]
+
+  --package DIR   unpacked P5 package: MANIFEST.sha256, PROVENANCE,
+                  payload/filemap and the payload files themselves
+  --role          which box this is. The filemap is role-tagged, so one
+                  package serves the client and the server without either
+                  being a special case of the other
+  --dry-run       run every check and print the plan, including the removal
+                  set the install will create; touch nothing
+  --transport-key FILE
+                  ADOPT the transport secret in FILE (one line of 64 hex
+                  characters) instead of making a new one. Both boxes must
+                  carry the SAME secret, so exactly one of them generates and
+                  the other adopts a copy. Omitted, this install generates.
+                  FILE is read, never printed, and never shipped anywhere
+
+exit codes: 0 ok | 2 usage | 3 integrity | 4 contract violation
+            5 precondition (the box is not in a state this tool acts on)
+EOF
+    exit "$P5_EX_USAGE"
+}
+
+PKG=""; ROLE=""; DRY=0; TKSRC=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --package) [ $# -ge 2 ] || usage; PKG="$2"; shift 2 ;;
+        --role)    [ $# -ge 2 ] || usage; ROLE="$2"; shift 2 ;;
+        --transport-key) [ $# -ge 2 ] || usage; TKSRC="$2"; shift 2 ;;
+        --dry-run) DRY=1; shift ;;
+        -h|--help) usage ;;
+        *) echo "p5-install: unknown argument: $1" >&2; usage ;;
+    esac
+done
+[ -n "$PKG" ] || usage
+case "$ROLE" in client|server) : ;; *) echo "p5-install: --role must be client or server" >&2; usage ;; esac
+
+p5_announce_overrides
+
+# --- 0. a single scratch dir, removed on EVERY orderly exit path ------------
+# One directory, one trap. The alternative -- scattered /tmp files and an
+# `rm -f` before each `p5_die` -- leaks on the paths that forget one, and this
+# script is mostly abort paths by design. A hard kill (power loss, or
+# P5_FAULT_AFTER) deliberately does NOT run the trap: the scratch dir is on
+# tmpfs and a reboot clears it, and pretending a power cut tidies up would
+# make the crash bars measure the wrong thing.
+# EXCLUSIVE, never adopted -- see p5_workdir in p5-common.sh (U82).
+WORK=$(p5_workdir p5-install) || { echo "p5-install: ERROR: cannot create an exclusive scratch directory under ${TMPDIR:-/tmp}" >&2; exit 5; }
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# --- 1. tools + contracts ---------------------------------------------------
+# p5_require_tools does not merely look for sha256sum: it hashes a known string
+# and checks the answer, so a P5_SHA256 pointed at something that prints
+# plausible hashes fails here rather than silently signing off the payload.
+p5_require_tools
+p5_require_contracts
+
+# The transport secret must be PRODUCIBLE before the box is touched. Checked
+# here, at the same point as the other tool checks, so a box that cannot make
+# one is refused while it is still untouched rather than half way through an
+# install -- and so `--dry-run` answers the question too.
+if [ -n "$TKSRC" ]; then
+    [ -r "$TKSRC" ] || p5_die "$P5_EX_PRECOND" "--transport-key names a file that cannot be read: $TKSRC"
+    key_wellformed "$TKSRC" || p5_die "$P5_EX_PRECOND" "--transport-key file is not one line of 64 hex characters: $TKSRC (its content is deliberately not printed)"
+    KEYHOW="adopted from $TKSRC"
+else
+    [ -r /dev/urandom ] || p5_die "$P5_EX_PRECOND" "no readable /dev/urandom, so $P5_KEYFILE cannot be generated on this box. Without it the daemon runs with transport authentication OFF. Supply one with --transport-key or fix the box"
+    for _kt in od tr; do
+        command -v "$_kt" >/dev/null 2>&1 || p5_die "$P5_EX_PRECOND" "'$_kt' is missing, so $P5_KEYFILE cannot be generated on this box. Without it the daemon runs with transport authentication OFF"
+    done
+    KEYHOW="generated on this box from /dev/urandom"
+fi
+
+# --- 2. package layout ------------------------------------------------------
+# Every one of these is required. A package missing any of them is not a
+# package, and guessing a default for a missing piece is how invented values
+# reach a box.
+MANIFEST="$PKG/MANIFEST.sha256"
+PROVENANCE="$PKG/PROVENANCE"
+FILEMAP="$PKG/payload/filemap"
+
+[ -d "$PKG" ]        || p5_die "$P5_EX_PRECOND" "package dir not found: $PKG"
+[ -r "$MANIFEST" ]   || p5_die "$P5_EX_PRECOND" "package has no MANIFEST.sha256 (U28/E8 generates it): $MANIFEST"
+[ -r "$PROVENANCE" ] || p5_die "$P5_EX_PRECOND" "package has no PROVENANCE (U28/E8 generates it): $PROVENANCE"
+[ -r "$FILEMAP" ]    || p5_die "$P5_EX_PRECOND" "package has no payload/filemap (U28/E8 generates it): $FILEMAP"
+
+# --- 3. integrity: the manifest must match AND must be complete -------------
+# Two checks, because they fail differently. A MISMATCH is corruption -- the
+# scp truncation the old runbook worried about (deploy-p5-runbook.md:32). An
+# UNPINNED file is worse and quieter: a file that rode along in the payload
+# without appearing in the manifest is a file nobody signed off, and a
+# manifest-only check would install it silently.
+p5_log "verifying package integrity against $MANIFEST"
+( cd "$PKG" && "$P5_SHA256" -c MANIFEST.sha256 ) >/dev/null 2>&1 \
+    || p5_die "$P5_EX_INTEGRITY" "MANIFEST.sha256 does not verify -- corrupt or partial package, ABORT before touching the box"
+
+# The `rel` value is spliced into a BRE. Payload paths are package-internal and
+# U28 controls them; if a payload filename ever contains a BRE metacharacter
+# this check gets looser, not tighter, so it is worth knowing about.
+find "$PKG/payload" -type f 2>/dev/null | while read -r f; do
+    rel=${f#"$PKG"/}
+    grep -q " \*\{0,1\}${rel}\$" "$MANIFEST" 2>/dev/null || echo "$rel"
+done > "$WORK/unpinned" 2>/dev/null
+if [ -s "$WORK/unpinned" ]; then
+    p5_err "payload files present but NOT pinned by MANIFEST.sha256:"
+    cat "$WORK/unpinned" >&2
+    exit "$P5_EX_INTEGRITY"
+fi
+
+# --- 3b. PROVENANCE must be present AND WELL FORMED -------------------------
+# The stamp exists so a box can be tied back to a commit. Carrying PROVENANCE
+# through with a bare grep and no check that anything matched produced a stamp
+# that looked authoritative and carried none of the fields it exists for -- an
+# unvalidated stamp is worse than no stamp, because it answers the question
+# wrongly instead of not answering it. Every field is shape-checked here, and a
+# package that fails is an integrity failure, not a warning.
+prov_bad=""
+prov_need() {   # prov_need KEY REGEX HUMAN
+    _pv=$(grep "^$1=" "$PROVENANCE" 2>/dev/null | head -1)
+    _pv=${_pv#*=}
+    if [ -z "$_pv" ]; then
+        prov_bad="$prov_bad
+  $1 is missing or empty (expected $3)"
+        return 1
+    fi
+    echo "$_pv" | grep -qE "$2" || prov_bad="$prov_bad
+  $1='$_pv' is not $3"
+    return 0
+}
+prov_need P5_PRODUCT    '^p5$'                                       "the literal 'p5'"
+prov_need P5_VERSION    '^[A-Za-z0-9][A-Za-z0-9._+-]*$'              "a version token"
+prov_need P5_GIT_COMMIT '^[0-9a-f]{40}$'                             "a full 40-character git object id"
+prov_need P5_GIT_BRANCH '^[A-Za-z0-9][A-Za-z0-9._/-]*$'              "a branch name"
+prov_need P5_GIT_DIRTY  '^(yes|no)$'                                 "exactly 'yes' or 'no'"
+prov_need P5_BUILT_UTC  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "an ISO-8601 UTC timestamp"
+if [ -n "$prov_bad" ]; then
+    p5_err "package PROVENANCE is not usable, so the stamp this install would write could not identify it:$prov_bad"
+    p5_err "A stamp that looks authoritative and carries none of the fields it exists for is worse than no stamp."
+    exit "$P5_EX_INTEGRITY"
+fi
+p5_log "package provenance validated ($(grep '^P5_GIT_COMMIT=' "$PROVENANCE" | head -1), dirty=$(grep '^P5_GIT_DIRTY=' "$PROVENANCE" | head -1 | sed 's/.*=//'))"
+
+# --- 4. the box must be in a state this tool understands --------------------
+# THE precondition, and it is computed IN THIS PROCESS from p5_box_state -- not
+# by asking an external program. That is not a style choice: the previous form
+# shelled out to $P5_UNINSTALL, so `P5_UNINSTALL=/bin/true` turned the whole
+# precondition into a no-op with nothing logged. There is no external program to
+# substitute here, so that bypass does not exist rather than being defended
+# against (bar IN-17).
+#
+# `clean` is the only state an install proceeds from. Every other state names
+# itself and names the remedy; none of them is guessed at.
+p5_box_state "$ROLE"
+# RESOLVE THE REMEDY BEFORE PRINTING IT. Round 2 printed "Remedy: p5-uninstall
+# --remove" unconditionally, and the state that most needs a remedy is the one
+# an interrupted removal produces -- where /usr/sbin/p5-uninstall may be the
+# file that run just deleted. Naming a binary that is not there, on a box with
+# no console, is worse than printing nothing. p5_recovery_verb checks that the
+# box's copy AND its library are both present and falls back to the copy beside
+# this installer, which exists whenever this installer does.
+REMEDY=$(p5_recovery_verb "$_self_dir")
+case "$P5_STATE" in
+    clean) : ;;
+    installed)
+        p5_die "$P5_EX_PRECOND" "P5 is already installed ($P5_STATE_WHY). This installer does not upgrade in place -- the deploy shape is remove-then-install, so a layered install would make installed.files a lie. Remedy: $REMEDY --remove" ;;
+    incomplete)
+        p5_die "$P5_EX_PRECOND" "a previous run of this product died half way ($P5_STATE_WHY). It is NOT resumed automatically: resuming means guessing which steps completed, and this box cannot afford a guess. Remedy: $REMEDY --remove (it undoes exactly the recorded plan, whether or not each step landed), then install again" ;;
+    damaged)
+        p5_die "$P5_EX_PRECOND" "the box carries P5 paths that this product did not put there in a way it can account for ($P5_STATE_WHY). Refusing: an install over an unaccountable tree produces a record that is false, and that record is the only thing that makes removal precise. Remedy: $REMEDY --check --role $ROLE lists exactly what is present, then $REMEDY --remove --recover --role $ROLE derives the set from the contract and clears it" ;;
+    future)
+        p5_die "$P5_EX_PRECOND" "$P5_STATE_WHY. Refusing to install over a layout this build does not understand" ;;
+    *)
+        p5_die "$P5_EX_PRECOND" "unrecognised box state '$P5_STATE' -- refusing. This is a bug in p5_box_state, and failing closed is the correct response to it" ;;
+esac
+p5_log "box state: clean ($P5_STATE_WHY)"
+
+# --- 5. contract gate on every destination ----------------------------------
+# Read the filemap once, judge every destination against contract/foreign,
+# contract/namespace and contract/paths, and refuse the WHOLE install on any
+# violation -- never a partial install with the bad row skipped.
+#
+# filemap format: mode|role|src|dest
+#   mode  the install mode, e.g. 755 or 644 (passed to `install -m`)
+#   role  client | server | both
+#   src   path RELATIVE to the package's payload/ dir
+#   dest  absolute PRODUCTION destination path
+p5_log "checking every destination against the on-disk contract"
+viol=0; planned=0
+while IFS='|' read -r fm_mode fm_role fm_src fm_dest; do
+    case "$fm_mode" in ''|\#*) continue ;; esac
+    [ -n "${fm_dest:-}" ] || { p5_err "malformed filemap row: $fm_mode|${fm_role:-}|${fm_src:-}|${fm_dest:-}"; viol=$((viol + 1)); continue; }
+    if [ "$fm_role" != both ] && [ "$fm_role" != "$ROLE" ]; then continue; fi
+    case "$fm_mode" in
+        [0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) : ;;
+        *) p5_err "filemap mode is not an octal file mode: $fm_mode ($fm_dest)"; viol=$((viol + 1)); continue ;;
+    esac
+    [ -f "$PKG/payload/$fm_src" ] || { p5_err "filemap names a payload file that is not in the package: $fm_src"; viol=$((viol + 1)); continue; }
+    p5_check_dest "$ROLE" "$fm_dest" || { viol=$((viol + 1)); continue; }
+    planned=$((planned + 1))
+    echo "$fm_mode|$fm_src|$fm_dest"
+done < "$FILEMAP" > "$WORK/plan"
+# NOTE on shell semantics, because it is load-bearing: a `while ... done < in
+# > out` compound command is NOT a pipeline, so it runs in the CURRENT shell
+# and `viol`/`planned` survive. Refusals go to stderr via p5_err, so they are
+# not swallowed by the plan redirect. If this is ever rewritten as a pipeline,
+# the counters silently become always-zero and the contract gate stops gating.
+
+if [ "$viol" -gt 0 ]; then
+    p5_die "$P5_EX_CONTRACT" "$viol filemap row(s) violate the on-disk contract -- refusing the ENTIRE install (no partial installs)"
+fi
+if [ "$planned" = 0 ]; then
+    p5_die "$P5_EX_PRECOND" "filemap declares nothing for role=$ROLE -- an empty install is not a successful one"
+fi
+p5_log "$planned payload file(s) admitted by the contract for role=$ROLE"
+
+# --- 6. the product's own on-box files, checked against the contract --------
+# The library, the contract copies and the three on-box entry points are placed
+# by the installer itself, not from the filemap: they are what the box needs in
+# order to describe, protect and remove itself, so they cannot be optional
+# payload.
+#
+# THIS MAP IS THE ONE HAND-MAINTAINED LIST LEFT IN THE PRODUCT, and it exists
+# only because contract/paths is about destinations and cannot carry "copied
+# from where, with what mode". So it is BARRED from diverging: the destinations
+# it names, plus the three files the installer SYNTHESISES rather than copies,
+# must equal exactly the contract's install-state file rows -- in both
+# directions. A file declared and not placed, or placed and not declared, aborts
+# the install before anything is written (bars IN-14, IN-15).
+COPYMAP="$_lib_src/p5-common.sh|/usr/lib/p5/p5-common.sh|644
+$P5_CONTRACT_NS|/usr/lib/p5/contract-namespace|644
+$P5_CONTRACT_FOREIGN|/usr/lib/p5/contract-foreign|644
+$P5_CONTRACT_PATHS|/usr/lib/p5/contract-paths|644
+$_self_dir/p5-uninstall|/usr/sbin/p5-uninstall|755
+$_self_dir/p5-version|/usr/sbin/p5-version|755
+$_self_dir/p5-deadman|/usr/sbin/p5-deadman|755"
+# Synthesised, not copied: written from data this run computes. The transport
+# secret is here and not in COPYMAP for exactly that reason -- there is no
+# source file in the package to copy it from, and there must never be one.
+SYNTHMAP="/usr/lib/p5/stamp
+/usr/lib/p5/installed.dirs
+/usr/lib/p5/installed.files
+$P5_KEYFILE"
+
+{ printf '%s\n' "$COPYMAP" | cut -d'|' -f2; printf '%s\n' "$SYNTHMAP"; } | sort > "$WORK/mine"
+p5_installable_paths "$ROLE" file | sort > "$WORK/declared"
+if ! cmp -s "$WORK/mine" "$WORK/declared"; then
+    p5_err "the installer's own file set and the contract's install-state file rows DISAGREE."
+    p5_err "declared in $P5_CONTRACT_PATHS but this installer never places it:"
+    comm -13 "$WORK/mine" "$WORK/declared" 2>/dev/null | sed 's/^/    /' >&2
+    p5_err "placed by this installer but not declared in the contract:"
+    comm -23 "$WORK/mine" "$WORK/declared" 2>/dev/null | sed 's/^/    /' >&2
+    p5_die "$P5_EX_CONTRACT" "refusing to install: an undeclared file cannot be removed and a declared-but-absent file makes the clean predicate permanently red"
+fi
+
+# Every destination in the map is judged by the same gate as any payload row.
+printf '%s\n' "$COPYMAP" | while IFS='|' read -r src dst mode; do
+    p5_check_dest "$ROLE" "$dst" || echo bad
+done > "$WORK/mineviol"
+grep -q bad "$WORK/mineviol" && p5_die "$P5_EX_CONTRACT" "internal: a product file destination is not admitted by the contract"
+for dst in $SYNTHMAP; do
+    p5_check_dest "$ROLE" "$dst" || p5_die "$P5_EX_CONTRACT" "internal: $dst is not admitted by the contract"
+done
+
+# Directories: ONLY the contract's install-state dir rows are ever created as
+# owned directories, and therefore only those can ever be recorded. This is the
+# structural answer to "installed.dirs named /usr/sbin and /etc/init.d". The
+# loop that writes the record reads from here and from nowhere else; there is no
+# code path in which a `dirname` result reaches installed.dirs.
+p5_installable_paths "$ROLE" dir | sort > "$WORK/owndirs"
+while read -r d; do
+    [ -n "$d" ] || continue
+    p5_check_dest "$ROLE" "$d" dir || p5_die "$P5_EX_CONTRACT" "internal: declared dir $d is not admitted by the contract"
+done < "$WORK/owndirs"
+
+# --- 7. dry run: print the whole plan, including what removal will do -------
+if [ "$DRY" = 1 ]; then
+    p5_log "--dry-run: every check passed. NOTHING BELOW HAS BEEN DONE."
+    echo "# directories this install would CREATE and OWN (removal rmdirs exactly these, deepest-first):"
+    sed 's/^/  /' "$WORK/owndirs"
+    echo "# payload files this install would place (mode|source|destination):"
+    sed 's/^/  /' "$WORK/plan"
+    echo "# product files this install would place (source|destination|mode):"
+    printf '%s\n' "$COPYMAP" | sed 's/^/  /'
+    echo "# files this install would synthesise:"
+    printf '%s\n' "$SYNTHMAP" | sed 's/^/  /'
+    echo "# the transport secret would be $KEYHOW, placed mode 600 at $P5_KEYFILE."
+    echo "# the resulting removal set = every file above, plus the directories above."
+    echo "# Directories P5 does NOT own (/usr/sbin, /etc/init.d, ...) may be created"
+    echo "# by this install but are NOT recorded and are NEVER removed."
+    exit "$P5_EX_OK"
+fi
+
+# --- 8. THE INTENT RECORD, before the first write ---------------------------
+# From here on the box is being changed. The plan goes down first, synced, so
+# that a power cut at any point after this leaves a box that knows what was
+# being attempted and can undo all of it.
+#
+# Which owned directories ALREADY existed is computed here, BEFORE any of them
+# is created, and step 9 records the complement. Deciding "did we create it?"
+# inside the creation loop looked equivalent and was not: /usr/lib/p5 has to
+# exist before the intent record can be written into it, so by the time the
+# loop ran it always existed, was never recorded, was therefore never rmdir-ed,
+# and every removal left an empty /usr/lib/p5 behind -- which the clean
+# predicate correctly calls NOT CLEAN, wedging the box against its next install.
+: > "$WORK/preexist"
+while read -r d; do
+    [ -n "$d" ] || continue
+    [ -d "${P5_ROOT}${d}" ] && echo "$d" >> "$WORK/preexist"
+done < "$WORK/owndirs"
+
+p5_fault_point
+mkdir -p "$P5_LIBDIR" || p5_die "$P5_EX_FAIL" "cannot create $P5_LIBDIR"
+{
+    echo "# P5 install intent record -- written BEFORE the first file was placed."
+    echo "# Its presence means an install started and did not finish."
+    echo "# Undo it with: p5-uninstall --remove"
+    echo "P5_CONTRACT_VERSION=$P5_CONTRACT_VERSION"
+    echo "P5_ROLE=$ROLE"
+    echo "P5_STARTED_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo unknown)"
+    echo "# dir|<owned directory this install may create>"
+    sed 's/^/dir|/' "$WORK/owndirs"
+    echo "# file|<every file this install intends to place>"
+    cut -d'|' -f3 "$WORK/plan" | sed 's/^/file|/'
+    printf '%s\n' "$COPYMAP" | cut -d'|' -f2 | sed 's/^/file|/'
+    printf '%s\n' "$SYNTHMAP" | sed 's/^/file|/'
+} | p5_atomic_write "$P5_INPROG_INSTALL" 644 \
+    || p5_die "$P5_EX_FAIL" "cannot write the install intent record at $P5_INPROG_INSTALL -- refusing to place a single file without one"
+
+# --- 9. create the directories P5 owns, and record exactly those ------------
+# THE ONLY WRITER OF installed.dirs IS THIS LOOP, and it reads from
+# $WORK/owndirs, which is p5_installable_paths ROLE dir -- the contract's
+# install-state `dir` rows and nothing else. There is no code path anywhere in
+# this file by which a `dirname` result reaches the record. That is what makes
+# "installed.dirs names /usr/sbin" impossible rather than unlikely: the record
+# is not filtered for shared system directories, it is incapable of containing
+# one, because /usr/sbin has no row in contract/paths and acquiring one would
+# also require an owner, a reason, and passing NS-3 disjointness.
+p5_log "installing"
+: > "$WORK/dirs"
+while read -r d; do
+    [ -n "$d" ] || continue
+    if ! grep -qxF "$d" "$WORK/preexist" 2>/dev/null; then
+        echo "$d" >> "$WORK/dirs"
+    fi
+    if [ ! -d "${P5_ROOT}${d}" ]; then
+        p5_fault_point
+        mkdir -p "${P5_ROOT}${d}" || p5_die "$P5_EX_FAIL" "cannot create $d"
+    fi
+done < "$WORK/owndirs"
+
+# --- 10. place the files ----------------------------------------------------
+# Parent directories that P5 does NOT own (/usr/sbin, /etc/init.d, ...) are
+# created if missing and are NOT recorded. Note there is no `p5_unroot
+# "$(dirname ...)" >> dirs` here and there must never be: that single line is
+# what put /usr/sbin and /etc/init.d into a removal list.
+: > "$WORK/files"
+place() {   # place MODE SRCFILE DEST
+    _pl_full="${P5_ROOT}$3"
+    _pl_dir=$(dirname "$_pl_full")
+    [ -d "$_pl_dir" ] || mkdir -p "$_pl_dir" || p5_die "$P5_EX_FAIL" "cannot create $(p5_unroot "$_pl_dir")"
+    [ -r "$2" ] || p5_die "$P5_EX_PRECOND" "cannot read the file to install from: $2"
+    p5_fault_point
+    p5_atomic_install "$1" "$2" "$_pl_full" || p5_die "$P5_EX_FAIL" "install failed: $2 -> $3"
+    echo "$(p5_hash "$_pl_full")  $3" >> "$WORK/files"
+}
+
+while IFS='|' read -r fm_mode fm_src fm_dest; do
+    [ -n "$fm_dest" ] || continue
+    place "$fm_mode" "$PKG/payload/$fm_src" "$fm_dest"
+done < "$WORK/plan"
+
+printf '%s\n' "$COPYMAP" > "$WORK/copymap"
+while IFS='|' read -r src dst mode; do
+    [ -n "$dst" ] || continue
+    place "$mode" "$src" "$dst"
+done < "$WORK/copymap"
+
+# --- 10b. the transport secret ----------------------------------------------
+# Placed by the SAME `place` as every other file, so it lands atomically, is
+# hashed into installed.files, and is therefore removed by `--remove` with the
+# rest. A secret that outlives the product it authenticated is a leftover with
+# a longer life than the box's own record of it.
+#
+# Made in $WORK first (an exclusively-owned directory under a tmpfs), never in
+# place: a half-written key at the live path is a key the daemon would read and
+# reject every frame against.
+key_make "$WORK/transport.key" \
+    || p5_die "$P5_EX_FAIL" "could not produce the transport secret for $P5_KEYFILE ($KEYHOW). Refusing to finish an install whose daemon would run with authentication OFF"
+place 600 "$WORK/transport.key" "$P5_KEYFILE"
+p5_log "transport secret placed at $P5_KEYFILE, mode 600, $KEYHOW"
+
+# --- 11. the records and the stamp -----------------------------------------
+# ORDER IS THE WHOLE POINT.
+#   installed.dirs  first, so its hash exists to be recorded.
+#   stamp           next, so its hash exists to be recorded.
+#   installed.files LAST, because it is the only file that must contain hashes
+#                   of the other two, and it carries the one self-referential
+#                   row (a file cannot record its own sha256).
+# The completion marker is NOT "the stamp exists" -- it is "the intent record is
+# gone", removed in step 12. That is what makes a crash between here and there
+# a state the tools can name and undo rather than an installed-looking box with
+# an incomplete record.
+p5_fault_point
+sort -u "$WORK/dirs" | p5_atomic_write "$P5_DIRREC" 644 \
+    || p5_die "$P5_EX_FAIL" "cannot write $P5_DIRREC"
+
+p5_fault_point
+{
+    echo "# P5 install stamp -- written by p5-install. Machine-readable KEY=value."
+    echo "# Read it with: p5-version. Do not source it; it is parsed, never executed."
+    echo "P5_CONTRACT_VERSION=$P5_CONTRACT_VERSION"
+    echo "P5_ROLE=$ROLE"
+    # Package-side provenance, carried through verbatim so the stamp cannot
+    # disagree with the package it came from. Every field was shape-checked in
+    # step 3b, so this grep cannot silently match nothing.
+    grep -E '^P5_(PRODUCT|VERSION|GIT_COMMIT|GIT_BRANCH|GIT_DIRTY|BUILT_UTC|BUILDER)=' "$PROVENANCE"
+    echo "P5_PKG_MANIFEST_SHA256=$(p5_hash "$MANIFEST")"
+    echo "P5_INSTALLED_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo unknown)"
+    echo "P5_INSTALL_ARCH=$(uname -m 2>/dev/null || echo unknown)"
+    echo "P5_INSTALL_FILES=/usr/lib/p5/installed.files"
+    echo "P5_INSTALL_DIRS=/usr/lib/p5/installed.dirs"
+    # The transport secret, identified WITHOUT being disclosed. Both boxes must
+    # carry the same 32 bytes or every frame fails its MAC; nothing on either
+    # box can check that alone, so the stamp carries a truncated sha256 of the
+    # file and the operator compares the two. It discloses nothing the record
+    # does not already hold -- installed.files carries the full sha256 of every
+    # file it places, this one included -- and a sha256 is not a way back to a
+    # 32-byte random value.
+    echo "P5_TRANSPORT_KEY=$P5_KEYFILE"
+    echo "P5_TRANSPORT_KEY_ID=$(p5_hash "${P5_ROOT}${P5_KEYFILE}" | cut -c1-12)"
+    # Which contract this install was judged against, and whether anything was
+    # pointed elsewhere from the environment. An override is not refused (the
+    # harness and out-of-tree layouts need them) but it is made indelible: the
+    # names are here and the sha256 of each contract file actually used is
+    # beside them, so an install judged against a mutated contract is
+    # detectable on the box afterwards instead of only in a shell history.
+    echo "P5_INSTALL_OVERRIDES=$P5_OVERRIDE_NAMES"
+    echo "P5_CONTRACT_NS_SHA256=$(p5_hash "$P5_CONTRACT_NS")"
+    echo "P5_CONTRACT_FOREIGN_SHA256=$(p5_hash "$P5_CONTRACT_FOREIGN")"
+    echo "P5_CONTRACT_PATHS_SHA256=$(p5_hash "$P5_CONTRACT_PATHS")"
+    # E1 (the hardware edge-vs-mid probe, ROADMAP G1) sets the enablement of
+    # the cap and the standing lightning (p5-execution-handover.md:85). It has
+    # not run. `unmeasured` is the honest value and it is what makes the gap
+    # visible on the box instead of only in a document.
+    echo "P5_E1_VERDICT=unmeasured"
+    echo "P5_FEATURES="
+} | p5_atomic_write "$P5_STAMP" 644 \
+    || p5_die "$P5_EX_FAIL" "cannot write $P5_STAMP"
+
+p5_fault_point
+{
+    cat "$WORK/files"
+    echo "$(p5_hash "$P5_DIRREC")  /usr/lib/p5/installed.dirs"
+    echo "$(p5_hash "$P5_STAMP")  /usr/lib/p5/stamp"
+    echo "$P5_SELFREF  /usr/lib/p5/installed.files"
+} | p5_atomic_write "$P5_FILEREC" 644 \
+    || p5_die "$P5_EX_FAIL" "cannot write $P5_FILEREC"
+
+# --- 12. the run is complete: drop the intent record ------------------------
+p5_fault_point
+rm -f "$P5_INPROG_INSTALL"
+p5_sync
+
+n_files=$(grep -c . "$P5_FILEREC" 2>/dev/null); [ -n "$n_files" ] || n_files=0
+n_dirs=$(grep -c . "$P5_DIRREC" 2>/dev/null); [ -n "$n_dirs" ] || n_dirs=0
+p5_log "installed. $n_files file(s) recorded, $n_dirs owned directory/ies recorded."
+p5_log "Nothing was enabled, nothing was started, no service was stopped and no config was committed."
+p5_err "THE OLD-STACK HALF OF 'CLEAN' WAS NOT EVALUATED and this install did not need it:"
+p5_err "  P5's paths are disjoint from P1/P2/P3/P4/GL (bar NS-3), so these files sit beside the old"
+p5_err "  stack without disturbing it. That is deliberate -- on a box with no physical access, a"
+p5_err "  window with the old stack removed and the new one not yet installed is the thing to avoid."
+p5_err "THE TRANSPORT SECRET WAS $KEYHOW. Both boxes must carry the SAME one, and nothing on"
+p5_err "  either box can verify that by itself: compare P5_TRANSPORT_KEY_ID in the two stamps"
+p5_err "  (p5-version prints it). If they differ, install the second box with --transport-key"
+p5_err "  pointing at a copy of the first box's $P5_KEYFILE. Two different secrets is not an"
+p5_err "  open wire -- it is a dead one, because every frame then fails its MAC."
+p5_err "  BEFORE ENABLING ANYTHING, run: p5-uninstall --check --scope both"
+p5_err "  and arm p5-deadman around any step that touches routing, the firewall or the SSH path."
+p5_log "interrogate with: p5-version   |   verify with: p5-version --verify   |   plan a removal with: p5-uninstall --remove --dry-run"
+exit "$P5_EX_OK"

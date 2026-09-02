@@ -1,0 +1,35 @@
+# deploy/p5/portal/catalogue/fields — the non-mode writable fields.
+#
+# EVERY entry here is intent, never mechanism (m9-portal-design.md §3). The
+# reorder hold, target_ms, CAP_CLEAR, beta, ratchet internals, FEC and the
+# autorate MAX are deliberately absent and must stay absent: exposing them makes
+# the portal a back door for the invented constants OBJ-B exists to delete.
+#
+# There is also deliberately NO per-source participation field. ADR-003 §4 +
+# OBJ-A: source participation is NATIVE (netifd metrics, set in GL's own GUI).
+# An `/etc/bond/exclude` fact would be the `cell` mistake one layer up. Bar
+# PC-4 asserts no field here writes a per-source fact.
+#
+# fields: key|kind|domain|consumer|label
+#   kind     = enum | uint
+#   domain   = enum -> space-separated literals
+#              uint -> the name of the ENVELOPE file that declares the bounds.
+#                      NOT a constant in this file. See `floor_kbit` below.
+#   consumer = the artifact that READS the fact. `unbuilt` means the fact is
+#              written per its own spec but nothing consumes it yet; the page
+#              renders that plainly instead of implying the control works.
+shape|enum|on off|unbuilt|Shaping (writes /etc/bond/shape per e4-shaping-in-dag.md:70; the E4 DAG consumer is U22, not built)
+profile|enum|conservative balanced aggressive|unbuilt|Escalation profile -- risk appetite, not milliseconds. The mapping to bond-ecod's constants belongs INSIDE bond-ecod; the portal never names a constant.
+# floor_kbit — the ONE numeric field the guardrail permits, and only because it
+# is a REQUIREMENT (a service floor), not a measurement. INTENT.md OBJ-E /
+# m9-portal-design.md §3.
+#
+# ITS UPPER BOUND IS AN OPEN QUESTION, NOT A NUMBER. "No arbitrary constants"
+# applies to a validation range as hard as it applies to a rate. The only
+# non-arbitrary ceiling is the autorate max OBJ-F derives from the summed
+# per-source deliverable rate -- and OBJ-F is not built (U24). So the domain
+# below names an ENVELOPE FILE the operator must declare; with no envelope on
+# disk the field is rendered disabled with that reason and the CGI answers 400
+# `no_envelope`. It is NOT given a placeholder ceiling.
+# Lower bound is physics: a rate must be positive, so >= 1 kbit/s.
+floor_kbit|uint|floor_envelope|unbuilt|Service floor (kbit/s) -- a REQUIREMENT. OBJ-F makes it yield when proven unachievable.

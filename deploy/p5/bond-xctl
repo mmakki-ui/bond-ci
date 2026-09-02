@@ -1,0 +1,232 @@
+#!/bin/sh
+# shellcheck disable=SC1091,SC2034
+# U124, file-scope and structural, not a silencing: this file is the ENTRY
+# POINT. Every constant it sets is consumed by one of the five libraries it
+# sources and by nothing in this file (SC2034), and it sources them through
+# $XCTL_LIB, a path shellcheck cannot follow (SC1091). XS-1 is the bar that
+# checks the sources for real; a missing lib is a hard FATAL, not a warning.
+# /usr/sbin/p5-reconciler — P5 stateless DAG executor (de-daemonized operational
+# core, extracted from bondctl v2.8). The ONLY code that walks a lifecycle
+# edge. It is a small INTERPRETER over deploy/p5/bond.dag: it reads the row
+# for the requested intent, then runs the named guard -> action -> verify ->
+# onfail leaf functions. It holds no state and no memory: every invocation
+# re-derives the current node from live probes (level-triggered reconciler,
+# K8s/Airflow lineage), so a lost or racing action is simply re-applied by
+# the next converge. All lifecycle entry points (bondctl CLI, 97-bond
+# hotplug, bond-ecod, bond-watchdog) funnel through here under ONE lock.
+#
+#   bond-xctl reconcile [refresh]   THE single level-triggered verb: observe node()
+#                           -> desired() -> walk ONE bond.dag edge (engage|disengage|
+#                           switch chosen by desired(), never by the caller --
+#                           this is what dissolves the MF-1/MF-2 wrong-intent class).
+#                           `refresh` = a config-only live switch (tunnel intact ->
+#                           `switch`, no re-verify); default = re-establish (`engage`).
+#   bond-xctl node          print the current derived node (probe truth)
+#   bond-xctl selfcheck     parse+validate bond.dag, print the edge table
+#
+# The lifecycle intents themselves (engage/disengage/switch/suspend) are
+# bond.dag rows walked INTERNALLY by reconcile(); they are no longer CLI verbs.
+# U141 folded the old `agg`/`agg_revert` rows into engage/suspend: there is ONE
+# feeder (bond-agg on :59402) for every bonded mode, so there is one engage row.
+#
+# BUSYBOX-SAFE POSIX sh: no bashisms, no [[ ]], no arrays, no fractional
+# sleep, no paste. Proven equivalent to the deployed bondctl wiring in
+# orchestration/bond_model.py (the CANDIDATE machine runs THIS SAME
+# bond.dag through the same guard/action/verify names).
+
+BOND_DIR="${BOND_DIR:-/etc/p5}"
+RUN_DIR="${RUN_DIR:-/var/run/p5}"        # tmpfs: lock+suspended self-clear on boot (D4)
+DAG="${DAG:-/usr/lib/p5/dag}"
+# ONE FEEDER (U141). Every bonded mode is bond-agg on :59402; the engarde port,
+# the engarde local endpoint, its init script and its binary are all gone from
+# this file because no edge, guard, verify or builder reads them any more.
+# p5/contract/foreign still lists engarde's paths as FOREIGN -- that is a
+# never-write list, not a removal list, and E7/U26 owns the removal.
+AGG_PORT="59402"
+LOCAL_AGG="127.0.0.1:${AGG_PORT}"
+WG_DEV="${WG_DEV:-wgclient1}"
+# AGG_SVC is now the engaged/off DISCRIMINATOR as well as the feeder's service:
+# node()/desired() read ITS rc.d enable flag. Before U141 that flag was
+# engarde's, which is why P5's own lifecycle could not run on a purged box
+# (EG-2). It is P5's own init script, shipped by P5 (deploy/p5/init.d/bond-agg).
+AGG_SVC="${AGG_SVC:-/etc/init.d/p5-datapath}"
+AGG_BIN="${AGG_BIN:-/usr/sbin/p5-datapath}"
+# ---- EXTERNAL COMMANDS: resolved by an EXPLICIT $PATH WALK, never by name ----
+#
+# WHY (U69 measured the mechanism; U67h measured that naming them was not enough).
+# busybox ash is a STANDALONE shell: for any name in its applet table it runs its
+# own applet and NEVER consults $PATH. `ip`, `ping` and `tc` are all applets.
+# Under the interpreter the routers actually run, a BARE NAME therefore does not
+# mean "the tool on PATH" -- it means "busybox's cut-down applet", and no caller
+# can change that from outside the process. Measured on the mirror, `busybox`
+# workflow, job `bisect`, step "applet census", 2026-09-01:
+#     tc    APPLET=YES   busybox-ash resolves: tc   dash resolves: <path>/bin/tc
+#     ip    APPLET=YES   busybox-ash resolves: ip   dash resolves: <path>/bin/ip
+#     ping  APPLET=YES   busybox-ash resolves: ping dash resolves: <path>/bin/ping
+#
+# U69 fixed this for `ip`/`ping` by making them VARIABLES so the harness could
+# inject absolute paths. That closed the harness half and left the BOX half open,
+# because on the box nothing injects and the default was still a bare name: if
+# GL.iNet's busybox is built FEATURE_SH_STANDALONE (U69a, still an open question),
+# then `tc qdisc replace ... root cake` runs BUSYBOX's tc, which has no `cake`
+# qdisc -- and because shaping is INV8 (never escalates, only logs), the shaper
+# would silently never converge and the reconciler would re-walk the edge on every
+# ~10s tick forever. That is exactly the shape the SH-* bars catch: 10 of them,
+# `_shape` reading `off` while cake was requested, and SH-1 counting 3 restarts
+# where a converged box must cause 0.
+#
+# So the resolution happens HERE, in the process that runs the command, by walking
+# $PATH explicitly. Shell-independent by construction -- the same rule U67g applied
+# to the harness's own wrapper resolution, applied to the shipped side. Properties:
+#   - an INJECTED value (harness, or an operator override) always wins, unchanged;
+#   - otherwise the FIRST executable regular file of that name on $PATH wins, which
+#     is what every non-standalone shell would have done;
+#   - if $PATH holds none, the BARE NAME is kept, so a tool that exists ONLY as an
+#     applet still runs and nothing regresses;
+#   - an EMPTY $PATH element means the current directory to POSIX; it is SKIPPED
+#     here, because resolving a router's `tc` out of whatever directory a hotplug
+#     script happened to be started in is not a behaviour this file wants.
+_tool_path=""
+_tool() {   # $1 = bare name -> sets $_tool_path (absolute if found, else $1)
+    _tn=$1; _tp=$PATH; _tool_path=$_tn
+    while : ; do
+        case "$_tp" in
+            "")  break ;;
+            *:*) _td=${_tp%%:*}; _tp=${_tp#*:} ;;
+            *)   _td=$_tp;       _tp="" ;;
+        esac
+        [ -n "$_td" ] || continue
+        if [ -f "$_td/$_tn" ] && [ -x "$_td/$_tn" ]; then
+            _tool_path="$_td/$_tn"; return 0
+        fi
+    done
+    return 1
+}
+[ -n "${IP:-}" ]   || { _tool ip;   IP=$_tool_path; }
+[ -n "${PING:-}" ] || { _tool ping; PING=$_tool_path; }
+STATIC_EXCLUDES="wgclient1 ifb4wgclient1 br-lan lo"
+TAG="bond-xctl"
+# MIN_AGG_SOURCES is the ARITY OF AGGREGATION, not a WAN count and not a "two
+# WANs" assumption. Aggregation means distributing ONE flow across MORE THAN ONE
+# source; with a single source there is nothing to distribute across and the
+# "aggregate" IS that source -- which is `eco`. The floor follows from the
+# DEFINITION of the operation, not from a measurement and not from a pick, it has
+# no upper bound, and it never rises with N. == bond_model.py MIN_AGG_SOURCES.
+MIN_AGG_SOURCES=2
+# AGG_W_NEUTRAL is bond-agg's OWN per-path prior, not a number picked here:
+# `parseW` in p4-bondagg/daemon/main.go builds N weights and substitutes exactly
+# this value for any entry that is missing or unparseable. Emitting N copies of it
+# states "no prior" for every path, symmetrically. See agg_weights().
+#
+# PROVENANCE, checked rather than assumed, because the two files could otherwise
+# read as citing each other: `git log -S'w[i] = 10000' -- p4-bondagg/daemon/main.go`
+# -> 0d5b932 (2026-08-25, the [2]->[N] EIF port); `git log -S'AGG_W_NEUTRAL' --
+# deploy/p5/bond-xctl` -> fda6a0b (2026-08-30, U6). The daemon is the ORIGIN and
+# this file is the copy. Cited by SYMBOL, not by line number, and the number is why:
+# `git show <rev>:p4-bondagg/daemon/main.go | grep -n '^func parseW'` gives 540 at
+# 96b9ddb, 544 on dev (U7's pull-client switch case pushed it down), 576 on U36's
+# round-1 branch, 544 again after that branch reverted. Four values in five days.
+#
+# WHAT THE NUMBER IS, precisely: an ABSOLUTE per-path kb/s quantity, not a scale
+# and not a unit. In `Sched` it is floorKb, and rateKb is clamped to floorKb*0.25
+# on every decrease and set to floorKb*0.10 on a spike (p4-bondagg/daemon/paths.go,
+# NewSched and the AIMD decrease arms), so it is a hard lower bound on the send
+# rate in real kb/s. In `CapEst` it is the initial Chat and a prior*0.10 floor.
+# Scaling every entry by the same factor therefore CHANGES BEHAVIOUR; it does not
+# merely change units. It has no derivation on record and none is invented here.
+AGG_W_NEUTRAL=10000
+# ---- E4 shaping (U22; spec docs/knowledge/design/e4-shaping-in-dag.md) -------
+# The shaper CONTROLLER service. Overridable for the harness and for the vendor
+# +pin decision, which is NOT settled here (E4's install half / U24, MO-GATED:
+# it needs the box's live cake-autorate sha). This unit folds shaping into the
+# lifecycle; it does not install it.
+SHAPE_SVC="${SHAPE_SVC:-/etc/init.d/cake-autorate}"
+# `tc`, resolved through the same explicit $PATH walk as `ip`/`ping` above and for
+# the same measured reason: `tc` IS a busybox applet, so under busybox ash a bare
+# name reaches busybox's tc, which has no `cake`. It is still overridable.
+[ -n "${TC:-}" ] || { _tool tc; TC=$_tool_path; }
+# GL native SQM's config file. U22a: the RUNTIME half of E4's non-interference
+# requirement -- shape-install refuses to install while native SQM owns the
+# tunnel iface, and act_shape_apply refuses to ATTACH for the same reason, so a
+# box on which the operator turns FLOW CONTROL -> SQM on AFTER install does not
+# become a qdisc tug-of-war. Loud, never escalated (INV8).
+SQM_CONF="${SQM_CONF:-/etc/config/sqm}"
+
+log()  { echo "$TAG: $*"; logger -t "$TAG" "$*" 2>/dev/null; }
+fail() { echo "$TAG: FATAL: $*" >&2; logger -t "$TAG" "FATAL: $*" 2>/dev/null; exit 1; }
+
+# ---- LIBRARIES (U124) ------------------------------------------------------
+# This file is the ENTRY POINT: config, the $PATH-walk tool resolution above,
+# log/fail, and the dispatch at the end. Every leaf function lives in one of the
+# five libraries below, sourced in dependency order. XCTL_LIB is overridable so
+# the emulator can run the shipped tree from a worktree; the default is the
+# installed location (p5/contract/paths declares all five).
+XCTL_LIB="${XCTL_LIB:-/usr/lib/p5}"
+[ -r "$XCTL_LIB/xctl-lock.sh" ]    || fail "missing $XCTL_LIB/xctl-lock.sh"
+. "$XCTL_LIB/xctl-lock.sh"
+[ -r "$XCTL_LIB/xctl-probe.sh" ]   || fail "missing $XCTL_LIB/xctl-probe.sh"
+. "$XCTL_LIB/xctl-probe.sh"
+[ -r "$XCTL_LIB/xctl-actions.sh" ] || fail "missing $XCTL_LIB/xctl-actions.sh"
+. "$XCTL_LIB/xctl-actions.sh"
+[ -r "$XCTL_LIB/xctl-shape.sh" ]   || fail "missing $XCTL_LIB/xctl-shape.sh"
+. "$XCTL_LIB/xctl-shape.sh"
+[ -r "$XCTL_LIB/xctl-dag.sh" ]     || fail "missing $XCTL_LIB/xctl-dag.sh"
+. "$XCTL_LIB/xctl-dag.sh"
+
+# ================= entry point =============================================
+case "${1:-}" in
+    reconcile)
+        take_lock
+        # ONE OBSERVATION for this whole pass (see _SRC_SNAP above): probe the
+        # sources once, under the lock, and reconcile off that single view.
+        _SRC_SNAP=$(gl_sources 2>/dev/null)
+        reconcile "${2:-}"; _rc=$?
+        # DIRTY re-run (MED): a concurrent trigger that skipped on our lock left a
+        # `reconcile_dirty` crumb. Honor the LAST request with ONE more level-triggered
+        # pass off the CURRENT facts (reconcile re-derives desired from live probes, so a
+        # single extra pass reflects whatever we coalesced -- the request is never lost).
+        # Still inside our lock hold (EXIT trap not yet fired), so it stays serialized.
+        # CRITICAL: PRESERVE the primary reconcile's exit status ($_rc). The caller keys on
+        # it -- bondctl restores the prior mode iff `bond-xctl reconcile` (speed) FAILS --
+        # so the best-effort re-run must NEVER mask a real engage failure (and a bare
+        # trailing `if` with no else would reset $? to 0, hiding it).
+        if [ -f "$RUN_DIR/reconcile_dirty" ]; then
+            rm -f "$RUN_DIR/reconcile_dirty" 2>/dev/null
+            # RE-OBSERVE first: the dirty re-run exists to honor the LATEST
+            # facts, so it must not reuse this pass's snapshot.
+            _SRC_SNAP=$(gl_sources 2>/dev/null)
+            reconcile || true
+        fi
+        exit "$_rc"
+        ;;
+    node)      node ;;
+    # _sched: READ-ONLY query of the AGG_SCHED_TABLE. Prints the aggregate
+    # scheduler for $2 (default: the stored mode) and exits 0; exits 3 when the
+    # mode is not an aggregate mode. This is how bondctl (M5) and bond-ecod (M6)
+    # test "is this an aggregate mode" WITHOUT keeping a second copy of the mode
+    # class -- one table, one owner. Takes no action.
+    _sched)    agg_sched_of "${2:-}" ;;
+    # _sched_modes: READ-ONLY list of the aggregate mode NAMES, `|`-separated,
+    # from that same table. bondctl builds its accepted-mode test and its usage
+    # string from this, so adding an aggregate scheduler stays ONE row.
+    _sched_modes) agg_modes ;;
+    _primary)  _SRC_SNAP=$(gl_sources 2>/dev/null); primary_wan ;;
+    # _sources: the GL/ubus source table (OBJ-A). READ-ONLY fact surface for
+    # the portal (OBJ-E), the datapath's D-hat-min re-anchoring (OBJ-A) and the
+    # operator. Prints "<iface> <l3_device> <state> <metric|-> <metered|->";
+    # state = routed|up|idle|absent, where `up` is a configured-but-unrouted
+    # (DARK) source that route-parsing could not see. Takes no action.
+    # Exits 1 when ubus cannot answer, so a caller can tell "no sources" from
+    # "cannot ask" (live_wans falls back to route parsing; this does not).
+    _sources)  gl_ok || exit 1; gl_sources ;;
+    # _server: bond server in-tunnel HOST ONLY (no :port). Deliberate -- the
+    # consumer (bond-ecod TPROBE) pings it, and `ping host:port` fails.
+    # live_server_host already strips the port and returns 1 when unknown.
+    _server)   live_server_host ;;
+    # _shape: READ-ONLY shaping observation (E4/U22). Prints "off" or the
+    # discovered tunnel iface. Takes no action -- a probe surface for the CLI
+    # and the portal, exactly like _sources.
+    _shape)    shape_now ;;
+    selfcheck) selfcheck ;;
+    *) echo "usage: bond-xctl reconcile [refresh]|node|_primary|_server|_sources|_sched [mode]|_shape|selfcheck" >&2; exit 1 ;;
+esac

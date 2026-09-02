@@ -1,0 +1,154 @@
+#!/bin/sh /etc/rc.common
+# procd service for the thin P5 server daemon (/usr/sbin/p5-server).
+#
+# WHERE IT GOES. docs/deploy-p5-server.md S3 installs this file at
+# /etc/init.d/p5-server. That path is contract-reserved for E5
+# (p5/contract/paths:158) and the server preflight confirms it free.
+#
+# THERE IS NO ENABLE STEP, ANYWHERE IN THIS FILE OR IN S3, AND THAT IS THE
+# POINT. S7 (boot enablement) is deliberately deferred out of the first deploy
+# (deploy-p5-server.md:435 and the section at :441-450): the first reboot of a box with no physical
+# access is the highest-risk event in the plan, and coexistence means a server
+# that loses p5-server on reboot degrades to exactly today's working state.
+# /etc/rc.d/S<pri>p5-server is created at ENABLE time, never at install time
+# (p5/contract/paths:162-168), so an unenabled init script is inert -- which is
+# what S3's "if it fails halfway" column claims and what this file must remain.
+#
+# ---------------------------------------------------------------- START ----
+# DERIVED from the box, then tie-broken, and the two are kept separate because
+# deploy-p5-server.md:452-456 refuses to let a choice be reported as a
+# derivation.
+#
+#   The evidence derives a BOUND, not a number. The only ordering constraints
+#   the box supports are: p5-server must start after S19firewall (it binds
+#   udp/59402 and the ACCEPT rule for that port lives in the firewall config --
+#   deploy-p5-server.md sections 5 and 6) and after S20network (it opens a
+#   UDP socket and dials WireGuard's loopback listener). Both are in the
+#   server's rc.d listing (docs/knowledge/inventory/2026-08-30-server-brume2.txt:111).
+#   Therefore START > 20. Every value above 20 satisfies the evidence equally,
+#   so the evidence alone cannot produce one number.
+#
+#   TIE-BREAK -- A STATED CHOICE, NOT A DERIVATION: 94. engarde-server, the
+#   service this one coexists with, runs at S94engarde-server on this exact box
+#   (same inventory line 111; the stanza that put it there is
+#   p2-engarde/bootstrap-bond-server.sh:44). p5-server listens on :59402 while
+#   :59401 keeps carrying production (deploy-p5-server.md section 6), so giving
+#   it the same rank as its peer makes p5-server's ordering against every OTHER
+#   service on this box identical to an ordering that is already observed to
+#   boot it. Any other number in (20, 99] would be a new, unobserved ordering
+#   chosen for no reason. Two services at the same priority start in an order
+#   procd does not define -- acceptable here precisely because they share
+#   nothing: different ports, different config, different binaries.
+#
+# STOP=11 mirrors deploy/p5/init.d/bond-agg:18, our other feeder. K flags run in
+# ASCENDING order at shutdown, so K11 stops the daemon well before K90network
+# takes the interfaces down -- the daemon closes its socket while the socket
+# still has a network under it, rather than being killed alongside it.
+#
+# U66/SC2034: START, STOP and USE_PROCD are the /etc/rc.common INTERFACE. The
+# shebang hands this file to rc.common, which SOURCES it and reads them; they
+# are unused *within this file* by design, so the exclusion is per-variable and
+# not file-wide. Same convention as deploy/p5/init.d/bond-agg:15-20.
+# shellcheck disable=SC2034
+START=94
+# shellcheck disable=SC2034
+STOP=11
+# shellcheck disable=SC2034
+USE_PROCD=1
+
+# ------------------------------------------------------------------ env ----
+# EXACTLY the four keys p4-bondagg/server/main.go:152-155 reads, and no others.
+# The daemon reads nothing else from the environment (grep Getenv over
+# p4-bondagg/server/*.go returns only the env()/envMS() helpers at :91,:98 and
+# these four call sites), so a fifth Getenv key here would be a constant this
+# file invents and nothing consumes. GOMAXPROCS (below) is not a fifth Getenv
+# key -- see the C4 footprint block for why it belongs in this file anyway.
+#
+# Each value is the daemon's OWN compiled default, restated so the running
+# configuration is visible in one file on a box with no console:
+#   AGG_LISTEN       main.go:152  ":59402"            -- the port S6 proves
+#   AGG_WG           main.go:153  "127.0.0.1:51820"   -- and 51820 is the port
+#                    WireGuard actually listens on on this box
+#                    (inventory 2026-08-30-server-brume2.txt:149,19)
+#   AGG_HOLD_MIN_MS  main.go:154  main.go:74  150ms
+#   AGG_HOLD_MAX_MS  main.go:155  main.go:75  350ms
+#
+# The ${VAR:-default} form is deliberate: it lets S4 ("run it by hand, in the
+# foreground, bounded" -- deploy-p5-server.md:432) and S5 use the same values
+# without editing the file, and it means an operator override is one export
+# rather than a patch. NOTHING is sourced from /etc/p5: that directory is
+# E6-runtime and the installer is barred from writing into it
+# (p5/contract/paths, the /etc/p5/* row and bar IN-16), so this file must not
+# grow a dependency on a config file no installed component may create.
+AGG_LISTEN="${AGG_LISTEN:-:59402}"
+AGG_WG="${AGG_WG:-127.0.0.1:51820}"
+AGG_HOLD_MIN_MS="${AGG_HOLD_MIN_MS:-150}"
+AGG_HOLD_MAX_MS="${AGG_HOLD_MAX_MS:-350}"
+
+# ------------------------------------------------------- C4 footprint (U129) --
+# GOAL.md:32, C4: "minimal SERVER-side footprint (server is shared across
+# peers -- push complexity client-side)". Until this unit the stanza bounded
+# nothing but respawn: no `nice`, no `limits`, no GOMAXPROCS (grep -n
+# 'limits\|nice' on the pre-U129 file was empty), so a flood on :59402 competed
+# for both MT7981 cores with engarde-server and every WireGuard peer the box
+# serves. Three bounds, each chosen for what it does NOT do:
+#
+#   GOMAXPROCS=1 caps the daemon's Go scheduler at one P (one OS thread
+#   running Go code at a time) -- NOT the process's total OS thread count.
+#   The runtime still spawns its own sysmon/GC/syscall threads regardless of
+#   this value, so a `Threads:` line above 1 in this file's measurer output
+#   is expected, not a contradiction of the bound. This is a fifth key in the
+#   procd env block below but it is NOT a fifth Getenv call site: Go's own
+#   runtime reads the GOMAXPROCS environment variable at process start,
+#   before main() runs -- `grep Getenv p4-bondagg/server/*.go` finding
+#   nothing for it is correct, not a gap. Capping Ps at one bounds the
+#   daemon's own Go execution to one core; it does NOT bound kernel-side
+#   packet processing -- softirq/NAPI for a :59402 flood runs on whichever
+#   core takes the NIC interrupt, unrelated to GOMAXPROCS. So this bounds
+#   p5-server's userland compute, not the box's total response to a flood.
+#
+#   `nice 10` lowers the daemon's scheduling priority on the core it DOES
+#   share, so a burst on :59402 loses the CPU race against production traffic
+#   instead of contending for it equally.
+#
+#   `limits core="0"` disables core dumps -- /overlay is small flash on a box
+#   with no console to clean one up from, and a crash dump is not diagnostic
+#   value worth that risk.
+#
+#   NO `limits as=`. Go reserves virtual address space at process start (the
+#   runtime maps the heap arena up front); an RLIMIT_AS here would make the
+#   binary FAIL TO LAUNCH, not bound its steady-state memory -- the opposite
+#   of a footprint bound. Memory is bounded by construction instead: fixed
+#   [256]-element arrays sized by the wire's own one-byte pathID ceiling
+#   (MaxLinks=256, p4-bondagg/server/echo.go:12; used at main.go:141-142,
+#   echo.go:48-49, owd.go:26-28), one 2048-slot resequencer ring
+#   (RingPow2=11, main.go:54, consumed by NewRing at main.go:320 and
+#   ring.go:87), one net.ListenUDP (main.go:300), one net.DialUDP (main.go:308),
+#   and no `map[` anywhere in server/*.go outside tests -- there is no
+#   collection here that grows with traffic. `deploy/server/test-p5-server-
+#   footprint.sh` (FP-3) holds those five facts to a bar.
+#
+# Measure the effect on the running box, not just the shipped text, with
+# `deploy/server/p5-server-measure.sh` -- see docs/deploy-p5-server.md section 6.
+GOMAXPROCS="${GOMAXPROCS:-1}"
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /usr/sbin/p5-server
+    procd_set_param env AGG_LISTEN="$AGG_LISTEN" AGG_WG="$AGG_WG" AGG_HOLD_MIN_MS="$AGG_HOLD_MIN_MS" AGG_HOLD_MAX_MS="$AGG_HOLD_MAX_MS" GOMAXPROCS="$GOMAXPROCS"
+    # C4 footprint bound (U129) -- see the block above.
+    procd_set_param nice 10
+    procd_set_param limits core="0"
+    # respawn <threshold> <timeout> <retry>. These are procd's own documented
+    # defaults, written out rather than left implicit so the RETRY CAP is
+    # visible: after 5 failed starts inside one hour procd stops restarting.
+    # On a box with no console and no recovery button that cap is the feature --
+    # an unbounded crash loop is the failure S4 exists to catch before any
+    # supervisor owns the process (deploy-p5-server.md:437-439). Same triple as
+    # deploy/p5/init.d/bond-agg:32. NOT VERIFIED against this firmware build's
+    # procd; deploy-p5-server.md:458-459 says so and this file does not pretend
+    # otherwise -- S5 is where it is first observed.
+    procd_set_param respawn 3600 5 5
+    procd_set_param stderr 1
+    procd_close_instance
+}

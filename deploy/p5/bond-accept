@@ -1,0 +1,680 @@
+#!/bin/sh
+# /usr/sbin/p5-accept -- P5's OWN acceptance runner. Gate (4) of
+# docs/knowledge/design/p5-orchestration.md:80, run on the box immediately
+# before Mo's deploy "go".
+#
+# THE DESTINATION IS p5-accept, NOT bond-accept (ADR-005). Every `bond-*`
+# on-disk destination is FOREIGN -- it is the OLD stack's, and the ADR refuses
+# to widen the contract to admit it (ADR-005 SS2). ADR-005 SS4's convention is
+# function-not-letters, so this runner's destination is `/usr/sbin/p5-accept`.
+# HONEST GAP: `p5/contract/paths` has NO row for it (`grep -n accept
+# p5/contract/paths` -> nothing), so `p5-install` would refuse this file at
+# p5_check_dest today. The repo FILENAME stays `deploy/p5/bond-accept` --
+# ADR-005's scope line is explicit that the ADR moves destinations, "Not the
+# repo layout" -- and that is why this file carries both name sets below.
+#
+# P5 is a STANDALONE product. p3-ecod/bond-accept.sh is the OLD stack's runner
+# and every one of its checks is welded to P1-P3 plumbing (P2's engarde-client
+# service, P3's own bond-ecod service, the P3 bondctl `_mode_auto`/`mode`/`auto`
+# CLI, P3 bond-ecod's env-tuning surface, and P3's `mode`/`auto` fact files
+# under its own foreign config root -- every one of those paths is a
+# `p3|` row in p5/contract/foreign and STAYS where it is -- plus a
+# `logread | grep bond-ecod` tag). This file depends on NONE of it: it drives
+# only P5's shipped artifacts, at P5's own destinations.
+#
+# =========================================================================
+# THE SCENARIO COUNT. READ THIS BEFORE QUOTING A NUMBER.
+# =========================================================================
+# The brief for this runner said "cover the 12 v3 scenarios". THERE IS NO SET
+# OF 12. Checked, not argued:
+#   * p3-ecod/bond-accept.sh (sha256 39f60384..., the pinned v3) is 65 lines
+#     containing ONE precondition guard and FIVE named pass/fail checks --
+#     six decision points. Enumerated: :21 guard, :44 B1, :47 B1-recovery,
+#     :52 B2, :55 B2-recovery, :62 C. The string "12" appears nowhere in it.
+#   * "12 scenarios" is a label three docs hang on the bond-accept.sh ROW
+#     (docs/HANDOVER-STABLE.md:63, :117, p3-ecod/README.md:18) while the SAME
+#     docs describe the 12 as a SEPARATE gate: "12-scenario sim + bond-accept
+#     v3 ALL PASS" (HANDOVER-STABLE.md:70, README.md:27) and name the sim as
+#     the ecosim harness (HANDOVER-STABLE.md:136-138). p5-orchestration.md:80
+#     agrees: gate (2) is "Layer-2 legacy 12-scenario", gate (4) is
+#     "bond-accept.sh v3 ... + a v4".
+#   * The 12 are the LEGACY ecosim scenario set for bond-ecod v1.3, i.e. P1-P3
+#     policy scenarios run OFF the box against shims. They are not a hardware
+#     acceptance list and they are not enumerated anywhere in this repo.
+# So this runner does NOT claim 12. It carries over the six v3 decision points
+# that actually exist, adds the three v4 injections, and adds the P5-specific
+# checks P5 needs. Every scenario prints its own PASS/FAIL line; the final
+# count is the truth. Silently dropping one and still reporting 12 is the
+# exact defect class U46 exists for.
+#
+# CARRY-OVER MAP -- v3 decision point -> what runs here
+#   v3 :21 guard "bond not enabled"      -> SB-G   (P5 spelling: node()/desired(),
+#                                           not `/etc/init.d/engarde-client enabled`)
+#   v3 :44 B1 raw-bloat -> redundant     -> SB-B1  (P5 spelling: -> `lightning`;
+#                                           ADR-003 renamed the mode)
+#   v3 :47 B1-recovery -> eco            -> SB-B1r
+#   v3 :52 B2 tunnel-bloat -> redundant  -> SB-B2  (P5's TPROBE retargets via
+#                                           `bondctl _server`, not a fixed literal)
+#   v3 :55 B2-recovery -> eco            -> SB-B2r
+#   v3 :62 C manual-wins                 -> SB-C, BOTH limbs. The contract INVERTED
+#                                           in P5: ADR-003 makes `eco` the auto
+#                                           policy, so `mode eco` now SETS auto while
+#                                           every other mode clears it. v3 tested one
+#                                           limb; testing only that limb here would
+#                                           pass against a broken box.
+#
+# NOT CARRIED OVER, and why (each is a deliberate non-carry, not an omission):
+#   * v3's "12 scenarios" as an enumerated list -- it does not exist (above).
+#   * v3's LIVE mode-flipping. v3 stops production bond-ecod, forces the live
+#     mode, drives the real daemon and re-arms policy at the end. On a box whose
+#     server peer has NO physical access that is a production mode change with a
+#     window where a crash leaves policy disarmed. Every mutating check here runs
+#     against a hermetic sandbox instead (below). The loss is real and is stated:
+#     the bloat scenarios exercise the INSTALLED artifacts under the box's own
+#     busybox, but NOT the production fact tree.
+#   * v3's closing `bondctl auto on`. Nothing here disarms production policy, so
+#     nothing has to re-arm it. A runner that re-arms is a runner that can leave
+#     policy in a state it did not find.
+#   * v3's `logread | grep bond-ecod` failure dump -- P5's syslog TAGS are still
+#     the old spellings (`bond-xctl` bond-xctl:99, `bondctl` bondctl:37,
+#     `bond-ecod` bond-ecod:88, `bond-watchdog` bond-watchdog:32) even though the
+#     DESTINATIONS moved; tags are not paths and ADR-005 did not touch them. The
+#     sandbox captures its own log ledger anyway, so a failure prints the ledger
+#     rather than production syslog.
+#
+# ADDED, "v4" per p5-orchestration.md:80 (the F1-F11 battery at :78):
+#   F5 split-brain seeded tuple -> converges to the fixed point in ONE reconcile (D2)
+#   F6 policer degradation      -> watchdog publishes `tput`, ecod escapes to lightning (D1)
+#   F8 power-loss stale lock    -> tmpfs lock self-clears instead of skipping forever (D4)
+#      plus F8b, the NEGATIVE control: a LIVE holder's lock is still respected.
+#      Without F8b, F8 passes on a build that never locks at all.
+#
+# =========================================================================
+# WHAT THIS CHANGES ON THE BOX, AND HOW IT REVERTS
+# =========================================================================
+# PHASE A (live) WRITES NOTHING. Not one file, not one service call. It runs
+# only read verbs: `p5-reconciler selfcheck|node|_primary|_sources` and
+# `p5 status`. No mode change, no reconcile, no endpoint write, no
+# firewall rule, no service start/stop. Nothing to revert because nothing moved.
+#
+# PHASE B (sandbox) writes ONLY inside one mktemp -d directory, removed by an
+# EXIT/INT/TERM trap. It runs the REAL installed p5-reconciler / p5 /
+# p5-ecod / p5-watchdog with BOND_DIR, RUN_DIR, SVC, AGG_SVC, ECOD_SVC,
+# WDOG_SVC, ENGARDE_BIN, AGG_BIN, ECOD_BIN, WG_DEV, LOGGER and PATH all
+# redirected into that directory. Every command that could touch the real box
+# -- wg, uci, ip, iptables, ubus, pgrep, ping, logger and all four init.d
+# service scripts -- is shadowed by a shim first on PATH. No packet is sent, no
+# service is started or stopped, no wg peer is touched, no iptables rule is
+# installed. The DAG it interprets is the INSTALLED DAG table (ADR-005 SS4:
+# /usr/lib/p5/dag, product data, NOT /etc), read-only.
+# Revert = `rm -rf` of that one directory, which the trap already does.
+#
+# It therefore cannot leave the server unreachable: it never contacts the
+# server, and it never mutates the client's network state either.
+#
+# CLIENT-ONLY. P5's orchestration is client-side (the server install is
+# additive and ships no reconciler). Phase A fails loudly if the artifacts are
+# not installed rather than reporting a green run against an empty box.
+#
+# =========================================================================
+# N-GENERIC
+# =========================================================================
+# No interface name is written anywhere in this file. Phase A reads the source
+# set from the box (`p5-reconciler _sources` / `_primary`). Phase B GENERATES
+# its fixture device names from a loop counter and sweeps N from 1 to
+# MIN_AGG_SOURCES+3, where MIN_AGG_SOURCES is READ OUT OF the installed
+# reconciler rather than repeated here. Nothing branches on N==2.
+#
+# BUSYBOX-SAFE POSIX sh: no bashisms, no [[ ]], no arrays, no local, no
+# fractional sleep, no GNU-only flags.
+#
+# USAGE
+#   p5-accept                        full run (Phase A live read-only + Phase B)
+#   BOND_ACCEPT_MODE=sandbox p5-accept
+#                                    Phase B only -- for CI / the Layer-2 harness,
+#                                    where there is no installed box to inspect.
+#   P5_DIR=<dir> p5-accept           drive artifacts from <dir> instead of /usr/sbin.
+#                                    DEFAULTS to this script's own directory when the
+#                                    sibling artifacts are there, so the CI arm
+#                                    `BOND_ACCEPT_MODE=sandbox busybox ash
+#                                    deploy/p5/bond-accept` needs no other variable.
+# Exit 0 iff every scenario passed; 1 if any scenario failed.
+
+set -u
+
+# ---- ARTIFACT LAYOUT (ADR-005) ---------------------------------------------
+# TWO name sets, and they are NOT interchangeable.
+#   installed  /usr/sbin/{p5-reconciler,p5,p5-ecod,p5-watchdog}   -- ADR-005 SS4
+#   source     <checkout>/deploy/p5/{bond-xctl,bondctl,bond-ecod,bond-watchdog}
+#              -- ADR-005's scope line: the ADR moves DESTINATIONS, "Not the repo
+#              layout", so the repo filenames deliberately did not move.
+# Falling back from the first to the second ON A BOX would be a defect, not a
+# convenience: the operator CLI and the ecod daemon under their old names are
+# `p3|` rows in p5/contract/foreign (:102, :103), i.e. the OLD stack's live
+# files. A runner that accepted
+# those as "P5 installed" would report a green acceptance for the generation P5
+# replaces. So the layout is DECIDED ONCE here, and Phase A -- the live half --
+# refuses anything but `installed`.
+_p5_self_dir() { d=${0%/*}; [ "$d" = "$0" ] && d=.; printf '%s' "$d"; }
+P5_DIR="${P5_DIR:-$( [ -f "$(_p5_self_dir)/bond-xctl" ] && _p5_self_dir || echo /usr/sbin )}"
+if [ -f "$P5_DIR/p5-reconciler" ]; then
+    P5_LAYOUT=installed
+    XCTL="${XCTL:-$P5_DIR/p5-reconciler}"
+    BCTL="${BCTL:-$P5_DIR/p5}"
+    ECOD="${ECOD:-$P5_DIR/p5-ecod}"
+    WDOG="${WDOG:-$P5_DIR/p5-watchdog}"
+else
+    P5_LAYOUT=source
+    XCTL="${XCTL:-$P5_DIR/bond-xctl}"
+    BCTL="${BCTL:-$P5_DIR/bondctl}"
+    ECOD="${ECOD:-$P5_DIR/bond-ecod}"
+    WDOG="${WDOG:-$P5_DIR/bond-watchdog}"
+fi
+# WHERE THE RECONCILER'S LIBRARIES ARE, and it has to be said per LAYOUT.
+# U124 split bond-xctl into five libs sourced from $XCTL_LIB, defaulting to
+# /usr/lib/p5 (bond-xctl:161). That default is correct on an installed box and
+# wrong here in the source tree, where the libs sit beside the program -- and
+# because each is behind a hard `[ -r ... ] || fail`, getting it wrong does not
+# skew one assertion, it kills the reconciler before the first one. Measured at
+# dev 97e0254: every scenario read '' for `node` and the sandbox log said
+# "bond-xctl FATAL: missing /usr/lib/p5/xctl-lock.sh" -- 9 passed, 29 failed.
+if [ "$P5_LAYOUT" = source ]; then
+    XCTL_LIB="${XCTL_LIB:-$P5_DIR/lib}"
+else
+    XCTL_LIB="${XCTL_LIB:-/usr/lib/p5}"
+fi
+export XCTL_LIB
+# P5's OWN live roots, post-ADR-005. The old config and run roots are FOREIGN
+# now (p5/contract/foreign:98-101) and pointing the live half at them would aim
+# Phase A at the old stack's fact tree.
+LIVE_BOND_DIR="${LIVE_BOND_DIR:-/etc/p5}"
+LIVE_RUN_DIR="${LIVE_RUN_DIR:-/var/run/p5}"
+# The DAG table is PRODUCT DATA and does not live under /etc: ADR-005 SS4 puts it
+# at /usr/lib/p5/dag, because contract/paths bar IN-16 refuses an installer that
+# seeds /etc/p5 at all.
+LIVE_DAG="${LIVE_DAG:-/usr/lib/p5/dag}"
+RUN_MODE="${BOND_ACCEPT_MODE:-full}"
+
+# Fixture names for the sandbox. GENERATED, never a real device: sb_dev builds
+# them from a counter so N is a parameter, and SB_WG is deliberately unlike any
+# name a GL box uses. SB_DIRECT is RFC 5737 TEST-NET-3 -- documentation space,
+# routable nowhere.
+SB_WG="acctun0"
+SB_PEER="ACCEPTANCEPEERKEYPLACEHOLDER0000000000000="
+SB_DIRECT="203.0.113.9:51820"
+sb_dev() { printf 'accsrc%s' "$1"; }
+
+SB=""
+# shellcheck disable=SC2317
+# ^ reached only from the two traps below, so the linter sees no call site.
+cleanup() { [ -n "$SB" ] && rm -rf "${SB:?}" 2>/dev/null; return 0; }
+trap 'cleanup' EXIT
+trap 'cleanup; exit 130' INT TERM
+
+NPASS=0; NFAIL=0; NSKIP=0
+ok() { NPASS=$((NPASS+1)); echo "PASS  $1"; }
+# On the FIRST failure, snapshot the ledger NOW. sb_reset() truncates $SB/ledger
+# at the top of every scenario, so by the time the closing dump runs the live
+# ledger holds only the LAST scenario's output -- which on a green tail is empty.
+# Without this the dump printed its header and nothing else. Measured, not argued:
+# both seeded-failure A/B runs emitted the header with zero lines under it.
+# The label goes in too, so the section is never empty when a sandbox check fails.
+no() {
+    NFAIL=$((NFAIL+1)); echo "FAIL  $1"
+    if [ "$NFAIL" -eq 1 ] && [ -n "$SB" ] && [ -f "$SB/ledger" ]; then
+        { echo "first failure: $1"; cat "$SB/ledger"; } > "$SB/faildump" 2>/dev/null
+    fi
+}
+sk() { NSKIP=$((NSKIP+1)); echo "SKIP  $1"; }
+eq() { if [ "$2" = "$3" ]; then ok "$1 ($2)"; else no "$1 (want '$3' got '$2')"; fi; }
+
+# Constants are READ from the installed reconciler, never repeated here: a runner
+# that carries its own copy of a shipped constant stops testing the shipped one.
+xctl_const() { sed -n "s/^$2=\"\{0,1\}\([0-9A-Za-z._]*\)\"\{0,1\}.*/\1/p" "$1" | head -1; }
+
+echo "===== p5-accept: P5 acceptance runner ====="
+echo "artifacts: $P5_DIR   layout: $P5_LAYOUT   mode: $RUN_MODE"
+
+# ============================ PHASE A -- LIVE, READ-ONLY =====================
+# Writes nothing. Read verbs only.
+if [ "$RUN_MODE" = sandbox ]; then
+    sk "A* live box inspection (BOND_ACCEPT_MODE=sandbox)"
+else
+    echo "--- Phase A: live box, read-only ---"
+    A_OK=1
+    # ADR-005 destination names ONLY. See the layout block above: accepting the
+    # bond-* spelling here would green-light the old stack's live files.
+    if [ "$P5_LAYOUT" != installed ]; then
+        no "A1 no ADR-005 P5 install at $P5_DIR (looked for p5-reconciler; layout=$P5_LAYOUT)"
+        A_OK=0
+    else
+        for f in p5-reconciler p5 p5-ecod p5-watchdog; do
+            if [ -x "$P5_DIR/$f" ]; then ok "A1 $f installed and executable"
+            else no "A1 $f missing or not executable ($P5_DIR/$f)"; A_OK=0; fi
+        done
+    fi
+    if [ "$A_OK" = 0 ]; then
+        echo "----"
+        echo "p5-accept: P5 is not installed at $P5_DIR -- refusing to report a green run."
+        echo "p5-accept: $NPASS passed, $NFAIL failed, $NSKIP skipped"
+        exit 1
+    fi
+
+    BOND_DIR="$LIVE_BOND_DIR"; RUN_DIR="$LIVE_RUN_DIR"; DAG="$LIVE_DAG"
+    export BOND_DIR RUN_DIR DAG
+
+    if "$XCTL" selfcheck >/dev/null 2>&1; then ok "A2 installed DAG parses (p5-reconciler selfcheck)"
+    else no "A2 installed DAG FAILED selfcheck ($DAG)"; fi
+
+    LN=$("$XCTL" node 2>/dev/null)
+    case "$LN" in
+        off|engaged|suspended|suspended_degraded) ok "A3 node is a legal state ($LN)" ;;
+        *) no "A3 node is not a legal state (got '$LN')" ;;
+    esac
+
+    # INV1 single feeder, read through the shipped probe (`p5 status`) rather
+    # than a second copy of it here.
+    FEED=$("$BCTL" status 2>/dev/null | sed -n 's/^feeders:[ ]*//p')
+    # shellcheck disable=SC2086
+    NFEED=$(printf '%s\n' $FEED | grep -c .)
+    if [ "${NFEED:-0}" -le 1 ]; then ok "A4 INV1 single feeder (running=${NFEED:-0})"
+    else no "A4 INV1 VIOLATED -- $NFEED feeders running: $FEED"; fi
+
+    # Source discovery, on the real box. N is whatever the box declares.
+    SRC=$("$XCTL" _sources 2>/dev/null)
+    if [ -z "$SRC" ]; then
+        sk "A5 source discovery (p5-reconciler _sources returned nothing -- no ubus?)"
+        sk "A6 primary membership (no source table to check it against)"
+    else
+        ROUTED=$(printf '%s\n' "$SRC" | awk '$3=="routed" {print $2}')
+        NR=$(printf '%s\n' "$ROUTED" | grep -c .)
+        if [ "${NR:-0}" -ge 1 ]; then ok "A5 discovery: $NR routed source(s) declared by the box"
+        else no "A5 discovery: box declares ZERO routed sources"; fi
+        PRI=$("$XCTL" _primary 2>/dev/null)
+        if [ -n "$PRI" ] && printf '%s\n' "$ROUTED" | grep -qx "$PRI"; then
+            ok "A6 primary is a member of the routed set"
+        else
+            no "A6 primary '$PRI' is not in the routed set"
+        fi
+    fi
+
+    # ADR-003 (auto,mode) PAIR coherence: the auto policy never selects speed, and
+    # any manual pin clears auto -- so `auto` present together with mode=speed is a
+    # contradiction no code path should be able to produce.
+    LM=$(cat "$LIVE_BOND_DIR/mode" 2>/dev/null)
+    if [ -f "$LIVE_BOND_DIR/auto" ] && [ "$LM" = speed ]; then
+        no "A7 (auto,mode) incoherent -- auto set while mode=speed"
+    else
+        LA=off; [ -f "$LIVE_BOND_DIR/auto" ] && LA=on
+        ok "A7 (auto,mode) pair coherent (auto=$LA mode=${LM:-unset})"
+    fi
+fi
+
+# ============================ PHASE B -- SANDBOX =============================
+echo "--- Phase B: hermetic sandbox (real artifacts, shimmed world) ---"
+
+SB=$(mktemp -d 2>/dev/null) || SB="/tmp/p5-accept.$$"
+mkdir -p "$SB" 2>/dev/null || { no "B0 cannot create a work directory"; echo "----"; exit 1; }
+
+# The DAG table: the ADR-005 destination first, then the repo filename. The
+# second is the SOURCE layout's spelling, not a second destination.
+SB_DAG=""
+for c in "$LIVE_DAG" "$P5_DIR/bond.dag"; do
+    [ -r "$c" ] && { SB_DAG="$c"; break; }
+done
+if [ -z "$SB_DAG" ]; then
+    no "B0 no readable DAG table (looked at $LIVE_DAG and $P5_DIR/bond.dag)"
+    echo "----"; echo "p5-accept: $NPASS passed, $NFAIL failed, $NSKIP skipped"; exit 1
+fi
+
+# ENGARDE_PORT IS GONE. U141 took engarde out of the lifecycle, so bond-xctl no
+# longer defines it and this read aborted B0 -- the same failure the note below
+# records for the SPEED_PORT -> AGG_PORT rename, from the same cause. P5 pins ONE
+# local endpoint now and it is the feeder's.
+# AGG_PORT, not SPEED_PORT. The reconciler renamed the constant on dev between
+# this branch's last merge (821612c: SPEED_PORT="59402") and be30736
+# (AGG_PORT="59402"); this runner kept reading the old name and B0 aborted the
+# whole battery with "cannot read ... out of bond-xctl". That is the constant
+# READ working as designed -- the runner refused rather than substituting its
+# own copy -- but the name has to follow. Measured on the merged tree:
+# `grep -nE '^(ENGARDE_PORT|AGG_PORT|SPEED_PORT|MIN_AGG_SOURCES)=' deploy/p5/bond-xctl`
+# -> 32 ENGARDE_PORT, 33 AGG_PORT, 106 MIN_AGG_SOURCES; no SPEED_PORT.
+SPORT=$(xctl_const "$XCTL" AGG_PORT)
+MINSRC=$(xctl_const "$XCTL" MIN_AGG_SOURCES)
+if [ -z "$SPORT" ] || [ -z "$MINSRC" ]; then
+    no "B0 cannot read AGG_PORT/MIN_AGG_SOURCES out of $XCTL"
+    echo "----"; echo "p5-accept: $NPASS passed, $NFAIL failed, $NSKIP skipped"; exit 1
+fi
+EP_SPEED="127.0.0.1:$SPORT"
+
+mkdir -p "$SB/bin" "$SB/sbin" "$SB/svc"
+
+# ---- shims. Every one shadows a real command that could otherwise touch the box.
+cat > "$SB/bin/ip" <<'SHIM'
+#!/bin/sh
+D="$BOND_ACCEPT_SB"
+if [ "${1:-}" = route ] && [ "${2:-}" = show ]; then
+    while read -r dev met; do
+        [ -n "$dev" ] || continue
+        echo "default dev $dev metric $met"
+    done < "$D/routes"
+fi
+exit 0
+SHIM
+cat > "$SB/bin/wg" <<'SHIM'
+#!/bin/sh
+D="$BOND_ACCEPT_SB"
+case "${1:-}" in
+show)
+    if [ "${2:-}" = interfaces ]; then cat "$D/wgdev"; exit 0; fi
+    case "${3:-}" in
+    peers)     cat "$D/peer" ;;
+    endpoints) printf '%s\t%s\n' "$(cat "$D/peer")" "$(cat "$D/ep")" ;;
+    transfer)
+        r=$(cat "$D/rx" 2>/dev/null || echo 0)
+        s=$(cat "$D/rxstep" 2>/dev/null || echo 0)
+        r=$((r + s)); echo "$r" > "$D/rx"
+        printf '%s\t%s\t%s\n' "$(cat "$D/peer")" "$r" 0 ;;
+    *) : ;;
+    esac ;;
+set)
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = endpoint ]; then printf '%s' "${2:-}" > "$D/ep"; break; fi
+        shift
+    done ;;
+esac
+exit 0
+SHIM
+cat > "$SB/bin/uci" <<'SHIM'
+#!/bin/sh
+D="$BOND_ACCEPT_SB"
+case "$*" in
+*end_point*)  cat "$D/direct" ;;
+*wireguard*)  printf 'wireguard.accsec.public_key=%s\n' "$(cat "$D/peer")" ;;
+esac
+exit 0
+SHIM
+cat > "$SB/bin/iptables" <<'SHIM'
+#!/bin/sh
+exit 0
+SHIM
+# ubus is PRESENT but answers nothing: gl_sources then yields no table, so
+# the reconciler takes its documented route-parse fallback and svc_running falls
+# through to pgrep. Omitting ubus instead would let `command -v ubus` find the
+# REAL one on a box.
+cat > "$SB/bin/ubus" <<'SHIM'
+#!/bin/sh
+exit 1
+SHIM
+cat > "$SB/bin/pgrep" <<'SHIM'
+#!/bin/sh
+D="$BOND_ACCEPT_SB"
+n=$(printf '%s' "${2:-}" | sed 's#.*/##')
+[ -n "$n" ] || exit 1
+[ "$(cat "$D/st/running.$n" 2>/dev/null)" = 1 ] && exit 0
+exit 1
+SHIM
+cat > "$SB/bin/logger" <<'SHIM'
+#!/bin/sh
+D="$BOND_ACCEPT_SB"
+echo "$*" >> "$D/ledger"
+exit 0
+SHIM
+# ping: v3's probe-layer injection, kept. Keyed on -I exactly as v3 was (raw
+# per-source probe vs tunnel probe), but driven by a per-call COUNTER instead of
+# a flag file, so ONE short-lived daemon run can learn a baseline and then see
+# the step -- v3 needed a long-lived daemon plus a 30s wall-clock wait for that.
+cat > "$SB/bin/ping" <<'SHIM'
+#!/bin/sh
+D="$BOND_ACCEPT_SB"
+raw=0
+for a in "$@"; do [ "$a" = "-I" ] && raw=1; done
+if [ "$raw" = 1 ]; then c="$D/rawn"; a="$D/raw_bloat_after"; else c="$D/tunn"; a="$D/tun_bloat_after"; fi
+n=$(cat "$c" 2>/dev/null || echo 0); n=$((n+1)); printf '%s\n' "$n" > "$c"
+after=$(cat "$a" 2>/dev/null || echo -1)
+if [ "$after" -ge 0 ] && [ "$n" -gt "$after" ]; then t=400; else t=20; fi
+echo "64 bytes from x: seq=1 ttl=54 time=${t} ms"
+exit 0
+SHIM
+# one init.d shim, four names. basename is the service key, so svc_running's
+# pgrep fallback and svc_enabled read the same fact.
+#
+# THE NAMES ARE LOAD-BEARING, not decoration. ADR-005 re-pointed the shipped
+# services, and the reconciler now asks for them BY BARE NAME:
+# `svc_running p5-datapath` (bond-xctl:745,957,1414,1421,1428) and
+# bond-watchdog:52. svc_running matches that bare name in `ubus call service
+# list` and falls back to `pgrep -f "/usr/sbin/$1"`, which the pgrep shim keys
+# on the BASENAME. So a shim still called bond-agg would leave every
+# feeder-liveness read answering "not running" -- silently, with no error, which
+# is the exact defect ADR-005 SS2 warns about for the watchdog. engarde-client
+# keeps its name: it is P2's, FOREIGN, and ADR-005 SS3 leaves foreign names alone.
+for s in engarde-client p5-datapath p5-ecod p5-watchdog; do
+    cat > "$SB/svc/$s" <<'SHIM'
+#!/bin/sh
+D="$BOND_ACCEPT_SB"
+n=$(basename "$0")
+e="$D/st/enabled.$n"; r="$D/st/running.$n"
+case "${1:-}" in
+enable)        printf '1\n' > "$e"; exit 0 ;;
+disable)       printf '0\n' > "$e"; printf '0\n' > "$r"; exit 0 ;;
+enabled)       [ "$(cat "$e" 2>/dev/null)" = 1 ] && exit 0; exit 1 ;;
+start|restart) printf '1\n' > "$r"; exit 0 ;;
+stop)          printf '0\n' > "$r"; exit 0 ;;
+running)       [ "$(cat "$r" 2>/dev/null)" = 1 ] && exit 0; exit 1 ;;
+*)             exit 0 ;;
+esac
+SHIM
+done
+for b in engarde-client p5-datapath p5-ecod; do
+    printf '#!/bin/sh\nexit 0\n' > "$SB/sbin/$b"
+done
+chmod 755 "$SB"/bin/* "$SB"/svc/* "$SB"/sbin/* 2>/dev/null
+
+# ---- sandbox environment. Everything the artifacts touch is redirected here.
+# The sandbox roots mirror ADR-005's spelling (p5, not bond) so a reader cannot
+# mistake this tree for the old stack's; the artifacts read them from the
+# environment, so the leaf name is free either way.
+BOND_ACCEPT_SB="$SB"
+PATH="$SB/bin:$PATH"
+BOND_DIR="$SB/etc/p5"
+RUN_DIR="$SB/run/p5"
+DAG="$SB_DAG"
+WG_DEV="$SB_WG"
+SVC="$SB/svc/engarde-client"
+AGG_SVC="$SB/svc/p5-datapath"
+ECOD_SVC="$SB/svc/p5-ecod"
+WDOG_SVC="$SB/svc/p5-watchdog"
+ENGARDE_BIN="$SB/sbin/engarde-client"
+AGG_BIN="$SB/sbin/p5-datapath"
+ECOD_BIN="$SB/sbin/p5-ecod"
+LOGGER="$SB/bin/logger"
+export BOND_ACCEPT_SB PATH BOND_DIR RUN_DIR DAG WG_DEV
+export SVC AGG_SVC ECOD_SVC WDOG_SVC ENGARDE_BIN AGG_BIN ECOD_BIN LOGGER XCTL
+
+# a genuinely reaped pid, for the stale-lock injection
+( exit 0 ) &
+DEADPID=$!
+wait "$DEADPID" 2>/dev/null
+
+# ---- world builder. $1 = number of sources (N is a parameter, never a constant)
+sb_reset() {
+    # ${SB:?} not $SB: an unset or empty SB would make these four `rm -rf /etc`,
+    # `rm -rf /run`, ... on the machine running the gate. SC2115, and it is not
+    # theoretical for a script that also runs on the box as root.
+    rm -rf "${SB:?}/etc" "${SB:?}/run" "${SB:?}/st" "${SB:?}/sys" 2>/dev/null
+    mkdir -p "$BOND_DIR" "$RUN_DIR" "$SB/st" "$SB/sys"
+    : > "$SB/ledger"
+    printf '%s\n' "$SB_PEER"   > "$SB/peer"
+    printf '%s\n' "$SB_WG"     > "$SB/wgdev"
+    printf '%s\n' "$SB_DIRECT" > "$SB/direct"
+    printf '%s\n' "$SB_DIRECT" > "$SB/ep"
+    printf '0\n'  > "$SB/rx"
+    printf '0\n'  > "$SB/rxstep"
+    printf '0\n'  > "$SB/rawn"
+    printf '0\n'  > "$SB/tunn"
+    printf '%s\n' -1 > "$SB/raw_bloat_after"
+    printf '%s\n' -1 > "$SB/tun_bloat_after"
+    : > "$SB/routes"
+    _i=1
+    while [ "$_i" -le "$1" ]; do
+        _d=$(sb_dev "$_i")
+        printf '%s %s\n' "$_d" "$_i" >> "$SB/routes"
+        mkdir -p "$SB/sys/$_d"; printf '1\n' > "$SB/sys/$_d/carrier"
+        _i=$((_i + 1))
+    done
+    for _s in engarde-client p5-datapath p5-ecod p5-watchdog; do
+        printf '0\n' > "$SB/st/enabled.$_s"
+        printf '0\n' > "$SB/st/running.$_s"
+    done
+}
+run_ecod() {   # $1 = MAXCYCLES
+    MAXCYCLES="$1" CYCLE=0 MIN_BASE=4 BLOAT_N=3 BLOAT_DELTA=100 NEED_CLEAN=3 \
+        PROBATION=600 SYS_NET="$SB/sys" BONDCTL="$BCTL" PING="$SB/bin/ping" \
+        sh "$ECOD" >> "$SB/ledger" 2>&1
+}
+runq()     { "$@" >> "$SB/ledger" 2>&1; }
+mode_now() { cat "$BOND_DIR/mode" 2>/dev/null; }
+running()  { cat "$SB/st/running.$1" 2>/dev/null; }
+nsrc()     { tr ' ' '\n' < "$BOND_DIR/applied_wans" 2>/dev/null | grep -c .; }
+
+# ---- SB-G: v3's precondition guard, in P5's spelling ------------------------
+sb_reset 2
+printf 'lightning\n' > "$BOND_DIR/mode"
+eq "SB-G  node before p5 on"           "$("$XCTL" node)" off
+runq "$BCTL" on
+eq "SB-G  node after p5 on"            "$("$XCTL" node)" engaged
+# INVERTED BY U141, the same flip U141 made to ecosim S4 ("eco was engarde's").
+# `p5 on` engages P5's OWN feeder: the endpoint is the feeder's :59402, not
+# engarde's :59401, and the one running feeder is p5-datapath.
+eq "SB-G  endpoint pinned local (feeder)" "$(cat "$SB/ep")" "$EP_SPEED"
+eq "SB-G  single feeder (agg up)"      "$(running p5-datapath)" 1
+eq "SB-G  engarde not started by P5"   "$(running engarde-client)" 0
+
+# ---- SB-B1 / SB-B1r: v3's raw-bloat branch and its recovery -----------------
+sb_reset 2
+printf 'eco\n' > "$BOND_DIR/mode"
+: > "$BOND_DIR/auto"
+runq "$BCTL" on
+printf '4\n' > "$SB/raw_bloat_after"
+run_ecod 12
+eq "SB-B1  raw bloat -> lightning"     "$(mode_now)" lightning
+printf '%s\n' -1 > "$SB/raw_bloat_after"
+printf '0\n' > "$SB/rawn"
+printf '0\n' > "$SB/tunn"
+run_ecod 8
+eq "SB-B1r raw clean -> eco"           "$(mode_now)" eco
+
+# ---- SB-B2 / SB-B2r: v3's tunnel-bloat branch and its recovery --------------
+sb_reset 2
+printf 'eco\n' > "$BOND_DIR/mode"
+: > "$BOND_DIR/auto"
+runq "$BCTL" on
+printf '4\n' > "$SB/tun_bloat_after"
+run_ecod 12
+eq "SB-B2  tunnel bloat -> lightning"  "$(mode_now)" lightning
+printf '%s\n' -1 > "$SB/tun_bloat_after"
+printf '0\n' > "$SB/rawn"
+printf '0\n' > "$SB/tunn"
+run_ecod 8
+eq "SB-B2r tunnel clean -> eco"        "$(mode_now)" eco
+
+# ---- SB-C: v3's manual-wins, BOTH limbs (ADR-003 inverted one of them) ------
+sb_reset 2
+printf 'eco\n' > "$BOND_DIR/mode"
+: > "$BOND_DIR/auto"
+runq "$BCTL" on
+runq "$BCTL" mode lightning
+if [ -f "$BOND_DIR/auto" ]; then no "SB-C  manual pin did NOT clear auto"
+else ok "SB-C  manual pin cleared auto"; fi
+runq "$BCTL" mode eco
+if [ -f "$BOND_DIR/auto" ]; then ok "SB-C2 mode eco re-armed auto (ADR-003)"
+else no "SB-C2 mode eco did NOT arm auto -- eco IS the auto policy"; fi
+
+# ---- F5: split-brain seeded tuple converges in ONE reconcile (D2) -----------
+sb_reset 2
+printf 'eco\n' > "$BOND_DIR/mode"
+runq "$BCTL" on
+printf '1\n' > "$SB/st/running.p5-datapath"        # seeded contradiction: two feeders
+runq "$XCTL" reconcile
+eq "F5    split-brain: engarde up after 1 reconcile" "$(running engarde-client)" 1
+eq "F5    split-brain: stray agg stopped"            "$(running p5-datapath)" 0
+
+# ---- F6: policer degradation -- watchdog publishes, ecod escapes (D1) -------
+# This scenario uses REAL 1s sleeps: the sensor is a byte-counter DELTA over
+# wall time, so a logical clock would make DT=0 and the sample would be skipped.
+sb_reset 2
+printf 'eco\n' > "$BOND_DIR/mode"
+: > "$BOND_DIR/auto"
+runq "$BCTL" on
+printf '70000\n' > "$SB/rxstep"    # bytes/tick: above the idle gate, below the floor
+MAXCYCLES=5 CYCLE=1 TPROBE_WIN=3 COOLDOWN=0 sh "$WDOG" >> "$SB/ledger" 2>&1
+TP=$(cat "$RUN_DIR/tput" 2>/dev/null)
+case "$TP" in
+    degraded*) ok "F6    watchdog published tput degraded" ;;
+    *)         no "F6    watchdog did not publish degraded (tput='${TP:-unset}')" ;;
+esac
+run_ecod 1
+eq "F6    ecod escaped to lightning on tput" "$(mode_now)" lightning
+
+# ---- F8 / F8b: power-loss stale lock, and its negative control (D4) ---------
+sb_reset 2
+printf 'eco\n' > "$BOND_DIR/mode"
+runq "$BCTL" on
+printf '1\n' > "$SB/st/running.p5-datapath"
+mkdir -p "$RUN_DIR/lock"
+printf '%s\n' "$DEADPID" > "$RUN_DIR/lock/pid"
+runq "$XCTL" reconcile
+eq "F8    stale lock broken, reconcile ran"  "$(running p5-datapath)" 0
+if [ -d "$RUN_DIR/lock" ]; then no "F8    lock not released after the run"
+else ok "F8    lock released after the run"; fi
+
+sb_reset 2
+printf 'eco\n' > "$BOND_DIR/mode"
+runq "$BCTL" on
+printf '1\n' > "$SB/st/running.p5-datapath"
+mkdir -p "$RUN_DIR/lock"
+printf '%s\n' "$$" > "$RUN_DIR/lock/pid"       # LIVE holder -- must NOT be broken
+runq "$XCTL" reconcile
+eq "F8b   live lock respected (skip, no work)" "$(running p5-datapath)" 1
+rm -rf "$RUN_DIR/lock" 2>/dev/null
+
+# ---- NG: N-generic sweep. N is swept, never assumed. ------------------------
+# Upper bound is MIN_AGG_SOURCES+3, read out of the installed reconciler, so the
+# sweep straddles the arity floor from both sides for whatever that floor is.
+NMAX=$((MINSRC + 3))
+n=1
+while [ "$n" -le "$NMAX" ]; do
+    sb_reset "$n"
+    printf 'lightning\n' > "$BOND_DIR/mode"
+    runq "$BCTL" on
+    eq "NG1[N=$n] non-eco enrols every source" "$(nsrc)" "$n"
+
+    printf 'eco\n' > "$BOND_DIR/mode"
+    runq "$XCTL" reconcile refresh
+    eq "NG2[N=$n] eco enrols the primary only" "$(nsrc)" 1
+
+    printf 'lightning\n' > "$BOND_DIR/mode"
+    runq "$XCTL" reconcile refresh
+    if "$BCTL" mode speed >> "$SB/ledger" 2>&1; then r=admitted; else r=refused; fi
+    if [ "$n" -ge "$MINSRC" ]; then
+        eq "NG3[N=$n] speed admitted at N>=$MINSRC" "$r" admitted
+        eq "NG4[N=$n] speed endpoint pinned"        "$(cat "$SB/ep")" "$EP_SPEED"
+    else
+        eq "NG3[N=$n] speed refused below arity floor" "$r" refused
+        eq "NG4[N=$n] refused speed restored the mode" "$(mode_now)" lightning
+    fi
+    n=$((n + 1))
+done
+
+echo "----"
+if [ "$RUN_MODE" = sandbox ]; then
+    echo "p5-accept: SANDBOX-ONLY RUN -- the live box was NOT inspected."
+fi
+echo "p5-accept: $NPASS passed, $NFAIL failed, $NSKIP skipped"
+if [ "$NFAIL" -ne 0 ]; then
+    echo "p5-accept: sandbox log at the FIRST failure (last 20 lines):"
+    tail -20 "$SB/faildump" 2>/dev/null | sed 's/^/    /'
+    exit 1
+fi
+echo "p5-accept: ALL PASS"
+exit 0

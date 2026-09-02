@@ -1,0 +1,75 @@
+name: deadman
+
+# U38d. The deadman bars (U38a: p5/bin/p5-deadman, the ONE rollback primitive the whole
+# server procedure leans on) ran in NO CI job -- scripts/sync-public-ci.sh's ALLOW list
+# carried deploy/p5, not deploy/server, so the mirror never even had the files, and no
+# workflow invoked them either way. A regression here is invisible everywhere until
+# someone happens to run the suite by hand.
+#
+# Its own workflow file, not a step bolted onto emulator-gate.yml, for the reason U60/U61
+# already established: that file has several concurrent writers and is a min-cut
+# (ROADMAP:248), and adding a step there is how U61 put unparseable shell onto dev.
+#
+# Runs under Linux `sh` on purpose, not Git Bash: Linux sh is much closer to the busybox
+# ash the boxes run than Git Bash is, so this buys interpreter fidelity, not just
+# regression cover -- the same reason ecosim/portal/busybox are gated on real Linux.
+#
+# Same commands as `bash scripts/ci-local.sh deadman` (that arm's comment explains why the
+# mutant-check output is grepped for the literal string, not just trusted by exit code):
+#   sh deploy/server/test-p5-fw-deadman.sh && sh deploy/server/mutant-check-p5-fw-deadman.sh
+# plus, if present on the tree, deploy/server/test-p5-server-init.sh (U112, landed) and
+# deploy/server/test-p5-server-footprint.sh (U129, landed on dev 2026-09-02 -- still guarded with [ -f ] so older trees pass, never
+# asserted absent).
+
+on:
+  # RETARGETED BY scripts/sync-public-ci.sh. The SOURCE is workflow_dispatch-only so the
+  # PRIVATE repo (paid Actions minutes) starts nothing; the mirror is public and free, and
+  # carries ONE BRANCH PER UNIT under test, so it fires on all of them. A unit whose branch
+  # triggered no run reads as NO EVIDENCE, which is the state that made five units
+  # unverifiable at once.
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  deadman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: deadman bars + mutant-check (U38a)
+        # The mutant-check's own exit code is necessary but not sufficient -- see
+        # ci-local.sh's gate_deadman for why the literal string is asserted rather than
+        # trusted: a suite that scores the same PASS count against a gutted tool is the
+        # exact failure mode U38a's independent verify measured (34/34 on a mutant with
+        # two of three limbs deleted).
+        run: |
+          set -eu
+          out=""
+          sh deploy/server/test-p5-fw-deadman.sh
+          out=$(sh deploy/server/mutant-check-p5-fw-deadman.sh)
+          printf '%s\n' "$out"
+          case "$out" in
+              *"MUTANT DETECTED"*) : ;;
+              *) echo "FAIL: mutant-check-p5-fw-deadman.sh ran but did not report MUTANT DETECTED"
+                 exit 1 ;;
+          esac
+
+      - name: server init + footprint bars, if present (U112/U129)
+        # test-p5-server-init.sh landed with U112. test-p5-server-footprint.sh is U129,
+        # absent on trees older than U129 -- guarded, never asserted absent, so this
+        # job does not go red for a file that has not landed yet and does not silently
+        # skip it once it has.
+        run: |
+          set -eu
+          if [ -f deploy/server/test-p5-server-init.sh ]; then
+            sh deploy/server/test-p5-server-init.sh
+          else
+            echo "deploy/server/test-p5-server-init.sh not on this tree, skipping"
+          fi
+          if [ -f deploy/server/test-p5-server-footprint.sh ]; then
+            sh deploy/server/test-p5-server-footprint.sh
+          else
+            echo "deploy/server/test-p5-server-footprint.sh absent on this tree (pre-U129), skipping"
+          fi

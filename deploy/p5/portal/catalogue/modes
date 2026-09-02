@@ -1,0 +1,30 @@
+# deploy/p5/portal/catalogue/modes — THE mode catalogue. SINGLE SOURCE OF TRUTH.
+#
+# WHY A FILE AND NOT A LIST IN THE CODE (m9-portal-design.md §3, "profiles not
+# constants"): the CGI, the injection whitelist and the page all read this file.
+# Nothing enumerates a mode name anywhere else, so a mode cannot be added,
+# removed or renamed in one place and not another.
+#
+# `implemented` is NOT decoration. `deploy/p5/bondctl` accepts exactly
+# `lightning|eco|speed` (bondctl:51). `bond-xctl mode_wans` has no fail-loud arm
+# for an unknown mode -- its `case` ends `*) R="$W"` (bond-xctl:427) -- so a mode
+# value the executor does not implement is accepted SILENTLY and behaves like
+# `lightning`. ADR-003 rule 6 requires unknown/legacy mode values to fail loud;
+# the executor does not yet do it, so the PORTAL does: `unimplemented` values are
+# rendered (ADR-003 §"resulting ladder" has five positions) but refused with 400.
+# Bar PC-1 (portal harness) re-derives the implemented set from bondctl's own
+# `case` and fails if this file drifts from it.
+#
+# fields: value|verb|status|note
+#   verb   = how the portal effects it. `mode` -> `bondctl mode <value>`;
+#            `lifecycle` -> `bondctl off`. NEVER an action, never an init script
+#            verb, never a second fact-writing path (m9-portal-design.md §1).
+#   status = implemented | unimplemented
+#
+# N-GENERIC: no source count, no source name, no rate appears in this file or in
+# any label. The modes are described by what they do to the source SET.
+direct|lifecycle|implemented|Bond off. Shaping stays. Not a `mode` fact value -- it is the lifecycle off state (m9-portal-design.md §2).
+eco|mode|implemented|Supervised. Selecting it ENABLES the auto policy; bond-ecod escalates to lightning on degradation and returns when clean.
+lightning|mode|implemented|Every live source, every packet duplicated, first copy wins. (ADR-003 §2 renamed `redundant` to this.)
+speed|mode|implemented|Aggregate across the live sources. SHIPPED MEANING. ADR-003 §1 renames this behaviour to `max` and redefines `speed` as fewest-fastest-for-the-load; that split is U17 and is NOT built.
+max|mode|unimplemented|ADR-003 §1 aggregate-everything after the U17 split. Refused with 400 until bondctl accepts it -- writing it today would silently behave like lightning.

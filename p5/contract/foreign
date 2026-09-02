@@ -1,0 +1,177 @@
+# p5/contract/foreign -- paths P5 MUST NEVER WRITE.
+#
+# What this is FOR, precisely. The installer already refuses any destination
+# that does not match contract/namespace, so as a guard this file is redundant
+# today. It exists for two things that the namespace rule cannot do:
+#
+#   1. It is the MACHINE-CHECKABLE form of the disjointness claim the whole
+#      standalone-product shape rests on. Bar NS-3 in test/run.sh asserts that
+#      no pattern in contract/namespace matches any path here. If someone later
+#      widens the namespace to reclaim an old-stack path -- say, to ship
+#      /usr/sbin/bond-agg again -- that bar goes red and names the collision,
+#      instead of the collision being discovered during a rollback at 3am.
+#   2. It is defence in depth on the exact defect class this unit was warned
+#      about: the deploy runbook seeding /etc/bond/agg_w with an invented
+#      20000,15000 (removed in 52a76d3). The installer checks BOTH lists, so
+#      re-introducing that write fails at install time with a named violation
+#      even if the namespace rule were relaxed.
+#
+# What this is NOT. It is NOT E7's removal list. E7 must remove the old stack,
+# and its list comes from the old package's OWN teardown -- bond-rollback.sh,
+# autoratectl off, bondctl revert, engarde stop (p5-execution-handover.md:80).
+# That list is U26's to derive and is a SUPERSET of the entries below, which
+# were collected only by grepping the frozen baseline for absolute paths:
+#   grep -rhoE '/(etc|usr|var|opt|root)/[A-Za-z0-9_./*-]+' p1-autorate/ p2-engarde/ p3-ecod/
+# plus the paths deploy/p5's reconciler set writes. Anything the old stack
+# creates at RUNTIME rather than naming in its source is absent here.
+#
+# THE UNIT OF OWNERSHIP FOR A UCI CONFIG FILE IS THE NAMED OBJECT, NOT THE
+# FILE. This is forced, not a preference. /etc/config/firewall is GL native and
+# is shared by GL, the old stack and P5; if the FILE were the unit, then either
+# P5 may never open the bonded UDP port -- the server is then unreachable and
+# E3 cannot work -- or P5 claims a file GL owns and "remove precisely P5" stops
+# being decidable. The old stack already resolved this the right way: ONE named
+# rule object (p2-engarde/bootstrap-bond-server.sh:57-63, `uci set
+# firewall.engarde...`), and the handover's removal list names the OBJECT --
+# "engarde + bondctl + its firewall rule (`firewall.engarde`)"
+# (p5-execution-handover.md:80) -- not the file. So:
+#   * the FILE stays on this list. Nothing may ever INSTALL a file there, and
+#     the installer refuses one by name.
+#   * the OBJECTS P5 owns are declared in contract/paths with kind=uci. Today
+#     there is exactly one, `firewall.p5`, and nothing writes it yet.
+#   * the objects the OLD stack owns are listed here with a `uci:` pattern, so
+#     the disjointness bar checks P5's objects against them too.
+# A `uci:` pattern is not an absolute path and therefore never matches a
+# filesystem destination; the path matchers skip it by construction.
+#
+# /etc/config/sqm: P5 DOES NOT REPLACE P1'S WRITES TO IT, IT DROPS THEM.
+# P1's shaper controller drives `uci set sqm.$SID.enabled` + `uci commit sqm`
+# (p1-autorate/autoratectl:38-39,51-52), where $SID is discovered by matching
+# the queue's `.interface` against the tunnel iface (autoratectl:30) -- not a
+# fixed object name, which is why there is no `uci:sqm.*` row here: deleting
+# the whole sqm config would take GL's native queues with it, and picking out
+# the right queue is E7's derivation (U26), not a pattern this file can state.
+# What replaces those writes under P5 is named in the record: E4 is "cake +
+# cake-autorate on the tunnel iface ... Non-interfering with GL native SQM
+# (converge-guard, loud logging)" (p5-execution-handover.md:71), and E7 removes
+# the old `sqm.wgclient1` config outright (:80, and e4-shaping-in-dag.md:22).
+# So P5 shapes its own tunnel and OBSERVES GL native SQM rather than driving
+# it. If E4 turns out to need persisted shaper settings, the E0-level answer is
+# already fixed: they go inside the P5 namespace (/etc/p5/* or /etc/config/p5),
+# never into `sqm`. Owner of that residual question: U22 (E4).
+#
+# FORMAT: origin|pattern
+#   origin  p1 | p2 | p3 | p4 | gl   (which stack the path belongs to)
+#   pattern POSIX `case` glob, absolute production path, or `uci:<object>` for
+#           a named UCI object (see above)
+
+# ---- P1: cake + cake-autorate ----------------------------------------------
+p1|/etc/init.d/cake-autorate
+p1|/etc/init.d/sqm
+p1|/etc/hotplug.d/iface/98-wg-autorate
+p1|/etc/hotplug.d/iface/99-tether-autorate
+p1|/root/cake-autorate
+p1|/root/cake-autorate/*
+p1|/root/autoratectl
+p1|/root/bootstrap-autorate.sh
+p1|/var/log/cake-autorate.wg.log
+p1|/etc/tether-reflectors
+p1|/etc/wg-reflectors
+p1|/etc/wg-logical
+
+# ---- P2: engarde + bondctl v2.8 --------------------------------------------
+p2|/usr/sbin/engarde-client
+p2|/usr/sbin/engarde-server
+p2|/etc/init.d/engarde-client
+p2|/etc/init.d/engarde-server
+p2|/root/engarde-client-arm64
+p2|/root/engarde-server-arm64
+p2|/root/engarde-server-armv7
+p2|/root/bondctl
+
+# ---- P3 / P4 / the deploy/p5 reconciler set: the bond namespace ------------
+# One namespace, three generations of owner, all of it foreign to P5. Four
+# rows below were tagged p3 but were never P3's -- ADR-005 §5 retags them p4,
+# the deploy/p5 reconciler generation (same generation as bond-agg, already
+# p4 below), because the tag is what an operator reads at 3am. Disjointness
+# (NS-3) is unaffected either way; only the origin label changes.
+p3|/etc/bond
+p3|/etc/bond/*
+p3|/var/run/bond
+p3|/var/run/bond/*
+p3|/usr/sbin/bondctl
+p3|/usr/sbin/bond-ecod
+p4|/usr/sbin/bond-xctl
+p4|/usr/sbin/bond-watchdog
+p4|/usr/sbin/bond-agg
+p4|/etc/init.d/bond-agg
+p3|/etc/init.d/bond-ecod
+p4|/etc/init.d/bond-watchdog
+p3|/etc/hotplug.d/iface/97-bond
+
+# ---- the old stack's procd rc.d flags --------------------------------------
+# Derived from the /etc/init.d rows above, not collected separately: enabling
+# any of those services writes /etc/rc.d/S<pri><svc> and K<pri><svc>. The grep
+# in the header could not see them -- they are created at ENABLE time, never
+# named in the sources -- which is exactly the class this file said it was
+# missing. Listed so the installer refuses them and so the disjointness bar has
+# both sides of the /etc/rc.d namespace to compare.
+p1|/etc/rc.d/[SK][0-9][0-9]cake-autorate
+p1|/etc/rc.d/[SK][0-9][0-9]sqm
+p2|/etc/rc.d/[SK][0-9][0-9]engarde-*
+p3|/etc/rc.d/[SK][0-9][0-9]bond-*
+
+# ---- named UCI objects the old stack owns ----------------------------------
+p2|uci:firewall.engarde
+
+# ---- GL.iNet native: non-interference (handover section 1) -----------------
+# P5 must be non-interfering with GL native features. These are the config
+# surfaces the old stack touched or the product could be tempted to touch.
+gl|/etc/config/network
+gl|/etc/config/firewall
+gl|/etc/config/wireless
+gl|/etc/config/sqm
+gl|/etc/config/dhcp
+gl|/etc/config/glconfig
+gl|/etc/init.d/firewall
+gl|/etc/init.d/network
+
+# ---- THE MANAGEMENT PATH: the branch the operator is sitting on ------------
+# The server (GL-MT2500 at ${SERVER_PC_IP}) has NO PHYSICAL ACCESS -- no console,
+# no recovery button, no power-cycle into failsafe (ROADMAP, STANDING
+# CONSTRAINT). Every deploy step reaches it over SSH. So the set of files that
+# carry that SSH session is a distinct class from "GL native config we should
+# be polite about": writing one of these is not a non-interference violation,
+# it is the loss of the box.
+#
+# The class is: the SSH daemon and its config, the network stack that routes
+# the session, the firewall that admits it, and the boot flags that bring any
+# of them up. The first four rows below are already above under `gl` and are
+# NOT repeated -- a duplicate pattern would make the disjointness bar's output
+# ambiguous about which row fired. What is added here is what those rows did
+# not cover.
+#
+# THE STRUCTURAL CONSEQUENCE, and it is the whole reason this section is worth
+# writing: p5_check_dest consults this file BEFORE contract/namespace, so no
+# filemap row, no packaging mistake and no widened namespace can put a P5 file
+# on any of these paths. E0's installer is therefore structurally incapable of
+# touching the management path. That is a mechanism, not a promise, and bar
+# MG-1 demonstrates it by packaging a file at each of these destinations and
+# asserting exit 4 with the refusal naming the foreign origin.
+#
+# It does NOT cover the case that actually needs a deadman: a step that writes
+# nothing here but still cuts the path -- `uci commit firewall` after touching
+# firewall.p5, `/etc/init.d/network restart`, stopping the service that carries
+# the tunnel the session rides. Those are E5's and E7's, they are actions
+# rather than destinations, and no path list can catch them. That is what
+# /usr/sbin/p5-deadman is for, and CONTRACT.md states the rule that binds them.
+gl|/etc/config/dropbear
+gl|/etc/init.d/dropbear
+gl|/etc/dropbear
+gl|/etc/dropbear/*
+gl|/etc/ssh
+gl|/etc/ssh/*
+gl|/etc/rc.d/[SK][0-9][0-9]dropbear
+gl|/etc/rc.d/[SK][0-9][0-9]network
+gl|/etc/rc.d/[SK][0-9][0-9]firewall
+gl|/etc/config/system

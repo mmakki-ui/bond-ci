@@ -1,0 +1,74 @@
+# p5/payload/filemap -- THE payload declaration. scripts/build-p5-package.sh
+# copies this file verbatim to <package>/payload/filemap, and p5-install reads
+# it there (p5/bin/p5-install:265-285).
+#
+# FORMAT, exactly as p5-install parses it: mode|role|src|dest
+#   mode  octal file mode, passed to `install -m`
+#   role  client | server | both -- a row whose role is neither `both` nor the
+#         installing box's role is SKIPPED, which is what makes one package
+#         serve both boxes without either being a special case
+#   src   path relative to the package's payload/ dir. It is the REPO path of
+#         the file (ADR-005 section 4: source paths do not change), or a build/
+#         path for something the builder produces rather than copies
+#   dest  absolute production destination, from ADR-005 section 4's map
+#
+# NO PADDING SPACES. p5-install splits on `|` with a raw `read` and does not
+# trim, so a column aligned with spaces becomes a mode/role/dest that carries
+# them.
+#
+# EVERY DEST HERE IS A DECLARED ROW IN p5/contract/paths, and p5-install
+# re-checks each one against contract/foreign, contract/namespace and
+# contract/paths at install time (p5_check_dest, p5-common.sh:658). A dest that
+# is not declared there is refused with exit 4 -- so this file cannot widen the
+# namespace, only fill it.
+#
+# WHAT IS DELIBERATELY NOT HERE, each with its reason:
+#   /etc/hotplug.d/iface/[0-9][0-9]-p5  contract/paths:159 leaves the two-digit
+#       priority UNSET on purpose -- choosing it is choosing an ordering against
+#       netifd's other hooks, which is E5's derivation to make and justify
+#       (CONTRACT.md:344-346). deploy/p5/97-bond therefore has no destination
+#       yet and is not shipped.
+#   /etc/config/p5                      contract/paths:160 is conditional on a
+#       decision E5 has not made.
+#   deploy/p5/shape-install, deploy/p5/init.d/cake-autorate, deploy/p5/portal/*,
+#   deploy/p5/shape/*                   no row in contract/paths declares a
+#       destination for them, so p5-install would refuse them with exit 4.
+#       They are shipped when a contract row exists, not before.
+#
+# ARCHITECTURE. The two Go binaries are built GOOS=linux GOARCH=arm64: both
+# boxes are aarch64 (.github/workflows/emulator-gate.yml:271-273 for the
+# GL-MT2500 server, :738 for the client). CONTRACT.md:348-350 says the
+# architecture choice is U28's and is expressed as filemap rows -- these two
+# rows are that expression.
+#
+# mode|role|src|dest
+
+# ---- the datapath: the client daemon and its procd service ----------------
+755|client|build/linux-arm64/p5-datapath|/usr/sbin/p5-datapath
+755|client|deploy/p5/init.d/bond-agg|/etc/init.d/p5-datapath
+
+# ---- the server daemon and its procd service ------------------------------
+# contract/paths:158 (/etc/init.d/p5-server) is an E5-RESERVED row, and reserved
+# is not a bar: p5_check_dest admits it exactly as it admits the other reserved
+# rows shipped above (/etc/init.d/p5-datapath, /usr/sbin/p5). The source is
+# deploy/server/init.d/p5-server, whose own header (:4-6) names that dest and
+# that contract row. Without this row --role server would place a daemon with no
+# service and docs/deploy-p5-server.md:431 S3 would keep delivering it by hand.
+755|server|build/linux-arm64/p5-server|/usr/sbin/p5-server
+755|server|deploy/server/init.d/p5-server|/etc/init.d/p5-server
+
+# ---- the client control plane --------------------------------------------
+755|client|deploy/p5/bondctl|/usr/sbin/p5
+755|client|deploy/p5/bond-xctl|/usr/sbin/p5-reconciler
+755|client|deploy/p5/bond-ecod|/usr/sbin/p5-ecod
+755|client|deploy/p5/bond-watchdog|/usr/sbin/p5-watchdog
+755|client|deploy/p5/init.d/bond-ecod|/etc/init.d/p5-ecod
+755|client|deploy/p5/init.d/bond-watchdog|/etc/init.d/p5-watchdog
+
+# ---- product data: read-only, version-locked, NOT configuration ----------
+644|client|deploy/p5/bond.dag|/usr/lib/p5/dag
+644|client|deploy/p5/lib/xctl-lock.sh|/usr/lib/p5/xctl-lock.sh
+644|client|deploy/p5/lib/xctl-probe.sh|/usr/lib/p5/xctl-probe.sh
+644|client|deploy/p5/lib/xctl-actions.sh|/usr/lib/p5/xctl-actions.sh
+644|client|deploy/p5/lib/xctl-shape.sh|/usr/lib/p5/xctl-shape.sh
+644|client|deploy/p5/lib/xctl-dag.sh|/usr/lib/p5/xctl-dag.sh
