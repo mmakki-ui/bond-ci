@@ -1,0 +1,33 @@
+name: portal
+# The M9 portal harness, the same command `bash scripts/ci-local.sh portal` runs.
+# It forks a mutant tree per bar and runs the shipped CGI under hermetic shims, which is why
+# ci-local.sh refuses it off Linux (U79). A GitHub runner is Linux, so it runs here.
+on:
+  # RETARGETED BY scripts/sync-public-ci.sh. The SOURCE is workflow_dispatch-only so the
+  # PRIVATE repo (paid Actions minutes) starts nothing; the mirror is public and free, and
+  # carries ONE BRANCH PER UNIT under test, so it fires on all of them. A unit whose branch
+  # triggered no run reads as NO EVIDENCE, which is the state that made five units
+  # unverifiable at once.
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  portal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: portal harness
+        run: |
+          sh orchestration/ecosim/p5/portal/run.sh > /tmp/portal.log 2>&1; rc=$?
+          tail -40 /tmp/portal.log
+          echo "--- lines naming a failure ---"
+          grep -nE '^FAIL' /tmp/portal.log | head -20 || true
+          exit $rc
+      - name: log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-log
+          path: /tmp/portal.log

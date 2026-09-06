@@ -1,0 +1,4 @@
+IMPORT_OK C:\Users\mmakk\AppData\Local\Temp\claude\C--Users-mmakk-Claude-Code\005bfed5-7c98-401c-ab0d-bf0b448997e4\scratchpad\sim_reserved\nsched_model.py C:\Users\mmakk\AppData\Local\Temp\claude\C--Users-mmakk-Claude-Code\005bfed5-7c98-401c-ab0d-bf0b448997e4\scratchpad\sim_reserved\ackclock_sim.py C:\Users\mmakk\AppData\Local\Temp\claude\C--Users-mmakk-Claude-Code\005bfed5-7c98-401c-ab0d-bf0b448997e4\scratchpad\sim_reserved\reserved_dp.py
+SMOKE_PULL {'gp': 61099.4, 'loss': 3.9, 'p95': 98.2}
+SMOKE_D {'gp': 62656.0, 'loss': 1.4, 'p95': 87.6, 'armed_frac': 1.0}
+BASELINE_OK

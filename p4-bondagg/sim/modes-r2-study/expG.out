@@ -1,0 +1,14 @@
+rig=N2 mid cellA+eth  nom=107000
+load key: gp loss%% tshare | p50/p95@ratchet late | dup_tx
+0.40 g0 : gp= 42620 loss= 0.30 ts=0.221 | p50=  20 p95=  21 late= 344.5 | dup= 8669 (2s)
+0.40 g2 : gp= 42624 loss= 0.29 ts=0.001 | p50=  20 p95=  21 late= 318.0 | dup=    0 (3s)
+0.40 g2m: gp= 42615 loss= 0.31 ts=0.002 | p50=  20 p95=  21 late= 273.5 | dup=   42 (5s)
+0.65 g0 : gp= 68792 loss= 0.96 ts=0.198 | p50=  21 p95=  67 late=1098.5 | dup=12414 (8s)
+0.65 g2 : gp= 68884 loss= 0.83 ts=0.004 | p50=  20 p95=  56 late=1338.0 | dup=    0 (10s)
+0.65 g2m: gp= 68969 loss= 0.71 ts=0.012 | p50=  20 p95=  59 late=1428.5 | dup=  496 (13s)
+0.85 g0 : gp= 84296 loss= 7.20 ts=0.217 | p50= 137 p95= 488 late= 950.0 | dup= 7009 (17s)
+0.85 g2 : gp= 84532 loss= 6.94 ts=0.135 | p50=  95 p95= 371 late=1315.0 | dup=  258 (20s)
+0.85 g2m: gp= 84185 loss= 7.32 ts=0.184 | p50= 125 p95= 456 late= 959.0 | dup= 4352 (24s)
+ref Dc 0.65: gp= 68792 loss= 0.96 ts=0.198 (26s)
+ref Dc 0.85: gp= 84296 loss= 7.20 ts=0.217 (29s)
+total 29s
