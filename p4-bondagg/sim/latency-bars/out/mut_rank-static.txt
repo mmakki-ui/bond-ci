@@ -1,0 +1,105 @@
+====================================================================================================
+OBJ-D LATENCY BARS -- SPD-1..6, HOLD-1..4   (U14)
+====================================================================================================
+  seeds=2 T=9.0s gran=10.0ms rig=edge+mid geo=canonical defect=rank-static
+  physics : nsched_model.py
+  rig     : pull-study\03-reserved-composite\reserved_composite.py
+  gran    : 10.0 ms from nsched_model.py source DT, <=10 ms asserted (r1 sec 8 limb 2)
+  go tick : 100 ms -- daemon/main.go PingIval, the cadence that calls ring.Tick(now).
+            r1 sec 8 also asks for gran == the Go ticker period. MEASURED, and it
+            does NOT hold: 10 ms model vs 100 ms shipped ring. Recorded as an
+            open finding, not asserted away -- every HOLD bar here is scored at a
+            granularity 10x finer than the shipped ring can resolve.
+  DEFECT  : SPD: draw order = static latency rank (V1). REFUTED in r1 sec 3.2 (= CPF strict priority; -9.07% gp at S3@90k)
+  ADR-004: every bar below is PAIRED, STRUCTURAL or UNIT. No absolute
+  loss or latency threshold is asserted against this rig anywhere.
+
+#   SPD-1  S3 edge offer=60000  speed vs the N=1 eth control  nominal_agg=60000
+  SPD-1a  spotty-class share == 0 (structural)                 PASS  share=0.0000
+  MARGIN SPD-1a | spotty-class share == 0 (structural) | 0
+  SPD-1b  out-of-order arrivals == 0 (structural)              PASS  late_arrivals=0
+  MARGIN SPD-1b | out-of-order arrivals == 0 (structural) | 0
+  SPD-1c  paired p95 <= p95(N=1 eth control) + 2*gran          PASS  p95=11 ctl=11 tol=20
+  MARGIN SPD-1c | paired p95 <= p95(N=1 eth control) + 2*gran | 20
+  SPD-1d  paired gp >= gp(N=1 eth control)                     PASS  gp=59926 ctl=59926
+  MARGIN SPD-1d | paired gp >= gp(N=1 eth control) | 0
+
+#   SPD-2  S3 edge offer=90000  speed vs max, identical seeds  nominal_agg=90000
+  SPD-2a  paired gp >= gp(max)                                 FAIL  gp=89615 max=89847
+  MARGIN SPD-2a | paired gp >= gp(max) | -0.257426552
+  SPD-2b  paired p95 <= p95(max)                               FAIL  p95=51 max=14
+  MARGIN SPD-2b | paired p95 <= p95(max) | -37
+  SPD-2c  spotty-class share == 0 at spill (structural)        PASS  share=0.0000 max_share=0.1243
+  MARGIN SPD-2c | spotty-class share == 0 at spill (structural) | 0
+
+#   SPD-3  S3 edge offer=140000  speed vs max, saturation  nominal_agg=140000
+  SPD-3a  paired gp >= 0.99 * gp(max)  [measured ratio]        PASS  ratio=0.9981 bar=0.99
+  MARGIN SPD-3a | paired gp >= 0.99 * gp(max)  [measured ratio] | 0.813105946
+  SPD-3b  paired p95 <= 1.03 * p95(max)  [measured ratio]      FAIL  ratio=1.1063 bar=1.03
+  MARGIN SPD-3b | paired p95 <= 1.03 * p95(max)  [measured ratio] | -7.62992126
+
+#   SPD-4  S4 edge offer=50000  all-spotty, speed vs max  nominal_agg=50000
+  SPD-4a  paired gp >= gp(max)                                 FAIL  gp=47278 max=47827
+  MARGIN SPD-4a | paired gp >= gp(max) | -1.14630776
+  SPD-4b  paired p95 <= p95(max)                               FAIL  p95=353.000 max=334.000
+  MARGIN SPD-4b | paired p95 <= p95(max) | -19
+
+#   SPD-5  N2 mid cellA+eth  speed-key vs Dc(hungriest)  nominal_agg=107000
+  SPD-5a  load=0.65 paired gp >= gp(Dc)                        PASS  gp=69349 Dc=69349
+  MARGIN SPD-5a | load=0.65 paired gp >= gp(Dc) | 0
+  SPD-5b  load=0.65 paired p95 <= p95(Dc)                      PASS  p95=78 Dc=78
+  MARGIN SPD-5b | load=0.65 paired p95 <= p95(Dc) | 0
+  SPD-5c  load=0.65 paired late-discard <= late(Dc)            PASS  late=0 Dc=0
+  MARGIN SPD-5c | load=0.65 paired late-discard <= late(Dc) | 0
+  SPD-5a  load=0.85 paired gp >= gp(Dc)                        PASS  gp=87241 Dc=87241
+  MARGIN SPD-5a | load=0.85 paired gp >= gp(Dc) | 0
+  SPD-5b  load=0.85 paired p95 <= p95(Dc)                      PASS  p95=426 Dc=426
+  MARGIN SPD-5b | load=0.85 paired p95 <= p95(Dc) | 0
+  SPD-5c  load=0.85 paired late-discard <= late(Dc)            PASS  late=118 Dc=118
+  MARGIN SPD-5c | load=0.85 paired late-discard <= late(Dc) | 0
+
+#   SPD-6  S3 edge STEP 30k->90k->30k  share follows demand  nominal_agg=90000
+  SPD-6a  share rises or holds into the 90k step (no starvation) PASS  seg1=0.0000 seg2=0.0000
+  MARGIN SPD-6a | share rises or holds into the 90k step (no starvation) | 0
+  SPD-6b  share RETURNS to the fits-load value after the step  PASS  seg3=0.0000 seg1=0.0000
+  MARGIN SPD-6b | share RETURNS to the fits-load value after the step | 0
+  SPD-6c  no residual pinning: seg3 share <= seg2 share        PASS  seg3=0.0000 seg2=0.0000
+  MARGIN SPD-6c | no residual pinning: seg3 share <= seg2 share | 0
+
+#   HOLD-1 N2 edge cellA+eth load=0.85  ratchet vs fixed-343  nominal_agg=107000
+  HOLD-1a edge p50(ratchet) <= p50(343) + 2*gran               PASS  p50=12 fixed=12 tol=20
+  MARGIN HOLD-1a | edge p50(ratchet) <= p50(343) + 2*gran | 20
+  HOLD-1b edge p95(ratchet) <= p95(343) + 2*gran               PASS  p95=242 fixed=232 tol=20
+  MARGIN HOLD-1b | edge p95(ratchet) <= p95(343) + 2*gran | 10
+  HOLD-1c edge p99(ratchet) <= p99(343) + 2*gran               FAIL  p99=323 fixed=261 tol=20
+  MARGIN HOLD-1c | edge p99(ratchet) <= p99(343) + 2*gran | -42
+  HOLD-1d edge late(ratchet) <= late(343) + one event burst    PASS  late=24 fixed=390 burst=137
+  MARGIN HOLD-1d | edge late(ratchet) <= late(343) + one event burst | 503
+  HOLD-3a edge p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran PASS  warm_p95=12 overall=242 tol=20
+  MARGIN HOLD-3a | edge p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran | 250
+
+#   HOLD-2 N2 mid cellA+eth load=0.85  ratchet vs fixed-343  nominal_agg=107000
+  HOLD-2a mid p50(ratchet) <= p50(343) + 2*gran                PASS  p50=148 fixed=129 tol=20
+  MARGIN HOLD-2a | mid p50(ratchet) <= p50(343) + 2*gran | 1.78277261
+  HOLD-2b mid late(ratchet) <= late(343) + one event burst     PASS  late=118 fixed=1612 burst=104
+  MARGIN HOLD-2b | mid late(ratchet) <= late(343) + one event burst | 1599
+  HOLD-3b mid p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran PASS  warm_p95=40 overall=426 tol=20
+  MARGIN HOLD-3b | mid p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran | 405.322754
+
+#   HOLD-4 unit derivation of the ratchet   (no rig, no seeds)
+  HOLD-4a zero observations => hold == gran                    PASS  hold=10.000 gran=10.000
+  MARGIN HOLD-4a | zero observations => hold == gran | 1
+  HOLD-4b injected gap g => hold == g + gran                   PASS  hold=147.000 want=147.000
+  MARGIN HOLD-4b | injected gap g => hold == g + gran | 0
+  HOLD-4c membership change => hold == spread(D) + gran        PASS  hold=33.000 want=33.000
+  MARGIN HOLD-4c | membership change => hold == spread(D) + gran | 1
+
+----------------------------------------------------------------------------------------------------
+6 BAR FAILURE(S):
+  FAIL SPD-2a paired gp >= gp(max): gp=89615 max=89847
+  FAIL SPD-2b paired p95 <= p95(max): p95=51 max=14
+  FAIL SPD-3b paired p95 <= 1.03 * p95(max)  [measured ratio]: ratio=1.1063 bar=1.03
+  FAIL SPD-4a paired gp >= gp(max): gp=47278 max=47827
+  FAIL SPD-4b paired p95 <= p95(max): p95=353.000 max=334.000
+  FAIL HOLD-1c edge p99(ratchet) <= p99(343) + 2*gran: p99=323 fixed=261 tol=20
+elapsed 54s
