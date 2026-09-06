@@ -1,0 +1,30 @@
+#!/bin/sh
+# fake uci: one wireguard peer section, end_point = the direct server.
+# Also serves `uci -q get network.<iface>.metric` from $ECOSIM_STATE/ucimetric.<iface>
+# so the discovery metric-precedence fallback (ubus -> uci -> route) is testable.
+# netifd OWNS the metrics on the real box (docs/INTENT.md OBJ-H).
+S="$ECOSIM_STATE"; PUB="PEERPUBKEY000000000000000000000000000000000="
+DIRECT=$(cat "$S/direct" 2>/dev/null || echo "203.0.113.9:51820")
+netmetric() {   # $1 = network.<iface>.metric
+    i=${1#network.}; i=${i%.metric}
+    cat "$S/ucimetric.$i" 2>/dev/null
+}
+case "$1" in
+  show)
+    if [ "$2" = wireguard ]; then
+        echo "wireguard.peer_mo.public_key='$PUB'"
+        echo "wireguard.peer_mo.end_point='$DIRECT'"
+    fi ;;
+  -q)
+    # uci -q get wireguard.peer_mo.end_point | uci -q get network.<iface>.metric
+    if [ "$2" = get ]; then case "$3" in
+        *.end_point)      echo "$DIRECT" ;;
+        network.*.metric) netmetric "$3" ;;
+    esac; fi ;;
+  get)
+    case "$2" in
+        *.end_point)      echo "$DIRECT" ;;
+        network.*.metric) netmetric "$2" ;;
+    esac ;;
+esac
+exit 0
