@@ -1,0 +1,779 @@
+#!/bin/sh
+# shellcheck shell=sh
+# p5-deadman -- THE automatic-rollback primitive. One implementation, one
+# record format, one firing code path.
+#
+#   p5-deadman arm --after SECONDS (--restore CMD | --restore-script PATH)
+#                  [--label L] [--no-timer]
+#   p5-deadman check                fire every record whose deadline has passed
+#   p5-deadman confirm [--label L]  the operator is still reachable: disarm
+#   p5-deadman fire    [--label L]  roll back NOW
+#   p5-deadman status               what is armed, and which limbs are live
+#
+# ---------------------------------------------------------------------------
+# U38a -- THE CONSOLIDATION. This file used to have a twin,
+# deploy/server/p5-fw-deadman, written for the server procedure because this one
+# shipped with its boot limb OPEN. Two implementations of a rollback primitive is
+# exactly the shape that produces a rollback that does not roll back: the two had
+# already diverged on the record format, on the confirm rule, on what `fire`
+# exits with, and on whether a corrupt record is reported at all. They are now
+# ONE file, this one, and the twin is deleted. Everything the twin had that this
+# did not is folded in and named here:
+#   - the CRON BOOT LIMB, which closes the power-cut gap this file's header used
+#     to record as OPEN (CONTRACT.md section 6);
+#   - `--restore-script PATH`, sha-pinned, so a tampered or truncated rollback is
+#     detected before it runs and there is no eval;
+#   - the PRE-ARM CONNECTION SNAPSHOT and the confirm rule built on it;
+#   - `status`'s per-limb verdicts, which are the pre-F3 gate in
+#     docs/deploy-p5-server.md.
+# Nothing this file already had was dropped: E0's file-deadline record, its
+# `--restore CMD` form, its exit codes and its DM-1..DM-10 semantics are intact,
+# and `p5-uninstall --remove` still refuses while any record is armed (DM-8).
+# ---------------------------------------------------------------------------
+#
+# WHY THIS EXISTS. The server (GL-MT2500, ${SERVER_PC_IP}) has no console, no
+# recovery button and no power-cycle into failsafe (ROADMAP, STANDING
+# CONSTRAINT). Every deploy step reaches it over SSH, and several of the steps
+# the product needs -- `uci commit firewall` after touching firewall.p5,
+# restarting the network, stopping the service that carries the tunnel the
+# session rides -- can cut the branch the operator is sitting on. Those steps
+# cannot be made safe by checking a path list: they write nothing forbidden,
+# they just change the running state of something the session depends on.
+#
+# So the answer is the classic shape: schedule an unconditional "put it back"
+# that only a confirmed-still-reachable operator cancels. E0 owns the primitive
+# and the rule; E5 and E7 own the steps that must use it, and CONTRACT.md
+# states the rule that binds them.
+#
+# THE SCHEDULING MECHANISM MUST SURVIVE WHAT IT PROTECTS AGAINST, which is the
+# part that is usually got wrong. A background `sleep && rollback` inside the
+# SSH session dies with the session -- and the session dying is precisely the
+# event it is supposed to notice. Worse, it does not survive a power cut, and
+# "power lost between two steps" is on the list of failures that must not lose
+# the box. So the armed state is a FILE ON PERSISTENT STORAGE carrying an
+# ABSOLUTE DEADLINE, and firing is a pure function of (that file, the clock).
+# Three independent things call it, and they are the SAME code path:
+#
+#   the timer  a detached `sleep N; p5-deadman check`, disowned from the
+#              session (setsid where busybox provides it, nohup otherwise), so
+#              it outlives the SSH connection that armed it.
+#   the boot   a crontab line running `check` every minute. THIS is the limb
+#              that survives power loss: a box that reboots with a record still
+#              armed rolls back within a minute of crond starting.
+#   the human  `p5-deadman fire`.
+#
+# WHAT "ONE CODE PATH" DOES AND DOES NOT COVER, because this header used to
+# overclaim it. Testing `check` against a past-deadline record tests the FIRING
+# half of all three limbs -- there is no second implementation of firing to
+# diverge. It does NOT test their SCHEDULING: the detached spawn at the bottom of
+# do_arm and the crontab line it installs are shared with nothing, and a mutant
+# with either replaced by `:` fires exactly as well under a suite that only ever
+# calls `check` by hand. So the scheduling halves have their own bars in
+# deploy/server/test-p5-fw-deadman.sh (DM-30..DM-33 timer; DM-10, DM-25 and
+# DM-34..DM-41 boot), and the firing half has DM-1..DM-10 in p5/test/run.sh.
+#
+# NO ARBITRARY CONSTANTS. `--after` has NO DEFAULT and arm refuses without it.
+# How long an operator needs to prove reachability is not derivable from physics
+# or from anything this product can measure; it depends on the link, the step and
+# the person. So it is supplied explicitly every time and recorded in the armed
+# record, rather than invented here (bar DM-2).
+#   The crontab line's `* * * * *` is not an exception and not a tuned number: it
+# is cron's finest granularity, i.e. "as often as this mechanism can be asked",
+# and it is not a timeout -- the DEADLINE IN THE RECORD decides when the rollback
+# happens; the poll rate only bounds how late the boot limb notices. E0 still
+# ships no init script and invents no procd priority; a crontab line needs
+# neither, which is why this limb could be closed here while the procd ordering
+# question stays E5's (CONTRACT.md section 7).
+#
+# THE CONFIRM RULE, and why it is stricter than "not the arming session".
+# `confirm` must be run over a connection that DID NOT EXIST when arm ran. An
+# already-established TCP connection keeps flowing through the conntrack
+# ESTABLISHED rule even after the ACCEPT rule that admitted it is gone -- so
+# confirming over a connection that predates the change proves the box was
+# reachable a minute ago, not that it is reachable now. That is the classic false
+# green for exactly this class of step, and it is the one that loses the box.
+#
+# COMPARING ONLY THE ARMING SESSION IS NOT ENOUGH. SSH_CONNECTION fields 1:2 are
+# the client ip:port, so a match proves "a different 4-tuple" -- nothing more. A
+# SECOND session opened BEFORE the change has a different client port, survives
+# the reload through conntrack ESTABLISHED exactly like the arming one, and would
+# confirm. The procedure CREATES that state on purpose: docs/deploy-p5-server.md
+# Gate M requires a second independent management path to be established and
+# proven BEFORE step 1. So arm SNAPSHOTS every TCP peer the box currently has
+# established (`netstat -tn`; `ss -tn` if netstat is absent) and stores it in the
+# record; confirm refuses any session id in that set.
+#
+# THE SNAPSHOT VALIDATES ITSELF, at arm time, while the operator is still
+# reachable. If the parse does not find the ARMING session's own id in its own
+# output, the format is not the one this code understands and the snapshot is
+# worthless -- arm records P5_DM_PRESNAP=untrusted and says so loudly. If no
+# snapshot tool works at all, P5_DM_PRESNAP=none. In BOTH cases `confirm`
+# REFUSES, because on a box with no console "cannot distinguish" must fail
+# closed. Fix it before the change, not after.
+#
+# WHEN THE STRICT RULE DOES NOT APPLY, stated rather than left implicit. All of
+# the above is about the ssh connection the operator is standing on. If arm ran
+# with no ssh session at all -- a local console, a rehearsal from a checkout, a
+# test harness -- there is no such connection to false-green through conntrack,
+# and there is nothing for the snapshot to prove. Those records carry
+# P5_DM_SESSION=no-ssh-session and `confirm` disarms them, SAYING which rule it
+# applied. A record armed over ssh always gets the strict rule, and `status`
+# prints the rule each record carries so it is never a surprise.
+#
+# WHAT IS STILL NOT PROVEN, said plainly rather than papered over: this proves
+# the confirming connection was admitted after ARM, not after the CHANGE. arm
+# runs immediately before the change, so the window is the operator's own
+# arm->change gap; the procedure requires that nothing new be opened inside it.
+# Proving admission after the change itself would need the box to time-stamp
+# inbound connections, and no mechanism for that has been demonstrated on this
+# hardware, so none is claimed.
+#
+# BUSYBOX-SAFE POSIX sh.
+
+set -u
+
+P5_TAG="p5-deadman"
+
+# WHERE THE LIBRARY COMES FROM, and the order matters.
+# The SIBLING copy wins. Running from an unpacked package, ../lib is the
+# package's own library and is the right one. Running from the box, this
+# script sits at /usr/sbin, so ../lib is /usr/lib -- which holds no
+# p5-common.sh -- and the box copy under /usr/lib/p5 is used instead. So the
+# sibling-first order costs nothing on a real box and buys one thing that
+# matters: a box whose /usr/lib/p5/p5-common.sh is CORRUPT can still be
+# inspected and cleaned up from the package, instead of every tool sourcing
+# the broken library and dying. A damaged box must stay reachable by its own
+# repair tools.
+_self_dir=$(dirname "$0")
+if [ -r "$_self_dir/../lib/p5-common.sh" ] || [ -n "${P5_LIB_SRC:-}" ]; then
+    _lib_src="${P5_LIB_SRC:-$_self_dir/../lib}"
+else
+    _lib_src="${P5_ROOT:-}/usr/lib/p5"
+fi
+if [ -r "$_self_dir/../contract/paths" ]; then
+    _con_dir="$_self_dir/../contract"; _con_pfx=""
+else
+    _con_dir="${P5_ROOT:-}/usr/lib/p5"; _con_pfx="contract-"
+fi
+[ -r "$_lib_src/p5-common.sh" ] || {
+    echo "p5-deadman: ERROR: cannot find p5-common.sh under $_lib_src" >&2
+    exit 5
+}
+. "$_lib_src/p5-common.sh"
+p5_contract_dir "$_con_dir" "$_con_pfx"
+
+# The path THIS invocation was reached by, resolved. The crontab line and the
+# detached sleeper both name the tool and both run long after this process is
+# gone, so a relative "$0" would be resolved against whatever directory cron or
+# the sleeper happens to be sitting in.
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+
+# The boot limb's file. Rooted like every other path this tool touches, so a
+# rehearsal against a fake root cannot reach the real crontab.
+CRONTAB="${P5_CRONTAB:-${P5_ROOT:-}/etc/crontabs/root}"
+CRONMARK="# p5-deadman"
+# The EXACT literal line boot_limb_install appends, computed once SELF is
+# known. Both the "is it already there" check and the removal use this as a
+# whole-line, fixed-string match (grep -qxF / -vxF, the same pattern already
+# used for exclusion sets in p5-install/p5-uninstall) instead of matching
+# CRONMARK as a bare unanchored substring. Unanchored matching on a shared
+# file was a real defect: an operator line that happens to CONTAIN the text
+# "# p5-deadman" anywhere -- inside a comment, inside an argument to their own
+# job -- would (a) make boot_limb_install think the limb was already
+# installed and silently skip it, and (b) make boot_limb_remove_if_last treat
+# that operator's whole line as ours and delete it. Anchoring to the exact
+# appended line closes both.
+CRONLINE=$(printf '* * * * * "%s" check >/dev/null 2>&1 %s' "$SELF" "$CRONMARK")
+# U130: THERE IS NO SIBLING BACKUP FILE ANY MORE. Before this unit, a byte-exact
+# copy of the crontab lived at "${CRONTAB}.p5-pre" -- outside p5's own namespace
+# (p5/contract/namespace:69-80 owns /etc/p5/* and friends, not /etc/crontabs/*),
+# and invisible to the "everything under $P5_DEADDIR is an armed record" rule
+# p5_deadman_armed relies on. "did the crontab exist before this arm touched it"
+# is now a FIELD on the armed record itself (P5_DM_CRON_PREEXISTED, do_arm
+# below), which lives under $P5_DEADDIR -- squarely inside the namespace -- and
+# removal STRIPS the marked line instead of restoring a saved copy
+# (boot_limb_remove_if_last below). A stripped file is byte-identical to the
+# original when the pre-existing crontab already ended in a newline (the
+# common case -- crond and every editor write one). When it did not,
+# boot_limb_install (below) inserts one before appending, so P5's line never
+# glues onto the operator's last line; the operator's content survives intact
+# and only gains that one separating byte, which removal cannot distinguish
+# from content the operator wrote themselves without keeping the backup file
+# this unit removes on purpose.
+
+usage() {
+    cat >&2 <<'EOF'
+usage: p5-deadman arm --after SECONDS (--restore CMD | --restore-script PATH)
+                      [--label L] [--no-timer]
+       p5-deadman check | confirm [--label L] | fire [--label L] | status
+
+  arm       record a rollback that runs unless it is confirmed in time.
+            --after   REQUIRED, no default. Seconds until the deadline.
+            --restore        the command that puts the box back. Run with sh -c.
+            --restore-script an EXECUTABLE FILE that puts the box back. It is
+                             sha256'd into the record, so a tampered or
+                             truncated restore is detected before it runs and
+                             there is no eval. Preferred on the server.
+                             Give exactly one of --restore / --restore-script.
+            --label   names this record so several can be armed at once.
+            --no-timer  arm the record without spawning the sleeper (for a
+                        caller that drives `check` itself, and for tests).
+                        The boot limb is still installed.
+  check     fire every armed record whose deadline has passed. This is what
+            the sleeper runs, what cron runs, and what a test calls.
+  confirm   the operator is still reachable: disarm without firing. For a
+            record armed over ssh this REFUSES over any connection that already
+            existed when arm ran -- not just the arming one -- and refuses if
+            arm could not take a trustworthy snapshot. That refusal is the
+            feature.
+  fire      run the rollback now, regardless of the deadline.
+  status    what is armed, how long is left, what would run, and which of the
+            three limbs are actually live on this box.
+
+exit codes: 0 ok | 1 a rollback ran, or one failed | 2 usage
+            5 precondition, or a record that can never fire
+EOF
+    exit "$P5_EX_USAGE"
+}
+
+VERB="${1:-}"; [ -n "$VERB" ] || usage; shift 2>/dev/null || true
+AFTER=""; RESTORE=""; RSCRIPT=""; LABEL="default"; TIMER=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --after)   [ $# -ge 2 ] || usage; AFTER="$2"; shift 2 ;;
+        --restore) [ $# -ge 2 ] || usage; RESTORE="$2"; shift 2 ;;
+        --restore-script) [ $# -ge 2 ] || usage; RSCRIPT="$2"; shift 2 ;;
+        --label)   [ $# -ge 2 ] || usage; LABEL="$2"; shift 2 ;;
+        --no-timer) TIMER=0; shift ;;
+        -h|--help) usage ;;
+        *) echo "p5-deadman: unknown argument: $1" >&2; usage ;;
+    esac
+done
+case "$LABEL" in
+    *[!A-Za-z0-9._-]*|'') echo "p5-deadman: --label must be [A-Za-z0-9._-]+" >&2; usage ;;
+esac
+
+p5_announce_overrides
+
+now() { date -u '+%s' 2>/dev/null || echo 0; }
+recf() { echo "$P5_DEADDIR/$1"; }
+
+# session id: client-ip + client-port from SSH_CONNECTION. The PORT is the part
+# that makes it unique per connection; the ip alone would let a second session
+# from the same machine confirm without proving a new admission.
+session_id() {
+    if [ -n "${SSH_CONNECTION:-}" ]; then
+        printf '%s' "$SSH_CONNECTION" | awk '{print $1 ":" $2}'
+    else
+        printf 'no-ssh-session'
+    fi
+}
+
+# Every TCP peer the box currently has established, in the same ip:port form
+# session_id() produces. Each backend is tested ON ITS OWN and its exit status
+# is read directly -- NOT through a pipeline, whose status is the last filter's.
+# That is the scripts/box-inventory.sh defect this project has now hit twice.
+established_peers_raw() {
+    if command -v netstat >/dev/null 2>&1; then
+        if _o=$(netstat -tn 2>/dev/null); then printf '%s\n' "$_o"; return 0; fi
+    fi
+    if command -v ss >/dev/null 2>&1; then
+        if _o=$(ss -tn 2>/dev/null); then printf '%s\n' "$_o"; return 0; fi
+    fi
+    return 1
+}
+
+# Reduce that to a space-separated set. Deliberately a SUPERSET: local addresses
+# and non-ssh peers are kept too. A superset can only ever refuse a confirm, and
+# refusing is the safe direction on a box that cannot be recovered.
+established_peers() {
+    _ep_raw=$(established_peers_raw) || return 1
+    printf '%s\n' "$_ep_raw" \
+        | tr ' \t' '\n\n' \
+        | grep -E '^[0-9a-fA-F.:]+:[0-9][0-9]*$' \
+        | sort -u | tr '\n' ' '
+    return 0
+}
+
+# ---------------------------------------------------------------- boot limb --
+# Install the crontab line. QUOTED, for the same reason the sleeper's
+# arguments are passed as arguments: crond hands this line to a shell, so an
+# unquoted path containing a space would split and the boot limb would
+# silently run nothing -- the same defect DM-30/DM-31 caught in the timer.
+boot_limb_install() {
+    _bl_dir=$(dirname "$CRONTAB")
+    if [ ! -d "$_bl_dir" ]; then
+        p5_err "WARNING: no $_bl_dir -- BOOT LIMB NOT ARMED. A power cut while armed will not roll"
+        p5_err "  this box back; only the timer and a manual check will. 'status' says so on every run."
+        return 1
+    fi
+    if ! grep -qxF "$CRONLINE" "$CRONTAB" 2>/dev/null; then
+        # If the file already has content and does NOT end in a newline,
+        # `>>` would glue our line onto the operator's last line -- one merged
+        # line that then matches CRONMARK inside grep -v below and takes the
+        # operator's content down with it when it is stripped. Separate them
+        # first. `tail -c1` on a file ending in \n returns nothing (command
+        # substitution strips trailing newlines), so this only fires when the
+        # last byte is genuinely not a newline.
+        if [ -s "$CRONTAB" ] && [ -n "$(tail -c1 "$CRONTAB" 2>/dev/null)" ]; then
+            printf '\n' >> "$CRONTAB"
+        fi
+        printf '%s\n' "$CRONLINE" >> "$CRONTAB"
+        # busybox crond rescans the crontab on mtime change; the reload is
+        # belt-and-braces and touches nothing that carries the session.
+        [ -x /etc/init.d/cron ] && /etc/init.d/cron reload >/dev/null 2>&1
+    fi
+    return 0
+}
+
+# Remove it, but ONLY once nothing is armed. Confirming one record must not drop
+# the limb while another record is still live.
+boot_limb_remove_if_last() {
+    if p5_deadman_armed >/dev/null 2>&1; then return 0; fi
+    if [ -f "$CRONTAB" ]; then
+        # Strip our line and leave everything else exactly as it is -- whether
+        # "everything else" is somebody else's pre-existing cron jobs or
+        # nothing at all (U130: this used to be an elif, reached only when no
+        # CRONPRE backup existed; it is now the ONLY path. Restoring from a
+        # byte-exact backup and stripping the one line P5 appended produce the
+        # same bytes when P5 only ever adds ONE line at the end -- which is all
+        # boot_limb_install ever does -- so the backup file bought nothing here
+        # and cost a path outside the contract namespace. "did the crontab
+        # exist before this arm" is recorded on the armed record instead, as
+        # P5_DM_CRON_PREEXISTED, for the operator's own reading via `status`).
+        #
+        # DO NOT WRITE `grep -v ... > tmp && mv tmp "$CRONTAB"`. grep exits 1
+        # when it selects NO lines, which is exactly the common case here (our
+        # line was the only one), so the `&&` short-circuits and the correctly
+        # filtered file is never moved into place -- the boot limb is then left
+        # armed for ever, pointing at a tool the operator believes is disarmed.
+        # That defect was live in the twin this file absorbed and its DM-25 bars
+        # caught it. It is the same shape as the `### firewall-loaded` collector
+        # in scripts/box-inventory.sh, where a `||` fallback was unreachable
+        # because `head` always exits 0, which is why the server's LOADED
+        # firewall was never read. (Cited by its section marker, not a line
+        # number: U40's fix moved that code.) The exit status of a filter is not
+        # a success signal.
+        #
+        # `mv` onto an existing path preserves neither mode nor ownership --
+        # the destination is unlinked and the source's own (umask-derived)
+        # mode takes its place. $CRONTAB is a SHARED file (root's own crontab,
+        # or -- under $P5_ROOT during a rehearsal -- whatever the harness put
+        # there); this is not p5's file to loosen. So: snapshot its mode and
+        # owner/group FIRST with plain `stat -c` (busybox has %a/%u/%g; it has
+        # no GNU `chmod --reference`, which is why the mode is carried in a
+        # variable rather than read off a reference file), then STAMP THEM
+        # ONTO THE REPLACEMENT BEFORE the mv. Stamping the temp file rather
+        # than the destination afterwards means $CRONTAB is never observable
+        # at a temp file's umask-derived mode, not even for the instant
+        # between mv and chmod, and no crash window leaves it loosened.
+        # Every step here is best-effort ON TOP OF a correct removal, never a
+        # precondition for one: a stat that fails (no stat on PATH, the file
+        # gone) leaves its variable empty and that stamp is skipped, and the
+        # chown is EXPECTED to fail when we are not root -- which is exactly
+        # the case where the uid/gid are already ours and nothing needs
+        # changing. The `case` guards are there because an unexpected stat
+        # output (a "?" placeholder, a usage error on stdout) must not reach
+        # chmod/chown as if it were a mode.
+        _bl_mode=$(stat -c %a "$CRONTAB" 2>/dev/null) || _bl_mode=""
+        _bl_uid=$(stat -c %u "$CRONTAB" 2>/dev/null) || _bl_uid=""
+        _bl_gid=$(stat -c %g "$CRONTAB" 2>/dev/null) || _bl_gid=""
+        case "$_bl_mode" in ''|*[!0-7]*) _bl_mode="" ;; esac
+        case "$_bl_uid$_bl_gid" in ''|*[!0-9]*) _bl_uid=""; _bl_gid="" ;; esac
+        if grep -vxF "$CRONLINE" "$CRONTAB" > "$CRONTAB.p5tmp" 2>/dev/null || [ -f "$CRONTAB.p5tmp" ]; then
+            [ -n "$_bl_mode" ] && chmod "$_bl_mode" "$CRONTAB.p5tmp" 2>/dev/null
+            [ -n "$_bl_uid" ] && chown "$_bl_uid:$_bl_gid" "$CRONTAB.p5tmp" 2>/dev/null
+            mv "$CRONTAB.p5tmp" "$CRONTAB"
+        else
+            rm -f "$CRONTAB.p5tmp"
+            p5_err "WARNING: could not strip the deadman line from $CRONTAB -- remove it by hand"
+        fi
+    fi
+    [ -x /etc/init.d/cron ] && /etc/init.d/cron reload >/dev/null 2>&1
+    return 0
+}
+
+do_arm() {
+    [ -n "$AFTER" ] || { p5_err "--after is REQUIRED and has no default. How long you need to prove you are still reachable is not derivable from anything this product can measure, so it is not invented here."; exit "$P5_EX_USAGE"; }
+    case "$AFTER" in *[!0-9]*|'') p5_err "--after must be a whole number of seconds, got '$AFTER'"; exit "$P5_EX_USAGE" ;; esac
+    if [ -n "$RESTORE" ] && [ -n "$RSCRIPT" ]; then
+        p5_err "--restore and --restore-script are alternatives, not a pair: give exactly one, so there is never a question about which of two rollbacks would run."
+        exit "$P5_EX_USAGE"
+    fi
+    [ -n "$RESTORE" ] || [ -n "$RSCRIPT" ] || { p5_err "a --restore is REQUIRED (--restore CMD, or --restore-script PATH): a deadman with no rollback command is a timer, not a safety net."; exit "$P5_EX_USAGE"; }
+
+    _a_sha=""
+    if [ -n "$RSCRIPT" ]; then
+        [ -f "$RSCRIPT" ] || p5_die "$P5_EX_PRECOND" "restore script not found: $RSCRIPT"
+        [ -x "$RSCRIPT" ] || p5_die "$P5_EX_PRECOND" "restore script is not executable: $RSCRIPT"
+        _a_sha=$(p5_hash "$RSCRIPT" 2>/dev/null)
+        [ -n "$_a_sha" ] || p5_die "$P5_EX_PRECOND" "cannot hash $RSCRIPT -- the restore cannot be integrity-checked, and a rollback that runs something other than what was reviewed is worse than no rollback"
+        RESTORE=$(readlink -f "$RSCRIPT" 2>/dev/null || echo "$RSCRIPT")
+    fi
+
+    mkdir -p "$P5_DEADDIR" || p5_die "$P5_EX_PRECOND" "cannot create $P5_DEADDIR"
+    _a_now=$(now)
+    [ "$_a_now" != 0 ] || p5_die "$P5_EX_PRECOND" "no usable clock (date -u +%s failed); a deadline cannot be set without one"
+    if [ "$AFTER" -eq 0 ]; then
+        # ACCEPTED, not refused, and loudly. A zero window is ALREADY past its
+        # deadline, so the next check rolls the box back -- the SAFE direction --
+        # and bar DM-4 uses it to make firing deterministic instead of racing a
+        # sleep. Refusing it would buy nothing and would cost the only way to
+        # test the firing path without a wall-clock wait.
+        p5_err "NOTE: --after 0 -- this record is ALREADY past its deadline and the next check,"
+        p5_err "  from any limb, fires it. That is deliberate; it is not a window."
+    fi
+    _a_file=$(recf "$LABEL")
+
+    # Snapshot every connection that exists NOW, and validate the snapshot
+    # against the one connection we independently know is established: this one.
+    # Failing that check here, at arm time, is the whole point -- the operator is
+    # still reachable and can fix it before the change.
+    _a_me=$(session_id)
+    if _a_pre=$(established_peers); then
+        case " $_a_pre " in
+            *" $_a_me "*) _a_snap=ok ;;
+            *)            _a_snap=untrusted ;;
+        esac
+    else
+        _a_pre=""; _a_snap=none
+    fi
+    if [ "$_a_me" = "no-ssh-session" ]; then
+        p5_log "armed OUTSIDE an ssh session: confirm will not require a new connection for this"
+        p5_log "record, because there is no ssh connection that could survive the change through"
+        p5_log "conntrack and confirm falsely. 'status' prints the rule each record carries."
+    elif [ "$_a_snap" = untrusted ]; then
+        p5_err "WARNING: the connection snapshot does not contain THIS session ($_a_me), so its"
+        p5_err "format is not the one this tool parses. P5_DM_PRESNAP=untrusted -- confirm will REFUSE."
+        p5_err "Fix the snapshot before making the change, not after."
+    elif [ "$_a_snap" = none ]; then
+        p5_err "WARNING: no working netstat/ss -- no connection snapshot could be taken."
+        p5_err "P5_DM_PRESNAP=none -- confirm will REFUSE. Only 'fire' and the deadline remain."
+    fi
+
+    # U130 / O15: whether the shared crontab existed BEFORE this arm touches it,
+    # captured NOW -- before boot_limb_install runs -- so a second arm while the
+    # boot limb is already live does not misread its own line as "pre-existing".
+    # This is what a separate backup FILE used to be for (CRONPRE, eliminated in
+    # U130); it is a field on the record instead, and boot_limb_remove_if_last
+    # strips the marked line rather than restoring from a copy.
+    if [ -f "$CRONTAB" ]; then _a_cronpre=yes; else _a_cronpre=no; fi
+
+    # Arming is idempotent by REPLACEMENT: re-arming the same label moves the
+    # deadline and keeps exactly one record. Two records for one step would mean
+    # two rollbacks, and the second would undo the first one's repair.
+    {
+        echo "# P5 deadman record. Fires unless 'p5-deadman confirm' arrives first."
+        echo "P5_DM_LABEL=$LABEL"
+        echo "P5_DM_ARMED_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo unknown)"
+        echo "P5_DM_AFTER=$AFTER"
+        echo "P5_DM_DEADLINE=$((_a_now + AFTER))"
+        echo "P5_DM_RESTORE=$RESTORE"
+        echo "P5_DM_SHA=$_a_sha"
+        echo "P5_DM_SESSION=$_a_me"
+        echo "P5_DM_PRESNAP=$_a_snap"
+        echo "P5_DM_PRE_SESSIONS=$_a_pre"
+        echo "P5_DM_CRON_PREEXISTED=$_a_cronpre"
+    } | p5_atomic_write "$_a_file" 600 || p5_die "$P5_EX_FAIL" "cannot write the armed record at $_a_file"
+    p5_log "ARMED '$LABEL': in ${AFTER}s this box will run: $RESTORE"
+    p5_log "Confirm you are still reachable with: p5-deadman confirm --label $LABEL"
+
+    # boot limb. Installed even under --no-timer: the limbs are independent, and
+    # the one that survives a power cut is not the one a test wants suppressed.
+    # A failure here does not refuse the arm -- the record above already
+    # exists and the other limbs are live -- it only leaves the boot limb
+    # absent, which boot_limb_install already said loudly on stderr and which
+    # `status`'s `boot: ABSENT` reports on every later run.
+    boot_limb_install || true
+
+    # timer limb, detached so it outlives this SSH session.
+    # </dev/null on the spawn as well as the output redirections: a detached
+    # child that keeps the parent's stdin or stdout open holds the SSH channel
+    # open after the command returns, so `ssh root@box 'p5-deadman arm ...'`
+    # would hang instead of returning. Measured -- it hung the test harness.
+    #
+    # THE SLEEPER'S ARGUMENTS ARE PASSED AS ARGUMENTS, NEVER INTERPOLATED INTO
+    # THE `sh -c` STRING. This used to be `sh -c "sleep $AFTER; $SELF check"`,
+    # so an install path containing a space split into two words and the sleeper
+    # died instantly with "No such file or directory" -- into /dev/null, from a
+    # detached process, with arm still exiting 0 and reporting "armed". The
+    # timer limb was silently absent and nothing could see it, because no bar had
+    # ever exercised the spawn. Found by DM-30/DM-31 the first time they ran.
+    # /usr/sbin has no space, so this would not have bitten on the box -- it bit
+    # every rehearsal run from a checkout, which is where Gate C happens.
+    if [ "$TIMER" -eq 0 ]; then
+        p5_log "--no-timer: no sleeper spawned. The boot limb and a manual 'check' still apply."
+    elif command -v setsid >/dev/null 2>&1; then
+        setsid sh -c 'sleep "$1"; exec "$2" check' _ "$AFTER" "$SELF" </dev/null >/dev/null 2>&1 &
+        p5_log "timer detached (pid $!). The armed record on disk is authoritative; the timer only wakes 'check'."
+    elif command -v nohup >/dev/null 2>&1; then
+        nohup sh -c 'sleep "$1"; exec "$2" check' _ "$AFTER" "$SELF" </dev/null >/dev/null 2>&1 &
+        p5_log "timer detached (pid $!). The armed record on disk is authoritative; the timer only wakes 'check'."
+    else
+        p5_err "WARNING: no setsid and no nohup -- TIMER LIMB NOT ARMED. Only cron and a manual check fire this."
+    fi
+    return "$P5_EX_OK"
+}
+
+# fire_one FILE -> run the recorded rollback.
+#   0  the rollback ran and returned 0; the record is removed.
+#   1  the rollback was ATTEMPTED and did not put the box back (it exited
+#      non-zero, or its file is gone, or its sha no longer matches). The record
+#      is KEPT armed and says so loudly -- dropping it would silently retire a
+#      rollback that never happened.
+#   2  the record CANNOT be fired at all: it carries no rollback. Kept, and
+#      reported on every check, because a deadman that cannot fire and never
+#      says so is the outcome this whole file exists to prevent.
+#
+# A record that fires successfully is REMOVED rather than renamed. Nothing may
+# be left behind in $P5_DEADDIR: p5_deadman_armed counts every file there as an
+# armed record, so a `.fired` tombstone would make `p5-uninstall --remove`
+# refuse for ever (DM-8/DM-9).
+fire_one() {
+    _f_lbl=$(p5_deadman_field P5_DM_LABEL "$1" || echo "?")
+    _f_cmd=$(p5_deadman_field P5_DM_RESTORE "$1" || echo "")
+    _f_sha=$(p5_deadman_field P5_DM_SHA "$1" || echo "")
+    if [ -z "$_f_cmd" ]; then
+        p5_err "armed record $1 carries no P5_DM_RESTORE -- IT CAN NEVER FIRE. Nothing will roll this"
+        p5_err "  box back. KEEPING it rather than dropping it: re-arm it, or remove it by hand."
+        return 2
+    fi
+    if [ -n "$_f_sha" ]; then
+        if [ ! -x "$_f_cmd" ]; then
+            p5_err "DEADMAN '$_f_lbl': restore script gone: $_f_cmd -- CANNOT ROLL BACK. Record KEPT."
+            return 1
+        fi
+        _f_got=$(p5_hash "$_f_cmd" 2>/dev/null)
+        if [ "$_f_got" != "$_f_sha" ]; then
+            p5_err "DEADMAN '$_f_lbl': the restore script's sha CHANGED ($_f_cmd) -- refusing to run it."
+            p5_err "  A rollback that runs something other than what was reviewed is worse than none."
+            p5_err "  The record is KEPT armed: nothing has been rolled back."
+            return 1
+        fi
+    fi
+    p5_err "DEADMAN FIRING '$_f_lbl': running the recorded rollback: $_f_cmd"
+    if [ -n "$_f_sha" ]; then
+        "$_f_cmd"; _f_rc=$?
+    else
+        sh -c "$_f_cmd"; _f_rc=$?
+    fi
+    if [ "$_f_rc" = 0 ]; then
+        rm -f "$1"
+        p5_sync
+        # U130: `check` and `fire` both fire through here, so this ONE call
+        # covers both -- before U130, only `confirm` called it, and a box that
+        # was rolled back by the timer, the boot limb or a human `fire` kept
+        # `* * * * * p5-deadman check` running in the shared crontab against a
+        # binary the next uninstall would delete. p5_deadman_armed still counts
+        # every OTHER armed record, so this is a no-op while one remains.
+        boot_limb_remove_if_last
+        p5_err "DEADMAN '$_f_lbl': rollback returned 0; record cleared"
+        return 0
+    fi
+    # The status is captured into _f_rc AT THE CALL, before anything else runs.
+    # `_r=1; log "... $?"` always printed "exit 0", because the assignment is a
+    # command and it succeeds -- and that was the one line an operator reads
+    # about a box they cannot reach. DM-42.
+    p5_err "DEADMAN '$_f_lbl': THE ROLLBACK FAILED (exit $_f_rc). The record is being KEPT armed so"
+    p5_err "  the next 'check' -- timer, boot hook or hand -- tries again. Do not delete it by hand"
+    p5_err "  until the box is known good."
+    return 1
+}
+
+# tally_fire RC -- fold one fire_one result into the check counters. One place,
+# so the two call sites below cannot drift apart.
+tally_fire() {
+    case "$1" in
+        0) _c_ran=$((_c_ran + 1)) ;;
+        1) _c_ran=$((_c_ran + 1)); _c_bad=$((_c_bad + 1)) ;;
+        *) _c_dead=$((_c_dead + 1)) ;;
+    esac
+}
+
+do_check() {
+    _c_now=$(now); _c_ran=0; _c_bad=0; _c_dead=0; _c_any=0
+    p5_deadman_armed > "$P5_DMLIST" 2>/dev/null
+    while read -r f; do
+        [ -n "$f" ] || continue
+        _c_any=1
+        _c_dl=$(p5_deadman_field P5_DM_DEADLINE "$f" || echo "")
+        case "$_c_dl" in
+            ''|*[!0-9]*)
+                p5_err "armed record $f has no usable deadline -- FIRING IT NOW. An unreadable deadline"
+                p5_err "  must not mean 'never': that is the one reading that loses the box."
+                fire_one "$f"; tally_fire "$?"
+                continue ;;
+        esac
+        if [ "$_c_now" -ge "$_c_dl" ]; then
+            fire_one "$f"; tally_fire "$?"
+        fi
+    done < "$P5_DMLIST"
+    [ "$_c_any" = 0 ] && { p5_log "nothing armed"; return "$P5_EX_OK"; }
+    if [ "$_c_ran" != 0 ]; then
+        p5_log "check: $_c_ran record(s) fired, $_c_bad rollback(s) failed and are still armed, $_c_dead unfireable"
+        # Non-zero whenever a rollback ran. A caller that treats 0 as "all well"
+        # must not read "the box was rolled back under me" as all well.
+        return "$P5_EX_FAIL"
+    fi
+    if [ "$_c_dead" != 0 ]; then
+        # A record that was SKIPPED SILENTLY on every check, for ever, is a
+        # deadman that cannot fire and never says so -- exactly what the atomic
+        # write exists to prevent. Say it, every time, and do not exit 0 on it.
+        p5_log "check: $_c_dead record(s) CANNOT FIRE and nothing was rolled back"
+        return "$P5_EX_PRECOND"
+    fi
+    p5_log "armed, none past its deadline"
+    return "$P5_EX_OK"
+}
+
+do_fire() {
+    _fi_f=$(recf "$LABEL")
+    [ -f "$_fi_f" ] || { p5_err "nothing armed under label '$LABEL'"; return "$P5_EX_PRECOND"; }
+    # Validate BEFORE firing. An unreadable record must produce a named
+    # precondition failure, never a bare shell error with a status the operator
+    # cannot interpret.
+    _fi_cmd=$(p5_deadman_field P5_DM_RESTORE "$_fi_f" || echo "")
+    if [ -z "$_fi_cmd" ]; then
+        p5_err "record $_fi_f is unreadable (it carries no rollback) -- refusing to fire from a record"
+        p5_err "  that cannot be parsed. IT CAN NEVER FIRE: re-arm it, or remove it by hand."
+        return "$P5_EX_PRECOND"
+    fi
+    fire_one "$_fi_f" || true
+    # Non-zero whenever a rollback ran, exactly as `check` reports it and as the
+    # usage text has always said. A caller must not read "the box was rolled
+    # back under me" as OK.
+    return "$P5_EX_FAIL"
+}
+
+do_confirm() {
+    _co_f=$(recf "$LABEL")
+    if [ ! -f "$_co_f" ]; then
+        p5_log "nothing armed under label '$LABEL' (already confirmed, or it already fired)"
+        return "$P5_EX_OK"
+    fi
+    # Every field is read through p5_deadman_field, which greps one line out of
+    # the record. Sourcing the record here would end the whole process with the
+    # shell's own status and no message of ours -- an exit code an operator on
+    # the far side of a firewall change cannot act on.
+    _co_arm=$(p5_deadman_field P5_DM_SESSION "$_co_f" || echo "")
+    _co_snap=$(p5_deadman_field P5_DM_PRESNAP "$_co_f" || echo "")
+    _co_pre=$(p5_deadman_field P5_DM_PRE_SESSIONS "$_co_f" || echo "")
+    _co_me=$(session_id)
+
+    if [ -z "$_co_arm" ]; then
+        # A hand-written record, or one from before this field existed. It cannot
+        # be judged, and on a box with no console that fails CLOSED.
+        p5_err "REFUSED: record $_co_f carries no P5_DM_SESSION, so there is nothing to judge a new"
+        p5_err "connection against. Let it fire, or use 'fire'."
+        return "$P5_EX_PRECOND"
+    fi
+
+    if [ "$_co_arm" = "no-ssh-session" ]; then
+        p5_log "this record was armed OUTSIDE an ssh session, so the new-connection proof does not"
+        p5_log "apply to it: there is no ssh connection that could survive the change through"
+        p5_log "conntrack and confirm falsely. Disarming."
+    else
+        if [ "$_co_me" = "$_co_arm" ]; then
+            p5_err "REFUSED: this is the session that armed the deadman ($_co_me)."
+            p5_err "An established connection survives the removal of the rule that admitted it"
+            p5_err "(conntrack ESTABLISHED), so confirming from here proves nothing about reachability."
+            p5_err "Open a NEW ssh session to the box and run confirm there."
+            return "$P5_EX_PRECOND"
+        fi
+        if [ "$_co_me" = "no-ssh-session" ]; then
+            p5_err "REFUSED: not an ssh session (SSH_CONNECTION unset), so a new connection cannot be"
+            p5_err "distinguished from the arming one. Confirm over ssh."
+            return "$P5_EX_PRECOND"
+        fi
+        if [ "$_co_snap" != ok ]; then
+            p5_err "REFUSED: P5_DM_PRESNAP=${_co_snap:-missing} -- no trustworthy snapshot of the connections"
+            p5_err "that existed when this was armed, so a NEW connection cannot be told from an OLD one."
+            p5_err "On a box with no console that ambiguity fails CLOSED. Let it fire, or use 'fire'."
+            return "$P5_EX_PRECOND"
+        fi
+        # Every connection that existed when arm ran is refused, not just the
+        # arming one. The procedure REQUIRES a second management path to be open
+        # before the change (Gate M), and that session survives the reload
+        # through conntrack ESTABLISHED exactly like the arming one -- so it
+        # proves nothing and must not be able to confirm.
+        case " $_co_pre " in
+            *" $_co_me "*)
+                p5_err "REFUSED: this connection ($_co_me) was ALREADY ESTABLISHED when the deadman was armed."
+                p5_err "An established connection survives the removal of the rule that admitted it"
+                p5_err "(conntrack ESTABLISHED), so it proves the box was reachable, not that it is."
+                p5_err "Open a connection that did not exist before the change, and confirm from there."
+                return "$P5_EX_PRECOND"
+                ;;
+        esac
+    fi
+
+    rm -f "$_co_f"; p5_sync
+    boot_limb_remove_if_last
+    p5_log "CONFIRMED '$LABEL' from $_co_me: disarmed. No rollback will run."
+    return "$P5_EX_OK"
+}
+
+do_status() {
+    _s_now=$(now); _s_any=0
+    p5_deadman_armed > "$P5_DMLIST" 2>/dev/null
+    while read -r f; do
+        [ -n "$f" ] || continue
+        _s_any=1
+        _s_l=$(p5_deadman_field P5_DM_LABEL "$f" || echo "?")
+        _s_d=$(p5_deadman_field P5_DM_DEADLINE "$f" || echo "")
+        _s_c=$(p5_deadman_field P5_DM_RESTORE "$f" || echo "")
+        _s_p=$(p5_deadman_field P5_DM_PRESNAP "$f" || echo "missing")
+        _s_a=$(p5_deadman_field P5_DM_SESSION "$f" || echo "?")
+        _s_cp=$(p5_deadman_field P5_DM_CRON_PREEXISTED "$f" || echo "?")
+        case "$_s_d" in
+            ''|*[!0-9]*)
+                echo "ARMED label=$_s_l deadline=UNREADABLE (the next check fires it) restore=$_s_c"
+                continue ;;
+        esac
+        echo "ARMED label=$_s_l deadline=$_s_d left=$((_s_d - _s_now))s restore=$_s_c armed_by=$_s_a presnap=$_s_p cron_preexisted=$_s_cp"
+        [ "$((_s_d - _s_now))" -le 0 ] && echo "  ^ DEADLINE PASSED -- 'check' will fire this now"
+        if [ "$_s_a" = "no-ssh-session" ]; then
+            echo "  ^ armed outside ssh: confirm does NOT require a new connection for this record"
+        elif [ "$_s_p" != ok ]; then
+            echo "  ^ confirm will REFUSE (presnap=$_s_p) -- only the deadline or 'fire' ends this"
+        fi
+    done < "$P5_DMLIST"
+    [ "$_s_any" = 0 ] && echo "$P5_TAG: nothing armed"
+
+    # Say out loud which limbs are actually live on THIS box. A deadman whose
+    # limbs are absent is worse than none, because it is trusted.
+    echo "limbs:"
+    if command -v setsid >/dev/null 2>&1 || command -v nohup >/dev/null 2>&1; then
+        echo "  timer: available (setsid/nohup present)"
+    else
+        echo "  timer: ABSENT -- no setsid and no nohup. A detached sleeper cannot be started."
+    fi
+    if ps w 2>/dev/null | grep -v grep | grep -q '[c]rond'; then
+        if [ -f "$CRONTAB" ] && grep -qxF "$CRONLINE" "$CRONTAB" 2>/dev/null; then
+            echo "  boot:  LIVE (crond running, crontab line installed)"
+        else
+            echo "  boot:  crond running but NO crontab line -- arm installs it. Until it does, the"
+            echo "$P5_TAG: boot limb is not wired yet on this box: a power cut while armed leaves the"
+            echo "$P5_TAG: record armed and UN-FIRED until something calls check."
+        fi
+    else
+        echo "  boot:  ABSENT -- crond is not running, so the crontab line cannot run. The"
+        echo "$P5_TAG: boot limb is not wired yet on this box: a power cut while armed leaves the"
+        echo "$P5_TAG: record armed and UN-FIRED until something calls check."
+    fi
+    return "$P5_EX_OK"
+}
+
+# EXCLUSIVE, never adopted (U82).
+P5_DMWORK=$(p5_workdir p5-deadman) || { echo "p5-deadman: ERROR: cannot create an exclusive scratch directory under ${TMPDIR:-/tmp}" >&2; exit 5; }
+trap 'rm -rf "$P5_DMWORK"' EXIT INT TERM
+P5_DMLIST="$P5_DMWORK/armed"
+
+case "$VERB" in
+    arm)     do_arm; exit $? ;;
+    check)   do_check; exit $? ;;
+    confirm) do_confirm; exit $? ;;
+    fire)    do_fire; exit $? ;;
+    status)  do_status; exit $? ;;
+    *) echo "p5-deadman: unknown verb: $VERB" >&2; usage ;;
+esac

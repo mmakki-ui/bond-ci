@@ -1,0 +1,59 @@
+# deploy/p5/portal/catalogue/modes — THE mode catalogue. SINGLE SOURCE OF TRUTH.
+#
+# WHY A FILE AND NOT A LIST IN THE CODE (m9-portal-design.md §3, "profiles not
+# constants"): the CGI, the injection whitelist and the page all read this file.
+# Nothing enumerates a mode name anywhere else, so a mode cannot be added,
+# removed or renamed in one place and not another.
+#
+# `implemented` is NOT decoration. `deploy/p5/bondctl`'s accepted mode set is
+# DERIVED FROM TWO SOURCES, not listed anywhere (this was a literal
+# `lightning|eco|speed` list until U17; the list is gone):
+#   1. the CLI's own non-aggregate modes, the literal `case` arm `lightning|eco`
+#      whose refusal path is bondctl `mode_usage`;
+#   2. every aggregate mode AGG_SCHED_TABLE claims, asked through the DEFAULT
+#      arm of that case, which execs the xctl bin. The arm that ANSWERS is
+#      bond-xctl `_sched` -- NOT bondctl `_sched`, which is a read-only
+#      passthrough kept for bond-ecod and is never entered by setting a mode.
+#      U124 moved that table into a library: the table is
+#      deploy/p5/lib/xctl-probe.sh `AGG_SCHED_TABLE`, its accessors
+#      deploy/p5/lib/xctl-probe.sh `agg_sched_of` and
+#      deploy/p5/lib/xctl-probe.sh `agg_modes`, and bond-xctl is only the
+#      dispatch -- bond-xctl `_sched` and bond-xctl `_sched_modes`.
+# ANCHORS, NOT LINE NUMBERS (U186). Every cite in this header was a bare line
+# number until now, and one of them named the COMMENT above the second dispatch
+# arm instead of the arm. This file is in citation_check.py's SCOPE from U186,
+# so a bare number here FAILS the gate. The anchor's guarantee is NARROWER than
+# "a rename reddens it": R2 searches the WHOLE target file for the backticked
+# token, so renaming ONLY the second dispatch arm leaves its name in the comment
+# above it and the anchor stays GREEN; it reddens when the name leaves the file.
+# So a new aggregate scheduler is ONE row in that table and ZERO edits in
+# bondctl, and bondctl's accepted set is a legitimate SUPERSET of the
+# `implemented` rows here -- `max` below is accepted by the executor and carried
+# here as `unimplemented` ON PURPOSE, so the portal refuses it.
+#
+# `mode_wans` still has no fail-loud arm for an unknown mode -- its `case` ends
+# `*) R="$W"` (the default arm of deploy/p5/lib/xctl-probe.sh `mode_wans`) -- so a mode
+# value the executor does not implement is accepted SILENTLY and behaves like
+# `lightning`. ADR-003 rule 6 requires unknown/legacy mode values to fail loud;
+# the executor does not yet do it, so the PORTAL does: `unimplemented` values are
+# rendered (ADR-003 §"resulting ladder" has five positions) but refused with
+# `501 Not Implemented` (cgi/p5-portal:186; bar MODE-1 pins the code).
+# Bar PC-1 (portal harness) re-derives BOTH halves of bondctl's accepted set and
+# asserts CONTAINMENT, not equality: every `implemented` row here must be a mode
+# bondctl accepts (PC-1), and every mode bondctl accepts must have a row here
+# (PC-1b). PC-1c/PC-1d are its CONTROL -- they drop and add an AGG_SCHED_TABLE
+# row in an in-tree COPY of bond-xctl and assert each bar goes red (U120).
+#
+# fields: value|verb|status|note
+#   verb   = how the portal effects it. `mode` -> `bondctl mode <value>`;
+#            `lifecycle` -> `bondctl off`. NEVER an action, never an init script
+#            verb, never a second fact-writing path (m9-portal-design.md §1).
+#   status = implemented | unimplemented
+#
+# N-GENERIC: no source count, no source name, no rate appears in this file or in
+# any label. The modes are described by what they do to the source SET.
+direct|lifecycle|implemented|Bond off. Shaping stays. Not a `mode` fact value -- it is the lifecycle off state (m9-portal-design.md §2).
+eco|mode|implemented|Supervised. Selecting it ENABLES the auto policy; bond-ecod escalates to lightning on degradation and returns when clean.
+lightning|mode|implemented|Every live source, every packet duplicated, first copy wins. (ADR-003 §2 renamed `redundant` to this.)
+speed|mode|implemented|Aggregate: deliver the offered load over the fewest and fastest live sources. THE ONE AGGREGATE MODE THE PORTAL OFFERS. ADR-003 §1's split IS built below this page -- the datapath installs a deadline gate for `speed` and none for `max`, and the table maps both (U17, U17a). Cited at the CODE, not at prose about it: `speed` is `Rank: RankDeadlineHit` and `max` is `RankDrainOrder` in `schedPolicies` (p4-bondagg/daemon/sched.go:136 and :132), and `PullCore.SetSched` nils every link's gate unless the policy is `RankDeadlineHit` (pull.go:1745-1753). The earlier cite here, pull.go:804,1081, pointed at two COMMENTS that merely say so; re-resolved 2026-09-03. What is NOT built is the stored-fact migration, U17b, which is why `max` is not offered here.
+max|mode|unimplemented|ADR-003 §1 aggregate-everything after the U17 split. bondctl already ACCEPTS it -- the AGG_SCHED_TABLE carries a `max` row -- so it stays `unimplemented` HERE, and refused, until U17b migrates a stored `speed` fact to the new meaning. Until then `speed` is the shipped aggregate and offering both would be one control under two names.
