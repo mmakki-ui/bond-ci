@@ -1,0 +1,250 @@
+#!/bin/sh
+# shellcheck shell=sh
+# deploy/p5/shape-bounds — OBJ-F: DERIVE the shaper's rate bounds. U24.
+#
+# WHAT THIS IS. `shape-install` (U22a/E4) reads $BOND_DIR/shape_bounds as a
+# declared input -- "dl_min dl_base dl_max ul_min ul_base ul_max", 6 positive
+# kbit/s integers, one line -- and REFUSES if it is absent (owner: U24/OBJ-F,
+# shape-install:§INPUTS item 2). This is the producer of that fact.
+#
+# WHY THIS EXISTS. `p1-autorate/bootstrap-autorate.sh:23-35` HAND-PICKS all
+# six numbers (`WG_DL_MIN_KBIT=5000` etc.) as literal constants -- comments
+# there call them "field-derived 2026-08-23" for THAT box's THAT tunnel on
+# THAT day. Copying them into P5 would freeze one measurement into the
+# product and would still be a hardcode, just a borrowed one. `docs/INTENT.md`
+# OBJ-F names the actual rule:
+#   max = SUM of PER-SOURCE MEASURED DELIVERABLE RATE, never observed tunnel
+#         throughput -- under `speed` the aggregate is demand-driven, so a
+#         max derived from what the tunnel carried locks the shaper onto
+#         whatever ONE source happened to be used and the aggregate this
+#         product exists to reach is never discovered (self-defeating).
+#   min = a SERVICE REQUIREMENT (a floor is a legitimate labelled constant,
+#         `m9-portal-design.md:91`), but it YIELDS when proven unachievable:
+#         "at min and still bloated" means the floor sits above true
+#         capacity and the shaper would otherwise sit inert forever.
+#   Time-scale separation is MANDATORY: bounds change rarely, on events; the
+#   fast loop (autorate's own AIMD) is untouched by this file. Precedent
+#   this codebase already paid for: Ĉ vs AIMD rateKb conflation oscillated
+#   (HANDOFF "CRITICAL invariant").
+#
+# WHAT THIS DOES NOT DO, deliberately (checked against the no-arbitrary-
+# constants rule, not merely intended):
+#   * it does not pick a number. Two facts are DECLARED inputs, and it
+#     refuses -- loudly, precisely, changing nothing -- when either is
+#     absent. See §INPUTS.
+#   * it does not derive max from tunnel throughput. There is no such read
+#     anywhere in this file.
+#   * it does not touch cake-autorate, sqm, or the management path. It only
+#     writes $BOND_DIR/shape_bounds -- shape-install's declared input, one
+#     file, one fact.
+#   * it does not implement "min yields when proven unachievable" as a
+#     control loop. See §NOT-IMPLEMENTED -- naming it precisely rather than
+#     approximating it with an invented threshold.
+#
+# §INPUTS
+#   1. $BOND_DIR/agg_link_rates -- MAX's source, owner: the datapath's
+#      read-only stats (M9/`m9-portal-design.md` names "a read-only
+#      localhost stats endpoint on the Go daemon for live numbers";
+#      NOT STARTED, `p5-status-map.md:189`). Contract this file DECLARES,
+#      so the producer has a target the moment it exists, rather than this
+#      unit inventing a second, incompatible one later:
+#        one line per live source: "<name> <dl_kbps> <ul_kbps>"
+#        both positive integers, kbit/s, MEASURED deliverable rate (what a
+#        source actually carried under load), never a link's nominal/
+#        advertised speed.
+#      NO LIVE PRODUCER EXISTS TODAY. Checked, not assumed: no file in
+#      `p4-bondagg/daemon/*.go` writes a stats file or opens a stats
+#      listener -- `pull.go` states its own delivered-rate estimator is "a
+#      placeholder" pending E1 (`pull.go:163-164`), and no `net.Listen` for
+#      a stats endpoint exists in the module. So on a box without a running
+#      P5 datapath (today, everywhere), this file has no ONGOING source.
+#      NOT the same as "no measurement has ever existed", though: G1/E1
+#      (`docs/knowledge/inventory/2026-08-30-e1-probe-verdict.txt`, ROADMAP
+#      "G1/E1 ANSWERED") measured real per-source throughput on THIS client
+#      on 2026-08-30 -- eth1/usb0/apcli0 at 10329241/2623258/1688497 B/s.
+#      That is a genuine on-box measurement, not invented -- but it is
+#      UPLINK-ONLY (a TCP upload to an external sink), a ONE-SHOT snapshot
+#      not an ongoing feed, and the probe's own text says some links "may
+#      not have saturated". Feeding it into $RATES_FILE would be silently
+#      upgrading a single caveated sample into a standing fact the format
+#      above does not distinguish from a live measurement, so this script
+#      does not read that file directly or auto-seed from it. It is named
+#      here as a CANDIDATE an operator could hand-transcribe (uplink column
+#      only; downlink still has no measurement at all), not as a producer
+#      this script trusts on its own. Until an ongoing source exists, this
+#      script REFUSES for MAX (exit 3), naming the absent file and its
+#      producer, rather than substituting a guess.
+#   2. $BOND_DIR/shape_min -- MIN's source, an OPERATOR-DECLARED requirement:
+#      one line, "<dl_min_kbps> <ul_min_kbps>", positive integers. Not
+#      derived, because a service floor is a POLICY input, not a
+#      measurement -- the guardrail's own text: "a service floor... is
+#      legitimate and must be labelled as such" (`m9-portal-design.md:91`).
+#      Absent => refuse (exit 3). P1's 5000/5000 is NOT defaulted to here;
+#      see the header note above.
+#
+# BASE -- a DERIVED choice, named so it can be reviewed, not an invented
+# number: base = min, for both directions. Rationale: base is a resting
+# START point, not a bound -- cake-autorate's own AIMD (`high_load_thr`,
+# `shaper_rate_max_adjust_up_load_high`, both untouched here) climbs from
+# it every control tick, on the order of seconds. Starting at the floor
+# means an inaccurate base is corrected by that fast loop within its own
+# time constant, whereas an inaccurate min or max is a hard, silent cap
+# the fast loop can never see past. This is a design call by U24, not a
+# measurement -- flagged for Fable/Mo review rather than asserted as final.
+#
+# §NOT-IMPLEMENTED -- named, not approximated. "min yields when proven
+# unachievable" (`docs/INTENT.md` OBJ-F) needs a PERSISTENT-BLOAT-AT-FLOOR
+# signal: cake-autorate has been running at min_shaper_rate and still
+# reports bufferbloat for some sustained interval. That needs cake-
+# autorate's own log/state format READ AND CHARACTERIZED -- `grep -rn
+# 'bufferbloat_refractory\|bloat_detected' docs/` finds nothing; nobody has
+# read that format yet. Inventing a threshold ("3 consecutive detections",
+# "60 seconds") here would be exactly the arbitrary-constant this project
+# forbids, so this script does not attempt it. It is an explicit OPEN
+# QUESTION, carried to the ROADMAP, not a silent gap. What it DOES do
+# instead: if the declared min cannot be met by the CURRENT measured max
+# (see the ordering check below), it refuses to write a bound rather than
+# writing one that already violates its own floor -- surfacing the
+# unachievable case rather than hiding it, without claiming to have solved
+# the run-time yield behaviour.
+#
+# §WRITE SAFETY -- one fact file, written the same way the rest of this
+# tree writes facts: temp file in the SAME directory + `mv` (rename(2),
+# atomic), so a kill mid-write leaves the previous $BOND_DIR/shape_bounds
+# (or none) intact, never a half-written line. Idempotent: re-running with
+# the same inputs produces byte-identical output.
+#
+# NEVER EXECUTED ON EITHER BOX. Like the rest of P5. BUSYBOX-SAFE POSIX sh.
+# NEVER TOUCHES p1-autorate/ (read-only reference, cited above by line
+# number only) OR the management path (network/firewall/ssh/reboot/opkg).
+
+set -u
+
+TAG="shape-bounds"
+# /etc/p5, NOT /etc/bond. PORTED AT THE MERGE ONTO DEV (2026-09-07): this file
+# was written before the P5 namespace landed and carried `/etc/bond`, which is
+# now the OLD stack's directory -- a `p1|` quarantine row the uninstaller moves
+# aside. Every other script in deploy/p5 defaults BOND_DIR to /etc/p5, INCLUDING
+# `shape-install`, this file's only consumer, and `deploy/p5/facts` rows
+# shape_bounds under /etc/p5. Left at /etc/bond the producer would write into
+# the old stack, and shape-install would go on refusing for a missing input that
+# had just been written one directory over.
+BOND_DIR="${BOND_DIR:-/etc/p5}"
+RATES_FILE="${RATES_FILE:-$BOND_DIR/agg_link_rates}"
+MIN_FILE="${MIN_FILE:-$BOND_DIR/shape_min}"
+OUT_FILE="${OUT_FILE:-$BOND_DIR/shape_bounds}"
+
+log()  { echo "$TAG: $*"; logger -t "$TAG" "$*" 2>/dev/null; return 0; }
+die()  { echo "$TAG: REFUSING: $*" >&2; logger -t "$TAG" "REFUSING: $*" 2>/dev/null; exit "${2:-1}"; }
+
+# is_pos_int VALUE — true iff VALUE is one or more decimal digits, no sign,
+# no fraction (busybox `[ x -gt 0 ]` on a non-numeric string is itself an
+# error on some ash builds, so this is checked BEFORE any arithmetic test).
+is_pos_int() {
+    case "${1:-}" in
+        ''|*[!0-9]*) return 1 ;;
+        *) [ "$1" -gt 0 ] 2>/dev/null ;;
+    esac
+}
+
+# ---- MAX: sum of per-source measured deliverable rate ----------------------
+# Reads $RATES_FILE if present; sums column 2 (dl) and column 3 (ul). A
+# malformed line is refused rather than skipped -- skipping would silently
+# under-count the sum this bound depends on.
+sum_rates() {
+    _col="$1"          # 2=dl, 3=ul
+    _sum=0
+    _n=0
+    while IFS=' ' read -r _name _dl _ul; do
+        [ -n "${_name:-}" ] || continue
+        case "$_name" in '#'*) continue ;; esac
+        if [ "$_col" = 2 ]; then _v="$_dl"; else _v="$_ul"; fi
+        is_pos_int "$_v" || { echo "malformed rate for source '$_name': '$_v' (want a positive integer kbit/s)" >&2; return 1; }
+        _sum=$((_sum + _v))
+        _n=$((_n + 1))
+    done < "$RATES_FILE"
+    [ "$_n" -gt 0 ] || { echo "$RATES_FILE has no source lines" >&2; return 1; }
+    echo "$_sum"
+}
+
+compute() {
+    # --- MAX: refuse precisely if the measured-rate fact does not exist ----
+    if [ ! -s "$RATES_FILE" ]; then
+        die "MAX cannot be derived: $RATES_FILE is absent or empty.
+    OBJ-F's rule is max = sum of PER-SOURCE MEASURED DELIVERABLE RATE, never
+    observed tunnel throughput (that is circular under speed mode -- see
+    docs/INTENT.md OBJ-F). No ONGOING producer of that measurement exists on
+    this box yet: no P5 datapath stats endpoint (grep -c 'net.Listen'
+    p4-bondagg/daemon/*.go; pull.go:163-164's own 'placeholder' note). G1/E1
+    (docs/knowledge/inventory/2026-08-30-e1-probe-verdict.txt) measured real
+    UPLINK throughput once (10329241/2623258/1688497 B/s, eth1/usb0/apcli0)
+    but that is a one-shot caveated sample, not a standing fact -- see this
+    script's header before hand-seeding $RATES_FILE from it. This is an
+    OPEN QUESTION, not a value to invent -- carried on the ROADMAP as U24's
+    honest fail, not silently defaulted." 3
+    fi
+    _dlmax=$(sum_rates 2) || die "MAX (downlink) derivation failed: see above" 3
+    _ulmax=$(sum_rates 3) || die "MAX (uplink) derivation failed: see above" 3
+
+    # --- MIN: an operator-declared requirement, never invented -------------
+    if [ ! -s "$MIN_FILE" ]; then
+        die "MIN cannot be read: $MIN_FILE is absent or empty.
+    min is a SERVICE REQUIREMENT (a floor), which is a legitimate labelled
+    constant (m9-portal-design.md:91) but is an INPUT, not something this
+    script derives or defaults -- P1's 5000/5000 is that box's field
+    reading, not a fact about this install. Declare it: one line,
+    '<dl_min_kbps> <ul_min_kbps>', in $MIN_FILE." 3
+    fi
+    read -r _dlmin _ulmin < "$MIN_FILE"
+    # `if ! A || ! B`, NOT `A && B || die`. The two are behaviourally identical here
+    # (`die` exits, so the third arm can only run on a genuine refusal), but the second
+    # is SC2015 and the shellcheck gate this file meets for the first time at the merge
+    # onto dev runs `shellcheck -s sh` at DEFAULT severity with no exclusions
+    # (.github/workflows/shellcheck.yml) -- one info-level finding exits non-zero and the
+    # job goes red. Rewritten, not suppressed.
+    if ! is_pos_int "${_dlmin:-}" || ! is_pos_int "${_ulmin:-}"; then
+        die "$MIN_FILE must contain exactly two positive integers (kbit/s): '<dl_min> <ul_min>'" 3
+    fi
+
+    # --- ordering sanity: fail closed rather than write an invalid bound ---
+    [ "$_dlmin" -le "$_dlmax" ] \
+        || die "measured downlink max ($_dlmax kbit/s, from $RATES_FILE) is BELOW the declared min ($_dlmin kbit/s, from $MIN_FILE) -- the service requirement is not met by any live source. Not written; this is OBJ-F's 'min yields when proven unachievable' case, which this script does not implement (see §NOT-IMPLEMENTED) -- surfacing it rather than writing a bound that violates its own floor." 4
+    [ "$_ulmin" -le "$_ulmax" ] \
+        || die "measured uplink max ($_ulmax kbit/s, from $RATES_FILE) is BELOW the declared min ($_ulmin kbit/s, from $MIN_FILE) -- same case as downlink above." 4
+
+    # --- BASE: derived = min (see header rationale), not invented ----------
+    _dlbase="$_dlmin"
+    _ulbase="$_ulmin"
+
+    printf '%s %s %s %s %s %s\n' "$_dlmin" "$_dlbase" "$_dlmax" "$_ulmin" "$_ulbase" "$_ulmax"
+}
+
+do_compute() {
+    _line=$(compute) || exit $?
+    _tmp="$OUT_FILE.new.$$"
+    printf '%s\n' "$_line" > "$_tmp" || die "cannot write $_tmp" 1
+    if [ -f "$OUT_FILE" ] && cmp -s "$_tmp" "$OUT_FILE"; then
+        rm -f "$_tmp"
+        log "unchanged: $_line"
+    else
+        mv "$_tmp" "$OUT_FILE" || { rm -f "$_tmp"; die "cannot place $OUT_FILE" 1; }
+        log "wrote $OUT_FILE: $_line"
+    fi
+    return 0
+}
+
+do_status() {
+    if [ -s "$RATES_FILE" ]; then echo "rates source: $RATES_FILE present"; else echo "rates source: $RATES_FILE ABSENT"; fi
+    if [ -s "$MIN_FILE" ]; then echo "min source:   $MIN_FILE present"; else echo "min source:   $MIN_FILE ABSENT"; fi
+    if [ -s "$OUT_FILE" ]; then
+        echo "current shape_bounds: $(cat "$OUT_FILE")"
+    else
+        echo "current shape_bounds: <none>"
+    fi
+}
+
+case "${1:-}" in
+    compute) do_compute ;;
+    status)  do_status ;;
+    *) echo "usage: shape-bounds compute|status" >&2; exit 2 ;;
+esac

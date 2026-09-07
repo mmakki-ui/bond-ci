@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Second layer behind the CGI's JSON escaper (injection surface INJ-2): no
+     inline script, no remote origin, nothing to connect to but this server. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; base-uri 'none'">
+<title>P5 portal</title>
+<style>
+ body { font: 14px/1.45 system-ui, sans-serif; margin: 0; padding: 1rem; max-width: 52rem; }
+ h1 { font-size: 1.1rem; margin: 0 0 .75rem; }
+ h2 { font-size: .95rem; margin: 1.4rem 0 .4rem; }
+ h3 { font-size: .85rem; margin: .9rem 0 .3rem; font-weight: 600; }
+ .card { border: 1px solid #bbb; border-radius: 6px; padding: .75rem; margin-bottom: .75rem; }
+ .card.danger { border-color: #b00; }
+ .intent { font-size: 1.4rem; font-weight: 600; }
+ .position { color: #a15c00; }
+ .muted { color: #666; }
+ .pending { color: #a15c00; font-size: .8rem; }
+ .mono { font-family: ui-monospace, monospace; font-size: .8rem; word-break: break-all; }
+ table { border-collapse: collapse; width: 100%; }
+ th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid #ddd; font-variant-numeric: tabular-nums; }
+ button { margin: 0 .3rem .3rem 0; padding: .3rem .6rem; }
+ button[disabled] { opacity: .45; }
+ #err { color: #b00; white-space: pre-wrap; }
+ #coex { color: #666; font-size: .8rem; margin-top: 1.2rem; }
+ pre { background: #f4f4f4; padding: .5rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<!-- CARD ORDER IS THE 2am QUESTION ORDER, and it is fixed HERE, first, before
+     the units that fill the cards land (U223 logs, U224 tunnel/shaping, U226
+     datapath, U228 tests/results/disruptive). Reading down the page:
+       who am I                    -> Session
+       what is it doing            -> State (intent/position, node, the two
+                                      controls, the last write's own words,
+                                      and the paths this CGI would call)
+       what does the box see       -> Sources
+       is the tunnel up            -> Tunnel
+       is the shaper attached      -> Shaping
+       what is the datapath doing  -> Datapath
+       what else steers it         -> Divergence
+       what did it say             -> Logs
+       ask it something            -> Probes
+       run something safe          -> Tests / Results
+       run something that hurts    -> DISRUPTIVE (last, and marked)
+     THE ids BELOW ARE THE CONTRACT. Later units bind to them by
+     getElementById and must not rename them; bar UI-1 asserts each exists
+     exactly once, and UI-1b that every id portal.js binds is present here. A
+     card whose unit has not landed keeps its heading and says 'not built on
+     this box' (portal.js renderPlaceholders) -- an empty card would read as a
+     healthy zero. -->
+<h1>P5 portal <span class="muted">— fact writer and viewer. Never a controller.</span></h1>
+
+<div class="card" id="authcard">
+  <b>Session</b>
+  <p class="muted" id="authnote"></p>
+  <input id="sid" size="36" placeholder="GL session id (32 hex)" autocomplete="off">
+  <button id="authgo">Use</button>
+</div>
+
+<!-- Everything below the Session card stays hidden until the box's own session
+     backend has accepted the id (no sid, or 403 -> Session card only). A page
+     of empty cards behind a refused session would look like a box with nothing
+     running on it. -->
+<div id="cards" hidden>
+
+<div class="card">
+  <h2>State</h2>
+  <div><span class="muted">Intent (what you chose)</span><br><span class="intent" id="intent">—</span></div>
+  <div id="posrow" hidden><span class="muted">Position (where the system is now)</span><br>
+    <span class="position" id="position">—</span></div>
+  <div class="muted">node: <span id="node">—</span> · auto: <span id="auto">—</span></div>
+
+  <h3>Mode</h3>
+  <div id="modebtns"></div>
+
+  <h3>Parameters</h3>
+  <div id="fields"></div>
+
+  <h3>Last write</h3>
+  <div class="muted" id="writedetail">—</div>
+
+  <h3>What this page would call</h3>
+  <div class="mono" id="resolved">—</div>
+</div>
+
+<div class="card">
+  <h2>Sources</h2>
+  <p class="muted">As the box declares them. Participation and priority are set in
+     GL's own interface configuration, not here — demote a source there and
+     <code>eco</code> follows.</p>
+  <button id="srcrefresh">refresh sources</button>
+  <table><thead><tr><th>interface</th><th>device</th><th>state</th><th>metric</th><th>metered</th></tr></thead>
+  <tbody id="sources"></tbody></table>
+</div>
+
+<div class="card">
+  <h2>Tunnel <span class="muted">(read-only)</span></h2>
+  <div id="tunnel"></div>
+  <pre id="tunnelout" hidden></pre>
+</div>
+
+<div class="card">
+  <h2>Shaping <span class="muted">(read-only)</span></h2>
+  <div id="qdisc"></div>
+  <pre id="qdiscout" hidden></pre>
+</div>
+
+<div class="card">
+  <h2>Datapath <span class="muted">(read-only)</span></h2>
+  <div id="stats"></div>
+  <pre id="statsout" hidden></pre>
+  <p class="muted">One click is one <code>p5-reconciler _stats</code>, which reads the
+     file the datapath renames into place on its own tick. The page has no timer:
+     the age shown is computed on the box from the file's own <code>ts=</code>,
+     never from this browser's clock, and fresh/stale comes from the cadence the
+     file states in <code>ival_ms=</code> rather than from a number kept here.
+     Throughput is a delta between two reads, so the first read has none.
+     Delivery-latency percentiles are not measured by the datapath and print
+     <code>absent</code>; a zero there would be a fabricated number.</p>
+</div>
+
+<div class="card">
+  <h2>Divergence</h2>
+  <div>kmwan mode: <b id="kmwan">—</b></div>
+  <p class="muted">failover is inert; a load-balance mode starts its tracker and
+     splits traffic underneath the tunnel (OBJ-H). GL ships a supervisor binary
+     named <code>eco</code> (<code>/usr/bin/eco</code>); it is unrelated to the
+     <code>eco</code> mode here.</p>
+</div>
+
+<div class="card">
+  <h2>Logs <span class="muted">(read-only tail of the box's ring)</span></h2>
+  <!-- logsrc is the enumerated source picker: U223 fills its options from
+       catalogue/logs and unhides it. logs carries the read button. -->
+  <select id="logsrc" hidden></select>
+  <div id="logs"></div>
+  <pre id="logout" hidden></pre>
+</div>
+
+<div class="card">
+  <h2>Probes <span class="muted">(read-only, enumerated)</span></h2>
+  <div id="probes"></div>
+  <pre id="probeout" hidden></pre>
+</div>
+
+<div class="card">
+  <h2>Tests <span class="muted">(read-only, enumerated)</span></h2>
+  <div id="tests"></div>
+  <pre id="testsout" hidden></pre>
+</div>
+
+<div class="card">
+  <h2>Results</h2>
+  <div id="results"></div>
+  <pre id="resultout" hidden></pre>
+</div>
+
+<div class="card danger">
+  <h2>DISRUPTIVE <span class="muted">(perturbs the datapath; each one confirms first)</span></h2>
+  <div id="disruptive"></div>
+  <pre id="disruptiveout" hidden></pre>
+</div>
+
+</div><!-- /#cards -->
+
+<div id="err"></div>
+
+<div id="coex">Reads GL via ubus/uci/logread; writes only /etc/p5 facts + reconcile.
+A firmware upgrade removes P5 entirely (re-run p5-install, re-declare
+/etc/p5/portal/port; pull results back first); GL is never modified.</div>
+
+<script src="portal.js"></script>
+</body>
+</html>
