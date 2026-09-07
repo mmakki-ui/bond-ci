@@ -1,0 +1,17 @@
+====================================================================================================
+PREDICTION iii: reverse ack loss 15%/35%, WITH/WITHOUT coarse pacing-silence floor. rig=MID-drop seeds=24
+====================================================================================================
+
+--- ack_loss = 15% ---
+  B floor ON  (rto=350)        gp=  61400 loss= 32.4%  p50= 504 p95= 608 p99= 618  tdrop=  594 qdrops=21444 late= 1531  c_lost=    0 c_probe=    0
+  B floor OFF (rto=None)       gp=     52 loss= 99.9%  p50= 529 p95= 622 p99= 632  tdrop=    1 qdrops=85376 late=    0  c_lost=    0 c_probe=    0
+  C floor ON  (probe=4)        gp=  75341 loss= 17.1%  p50= 421 p95= 596 p99= 629  tdrop=  630 qdrops= 8642 late= 1239  c_lost= 3342 c_probe=    0
+  C floor OFF (probe=0)        gp=  73968 loss= 18.6%  p50= 421 p95= 592 p99= 627  tdrop=  632 qdrops=10140 late= 1240  c_lost= 3279 c_probe=    0
+
+--- ack_loss = 35% ---
+  B floor ON  (rto=350)        gp=  34639 loss= 61.9%  p50= 513 p95= 611 p99= 619  tdrop=  559 qdrops=49930 late=  951  c_lost=    0 c_probe=    0
+  B floor OFF (rto=None)       gp=      0 loss=100.0%  p50=   0 p95=   0 p99=   0  tdrop=    0 qdrops=87614 late=    0  c_lost=    0 c_probe=    0
+  C floor ON  (probe=4)        gp=  74223 loss= 18.3%  p50= 422 p95= 594 p99= 628  tdrop=  624 qdrops= 9896 late= 1096  c_lost= 3214 c_probe=    0
+  C floor OFF (probe=0)        gp=  71958 loss= 20.8%  p50= 421 p95= 585 p99= 625  tdrop=  617 qdrops=11928 late= 1258  c_lost= 3517 c_probe=    0
+
+elapsed 313s
