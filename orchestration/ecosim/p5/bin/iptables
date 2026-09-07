@@ -1,0 +1,4 @@
+#!/bin/sh
+# fake iptables: the engage_verify silence window. Record only, always succeed.
+echo "iptables $*" >> "$ECOSIM_STATE/ledger"
+exit 0

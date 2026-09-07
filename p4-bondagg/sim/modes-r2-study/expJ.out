@@ -1,0 +1,82 @@
+  .. DEG-EDGE K1 seed 1/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K1 seed 2/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K1 seed 3/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K1 seed 4/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K1 seed 5/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K1 seed 6/6 demote=3.0 inj=0 (0s)
+== DEG-EDGE K1  demote(med)=3.0s  (n_demoted=6/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 0.50 0.47 0.49 0.49 0.48 0.51 0.49 0.49 0.48 0.47 1.00 1.00
+   call[2.5,6): loss=0.00% p50=12 p95=22 p99=42 dl50=99.3% frz=10ms gmax=48ms
+  .. DEG-EDGE K2 seed 1/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K2 seed 2/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K2 seed 3/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K2 seed 4/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K2 seed 5/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K2 seed 6/6 demote=3.0 inj=0 (0s)
+== DEG-EDGE K2  demote(med)=3.0s  (n_demoted=6/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 0.05 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+   call[2.5,6): loss=0.00% p50=14 p95=14 p99=14 dl50=100.0% frz=10ms gmax=8ms
+  .. DEG-EDGE K3 seed 1/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K3 seed 2/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K3 seed 3/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K3 seed 4/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K3 seed 5/6 demote=3.0 inj=0 (0s)
+  .. DEG-EDGE K3 seed 6/6 demote=3.0 inj=0 (0s)
+== DEG-EDGE K3  demote(med)=3.0s  (n_demoted=6/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 0.05 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+   call[2.5,6): loss=0.00% p50=14 p95=14 p99=14 dl50=100.0% frz=10ms gmax=8ms
+  .. DEG-MID  K1 seed 1/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K1 seed 2/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K1 seed 3/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K1 seed 4/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K1 seed 5/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K1 seed 6/6 demote=3.4 inj=0 (0s)
+== DEG-MID  K1  demote(med)=3.4s  (n_demoted=6/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 0.75 0.59 0.32 0.49 0.52 0.49 0.48 0.51 0.50 0.50 1.00 1.00
+   call[2.5,6): loss=0.00% p50=22 p95=108 p99=139 dl50=78.9% frz=12ms gmax=80ms
+  .. DEG-MID  K2 seed 1/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K2 seed 2/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K2 seed 3/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K2 seed 4/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K2 seed 5/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K2 seed 6/6 demote=3.4 inj=0 (0s)
+== DEG-MID  K2  demote(med)=3.4s  (n_demoted=6/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 0.68 0.59 0.16 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+   call[2.5,6): loss=0.00% p50=22 p95=78 p99=119 dl50=89.8% frz=15ms gmax=70ms
+  .. DEG-MID  K3 seed 1/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K3 seed 2/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K3 seed 3/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K3 seed 4/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K3 seed 5/6 demote=3.4 inj=0 (0s)
+  .. DEG-MID  K3 seed 6/6 demote=3.4 inj=0 (0s)
+== DEG-MID  K3  demote(med)=3.4s  (n_demoted=6/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 0.68 0.59 0.16 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+   call[2.5,6): loss=0.00% p50=22 p95=78 p99=119 dl50=89.8% frz=15ms gmax=70ms
+  .. DEG-LOSS K1 seed 1/6 demote=never inj=34 (0s)
+  .. DEG-LOSS K1 seed 2/6 demote=never inj=33 (0s)
+  .. DEG-LOSS K1 seed 3/6 demote=never inj=31 (0s)
+  .. DEG-LOSS K1 seed 4/6 demote=never inj=22 (0s)
+  .. DEG-LOSS K1 seed 5/6 demote=never inj=39 (0s)
+  .. DEG-LOSS K1 seed 6/6 demote=never inj=26 (0s)
+== DEG-LOSS K1  demote(med)=NEVER  (n_demoted=0/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00
+   call[2.5,6): loss=2.99% p50=12 p95=12 p99=12 dl50=97.0% frz=10ms gmax=0ms
+  .. DEG-LOSS K2 seed 1/6 demote=never inj=34 (0s)
+  .. DEG-LOSS K2 seed 2/6 demote=never inj=33 (0s)
+  .. DEG-LOSS K2 seed 3/6 demote=never inj=31 (0s)
+  .. DEG-LOSS K2 seed 4/6 demote=never inj=22 (0s)
+  .. DEG-LOSS K2 seed 5/6 demote=never inj=39 (0s)
+  .. DEG-LOSS K2 seed 6/6 demote=never inj=26 (0s)
+== DEG-LOSS K2  demote(med)=NEVER  (n_demoted=0/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00
+   call[2.5,6): loss=2.99% p50=12 p95=12 p99=12 dl50=97.0% frz=10ms gmax=0ms
+  .. DEG-LOSS K3 seed 1/6 demote=never inj=34 (0s)
+  .. DEG-LOSS K3 seed 2/6 demote=never inj=33 (0s)
+  .. DEG-LOSS K3 seed 3/6 demote=never inj=31 (0s)
+  .. DEG-LOSS K3 seed 4/6 demote=never inj=22 (0s)
+  .. DEG-LOSS K3 seed 5/6 demote=never inj=39 (0s)
+  .. DEG-LOSS K3 seed 6/6 demote=never inj=26 (0s)
+== DEG-LOSS K3  demote(med)=NEVER  (n_demoted=0/6)
+   prim share 2.6->5.4s/0.2: 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00
+   call[2.5,6): loss=2.99% p50=12 p95=12 p99=12 dl50=97.0% frz=10ms gmax=0ms
+TOTAL 1s
