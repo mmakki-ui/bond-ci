@@ -1,0 +1,88 @@
+rig: N2 MID(hidden-downstream) = 1 cellA(spotty, DROPS_A) + 1 eth(steady)
+nominal aggregate cap0 sum = 107000 kb/s ; T=9.0s SEEDS=24 target_ms=40.0 (paired seeds)
+
+  ...load=0.65 done (54.2s elapsed)
+  ...load=0.75 done (111.8s elapsed)
+  ...load=0.85 done (191.8s elapsed)
+  ...load=0.95 done (275.8s elapsed)
+
+================================================================================================================
+REPORT -- Dc vs pull / A(ewma cap) / oracle  (medians, 24 seeds, paired)
+================================================================================================================
+load   sched          gp   loss%   p50ms   p95ms   p99ms     res_tx   tshare
+----------------------------------------------------------------------------
+0.65   Dc          68794    0.96    20.6    72.1   108.4      12414    0.198
+0.65   pull        60578   12.79    81.6   210.0   233.0               0.253
+0.65   ewma        65848    5.20    77.8   175.0   226.0               0.198
+0.65   oracle      67309    3.10    76.8   121.8   196.0               0.189
+0.65   Dpp         68295    1.68                              16052    0.253  <- Dpp (BUG witness, native uncapped)
+
+0.75   Dc          76893    4.06    49.6   199.9   287.0      10356    0.201
+0.75   pull        69365   13.46    83.5   211.0   234.0               0.256
+0.75   ewma        75980    5.20    84.6   186.2   257.0               0.193
+0.75   oracle      76974    3.96    85.3   171.2   213.0               0.192
+0.75   Dpp         73480    8.32                              14192    0.256  <- Dpp (BUG witness, native uncapped)
+
+0.85   Dc          84307    7.19   108.5   362.5   390.0       7009    0.217
+0.85   pull        78682   13.38    86.3   217.0   241.0               0.248
+0.85   ewma        85083    6.33    96.8   328.5   357.0               0.202
+0.85   oracle      85454    5.92    95.0   285.9   315.0               0.202
+0.85   Dpp         79341   12.66                               8626    0.248  <- Dpp (BUG witness, native uncapped)
+
+0.95   Dc          91062   10.30   245.0   470.0   559.0       2903    0.235
+0.95   pull        74184   26.93   140.0   308.0   395.0               0.250
+0.95   ewma        91726    9.65   236.7   439.0   549.0               0.226
+0.95   oracle      93483    7.92   171.4   412.1   447.3               0.223
+0.95   Dpp         69333   31.71                               3015    0.250  <- Dpp (BUG witness, native uncapped)
+
+================================================================================================================
+TSHARE TIMELINE -- spotty-link (cellA) NATIVE assigned share vs load
+  the eviction-spiral watch: Dpp's known bug walks this 23%% -> 58%% as native
+  floods the deficit spotty link once its own cap is gone; Dc restores the cap.
+================================================================================================================
+load           Dc     Dpp(BUG)       pull       ewma     oracle
+0.65        0.198        0.253      0.253      0.198      0.189
+0.75        0.201        0.256      0.256      0.193      0.192
+0.85        0.217        0.248      0.248      0.202      0.202
+0.95        0.235        0.250      0.250      0.226      0.223
+
+Dc   tshare walk (max-min across 0.65..0.95) = 0.038 (3.8 pts)  series=['0.198', '0.201', '0.217', '0.235']
+Dpp  tshare walk (BUG witness, same range)    = 0.008 (0.8 pts)  series=['0.253', '0.256', '0.248', '0.250']
+ewma tshare walk (reference, same range)      = 0.033 (3.3 pts)  series=['0.198', '0.193', '0.202', '0.226']
+
+================================================================================================================
+PASS/FAIL
+================================================================================================================
+load=0.65 (moderate win survives capped native):
+  gp=68794  (target~68295, need>=67271 [-1.5%])  -> PASS
+  loss=0.96%  (need<=2.0%)                     -> PASS
+  0.65 OVERALL: PASS
+
+load=0.85 (priority damper holds vs ewma):
+  gp:   Dc=84307  ewma=85083  need>=0.99*ewma=84232    -> PASS
+  loss: Dc=7.19%  ewma=6.33%  need<=ewma+0.5=6.83%  -> FAIL
+  0.85 OVERALL: FAIL
+
+load=0.95 (priority damper holds vs ewma):
+  gp:   Dc=91062  ewma=91726  need>=0.99*ewma=90808    -> PASS
+  loss: Dc=10.30%  ewma=9.65%  need<=ewma+0.5=10.15%  -> FAIL
+  0.95 OVERALL: FAIL
+
+load=0.75 (no bar specified -- this is where the OLD static reserve knee'd;
+           reported here + an EXTENDED check using the same 0.99*ewma/+0.5pt
+           formula as 0.85/0.95, for continuity across the sweep):
+  gp:   Dc=76893  ewma=75980  (0.99*ewma=75220)   -> PASS [extended, informational]
+  loss: Dc=4.06%  ewma=5.20%  (ewma+0.5=5.70%) -> PASS [extended, informational]
+  0.75 OVERALL (extended, NOT part of the spec'd bar): PASS
+
+tshare drift (eviction-spiral bound):
+  Dc max tshare across sweep = 0.235  (need<=0.45, clear of Dpp's 0.256 bug ceiling) -> PASS
+  Dc walk=0.038 vs ewma walk=0.033  (need<=ewma_walk+0.15=0.183)                   -> PASS
+  Dpp (BUG witness) walk=0.008, series=['0.253', '0.256', '0.248', '0.250']  <- what an uncapped native looks like
+  TSHARE OVERALL: PASS
+
+================================================================================================================
+SUMMARY (spec'd bars):  0.65=PASS  0.85=FAIL  0.95=FAIL  tshare-drift=PASS  ==>  FAIL
+  (0.75 has no spec'd bar; extended informational check above: PASS)
+================================================================================================================
+elapsed 275.8s

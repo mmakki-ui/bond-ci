@@ -1,0 +1,13 @@
+=== EDGE stall severity: pull vs push vs B (build only showed push vs B) ===
+  none    pull gp= 90311 loss=0.6 p95=151 | push gp= 89577 loss=1.4 p95=161 | B gp= 89744 loss=1.2 p95=152
+  mild    pull gp= 90081 loss=0.8 p95=181 | push gp= 89463 loss=1.5 p95=201 | B gp= 89371 loss=1.6 p95=191
+  medium  pull gp= 90182 loss=0.7 p95=242 | push gp= 89436 loss=1.6 p95=291 | B gp= 89167 loss=1.9 p95=251
+  severe  pull gp= 90388 loss=0.5 p95=291 | push gp= 86880 loss=4.4 p95=461 | B gp= 88709 loss=2.4 p95=291
+
+=== Attack1: honest congestion-coupled reverse ack path (MID-drop, B w=50 rto350) ===
+  ideal ack (fixed prop)      gp= 86051 loss=5.3 p50=209 p95=335
+  rev_pen=  0ms jit=10ms         gp= 86143 loss=5.2 p50=237 p95=366
+  rev_pen= 50ms jit= 0ms         gp= 86792 loss=4.5 p50=211 p95=338
+  rev_pen=100ms jit= 0ms         gp= 86708 loss=4.6 p50=216 p95=353
+  rev_pen=200ms jit= 0ms         gp= 81091 loss=10.7 p50=360 p95=562
+  rev_pen=100ms jit=20ms         gp= 81163 loss=10.7 p50=397 p95=572
