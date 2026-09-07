@@ -1,0 +1,34 @@
+# deploy/p5/portal/catalogue/tests — the ENUMERATED on-box test list.
+#
+# m9-portal-design.md §3b: "Enumerated actions only. The runner exposes a fixed
+# list of named tests. It does NOT accept a command, a path, or a test name
+# interpolated into a shell."
+#
+# So the REQUEST supplies only a NAME, matched against column 1 by exact literal
+# match (the CGI's start_test), and the runner RE-VALIDATES it against this same
+# file before it resolves anything. The program is NOT in this file: column 3 is
+# a SYMBOLIC HEAD out of a closed set the runner carries in its own `case`, so a
+# catalogue edit -- or a corrupted catalogue -- cannot name a program to run.
+# Bar RUN-C1 asserts every head here is in that set; JOB-M2 shows what a runner
+# WITHOUT the closed case would do with a head this file could then supply.
+#
+# fields: name|class|head|bound|label
+#
+# CLASS is the HARD SPLIT (design §3b guard 1). `ro` rows are safe any time and
+# take no deadman; `disruptive` rows perturb the datapath, are confirmed by the
+# operator against the server's own text, are bounded in seconds and are rolled
+# back by p5-portal-restore whether they end or not. THIS FILE SHIPS NO
+# DISRUPTIVE ROW: the mechanism is built and barred here (U228), the two
+# lifecycle round trips are U229's rows and the E1 edge-vs-mid probe is U230's.
+# Until then the CGI answers 501 for the class, so a row added here without the
+# confirm path cannot be started from the page.
+#
+# BOUND is seconds, and it is REQUIRED for a disruptive row and EMPTY for a read-
+# only one -- the runner refuses a disruptive row with no bound rather than
+# invent a window (the p5-deadman `--after` rule: how long a disturbance may last
+# is not derivable from anything this product can measure, so it is declared).
+#
+# NO ARGV, NO PATH, NO TIMER: the label is operator text and the only thing the
+# page renders from this file besides the name and the class.
+accept|ro|ACCEPT||P5's own acceptance battery (`p5-accept`, F23). Phase A runs read verbs only; phase B builds a sandbox under one mktemp dir and removes it on exit -- it writes nothing in /etc/p5, starts and stops no service, and sends no packet (deploy/p5/bond-accept, "WHAT THIS CHANGES ON THE BOX"). Minutes, not seconds.
+converged_tick|ro|XCTL_TICK||Three `p5-reconciler reconcile` passes in a row on the live facts. A level-triggered reconciler on a converged box walks NO edge, so this is read-only in effect: pass 1 shows what it would do, passes 2 and 3 show it does nothing twice. On a box that is NOT converged it walks the one edge the facts already ask for -- the same edge any fact write would have walked.
