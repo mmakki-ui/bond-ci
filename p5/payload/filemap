@@ -1,0 +1,206 @@
+# p5/payload/filemap -- THE payload declaration. scripts/build-p5-package.sh
+# copies this file verbatim to <package>/payload/filemap, and p5-install reads
+# it there (p5/bin/p5-install:265-285).
+#
+# FORMAT, exactly as p5-install parses it: mode|role|src|dest
+#   mode  octal file mode, passed to `install -m`
+#   role  client | server | both -- a row whose role is neither `both` nor the
+#         installing box's role is SKIPPED, which is what makes one package
+#         serve both boxes without either being a special case
+#   src   path relative to the package's payload/ dir. It is the REPO path of
+#         the file (ADR-005 section 4: source paths do not change), or a build/
+#         path for something the builder produces rather than copies
+#   dest  absolute production destination, from ADR-005 section 4's map
+#
+# NO PADDING SPACES. p5-install splits on `|` with a raw `read` and does not
+# trim, so a column aligned with spaces becomes a mode/role/dest that carries
+# them.
+#
+# EVERY DEST HERE IS A DECLARED ROW IN p5/contract/paths, and p5-install
+# re-checks each one against contract/foreign, contract/namespace and
+# contract/paths at install time (p5_check_dest, p5-common.sh:658). A dest that
+# is not declared there is refused with exit 4 -- so this file cannot widen the
+# namespace, only fill it.
+#
+# WHAT IS DELIBERATELY NOT HERE. THE LIST BELOW IS MECHANICAL, NOT PROSE, and
+# that is the whole point of it (U176 folded into U211). Bar PK-4 in
+# p5/test/run.sh takes every regular file under deploy/, subtracts the src
+# column of the rows below, subtracts whatever scripts/build-p5-package.sh
+# copies out of deploy/ as a PACKAGE TOOL (parsed from the builder, never
+# hand-listed here, so the two cannot drift), and requires the remainder to be
+# matched by the EXCLUDE globs below -- and the unaccounted set must be EMPTY.
+# It also requires each file to be in EXACTLY ONE of the three, so a file that
+# starts riding in the package as a tool must lose its EXCLUDE line in the same
+# commit. So a new file under deploy/ is shipped, or it is deliberately not
+# shipped WITH A REASON, and there is no third state where nobody noticed.
+# Before PK-4 there was one: the three on-box validators sat in neither list,
+# and the only way to get any of them onto a box was scp (U176).
+#
+# It is PK-4 and not PK-1 because p5/test/run.sh already had a PK-1 (every file
+# a shipped program SOURCES is itself shipped -- the U124 xctl-lib defect). The
+# two are the same idea one level apart: PK-1 asks whether the payload is enough
+# for what it ships to RUN, PK-4 whether the payload is everything that should
+# be in it.
+#
+# FORMAT of an entry: `# EXCLUDE|<glob>|<reason>`. The glob is matched with a
+# POSIX `case`, where `*` spans `/`, so a `deploy/<dir>/*` entry covers every
+# depth beneath it. Not a detail: U176's first cut of this check tested only a
+# file's immediate parent and manufactured eight false findings out of the
+# portal alone, and invented work is how a real finding gets lost. (U217 ships
+# the portal, so that subtree glob is gone; the matcher rule is unchanged.)
+#
+# deploy/p5/shape-install and deploy/p5/shape/* have NO line here on purpose: since
+# U210 the BUILDER copies them into the package (<pkg>/bin/p5-shape-install and
+# <pkg>/shape/), which is account 2 above, and a file rides in exactly one account
+# (PK-4 named all three DOUBLE-COUNTED at the U210+U211 merge, 2026-09-05).
+# EXCLUDE|deploy/.gitkeep|placeholder that keeps the tree in git; not an artifact
+# EXCLUDE|deploy/baseline/MANIFEST.sha256|the frozen P1-P3 baseline's own pin. It is rollback evidence ABOUT the old stack, not a P5 file
+# EXCLUDE|deploy/p5/97-bond|the netifd hotplug hook. contract/paths leaves the two-digit priority UNSET on purpose (its `/etc/hotplug.d/iface/[0-9][0-9]-p5` glob row) -- choosing it is choosing an ordering against netifd's other hooks, which is E5's derivation to make and justify (p5/CONTRACT.md section 7, "What this contract does not settle", the hotplug-priority bullet -- cited by anchor, not line, per the U200 rule). The /etc/config/p5 row is withheld for the same class of reason: it is conditional on a decision E5 has not made
+# EXCLUDE|deploy/p5/facts|the fact LEDGER: a design-time table checked on the PC by deploy/p5/test-facts.sh. Nothing on a box reads it
+# EXCLUDE|deploy/p5/portal/README.md|the portal's own design/usage record, read in the repo. The other eight files under deploy/p5/portal/ are SHIPPED rows below (U217), so this is the only member of that subtree left with no destination; the whole-subtree glob it replaces went away in the same commit, because a file rides in exactly one account
+# EXCLUDE|deploy/p5/test-facts.sh|PC-side checker for the fact ledger above; it runs in the repo, never on a box
+# EXCLUDE|deploy/probe-capabilities.sh|operator-side measurement, run from the PC over ssh. It installs nothing and is not part of the product
+# EXCLUDE|deploy/server/p5-server-measure.sh|operator-side measurement of the server, run from the PC
+# EXCLUDE|deploy/server/mutant-check-p5-fw-deadman.sh|PC-side seeded A/B for the server firewall deadman
+# EXCLUDE|deploy/server/test-p5-fw-deadman.sh|PC-side test of the server firewall deadman
+# EXCLUDE|deploy/server/test-p5-server-footprint.sh|PC-side test of the server's memory footprint
+# EXCLUDE|deploy/server/test-p5-server-init.sh|PC-side test of the server's procd service
+#
+# ARCHITECTURE. The two Go binaries are built GOOS=linux GOARCH=arm64: both
+# boxes are aarch64 (.github/workflows/emulator-gate.yml:271-273 for the
+# GL-MT2500 server, :738 for the client). p5/CONTRACT.md section 7 ("What this contract does not settle", the architecture bullet -- cited by anchor, not line, per the U200 rule) says the
+# architecture choice is U28's and is expressed as filemap rows -- these two
+# rows are that expression.
+#
+# mode|role|src|dest
+
+# ---- the datapath: the client daemon and its procd service ----------------
+755|client|build/linux-arm64/p5-datapath|/usr/sbin/p5-datapath
+755|client|deploy/p5/init.d/bond-agg|/etc/init.d/p5-datapath
+
+# ---- the server daemon and its procd service ------------------------------
+# contract/paths:158 (/etc/init.d/p5-server) is an E5-RESERVED row, and reserved
+# is not a bar: p5_check_dest admits it exactly as it admits the other reserved
+# rows shipped above (/etc/init.d/p5-datapath, /usr/sbin/p5). The source is
+# deploy/server/init.d/p5-server, whose own header (:4-6) names that dest and
+# that contract row. Without this row --role server would place a daemon with no
+# service. The step that places it now is S2 in docs/deploy-p5-server.md section 6 -- the p5-install --package/--role server row, "this is what places" the two server paths -- NOT the hand delivery this line used to cite as S3, which U174 deleted when it rewrote section 6 onto the package (U200: anchor, never a line number).
+755|server|build/linux-arm64/p5-server|/usr/sbin/p5-server
+755|server|deploy/server/init.d/p5-server|/etc/init.d/p5-server
+
+# ---- the client control plane --------------------------------------------
+755|client|deploy/p5/bondctl|/usr/sbin/p5
+755|client|deploy/p5/bond-xctl|/usr/sbin/p5-reconciler
+# U18: M3, the agg-controller. The reconciler INVOKES it (bond-xctl `aggctl`), so
+# it is a mode 755 program beside the reconciler rather than a lib row below --
+# and it is not optional: without it every feeder guard fails closed and no
+# aggregate edge can be walked. A package that placed the reconciler and not this
+# would install a box that never engages.
+755|client|deploy/p5/bond-aggctl|/usr/sbin/p5-aggctl
+755|client|deploy/p5/bond-ecod|/usr/sbin/p5-ecod
+755|client|deploy/p5/bond-watchdog|/usr/sbin/p5-watchdog
+755|client|deploy/p5/init.d/bond-ecod|/etc/init.d/p5-ecod
+755|client|deploy/p5/init.d/bond-watchdog|/etc/init.d/p5-watchdog
+
+# ---- product data: read-only, version-locked, NOT configuration ----------
+644|client|deploy/p5/bond.dag|/usr/lib/p5/dag
+644|client|deploy/p5/lib/xctl-lock.sh|/usr/lib/p5/xctl-lock.sh
+644|client|deploy/p5/lib/xctl-probe.sh|/usr/lib/p5/xctl-probe.sh
+644|client|deploy/p5/lib/xctl-actions.sh|/usr/lib/p5/xctl-actions.sh
+644|client|deploy/p5/lib/xctl-shape.sh|/usr/lib/p5/xctl-shape.sh
+644|client|deploy/p5/lib/xctl-dag.sh|/usr/lib/p5/xctl-dag.sh
+
+# ---- the on-box validators (G6/F23, U176 folded into U211) -----------------
+# THE THREE TOOLS THAT SAY WHETHER AN INSTALL IS GOOD WERE NOT IN THE PACKAGE.
+# Until these rows existed, deploy/p5/bond-accept -- which IS feature F23,
+# "validates a P5 install on the box" -- the client preflight and the server
+# preflight were in NEITHER the payload nor the exclusion list, so the only way
+# to run any of them on a box was to scp it by hand: the exact hand-copy path
+# the package exists to replace, and the one p5-install refuses for every other
+# file because no contract row declared a destination (U176).
+#
+# THE PREMISE THAT HELD IT OPEN WAS FALSE, and it is worth naming because it is
+# what made a three-row change look like a contract change: U176's row said
+# "adding an install destination widens the namespace p5-install enforces".
+# contract/namespace's `both|/usr/sbin/p5-*` row already admits all three names.
+# These rows FILL that namespace; they do not widen it, and NS-2..NS-5 do not
+# move.
+#
+# TWO PREFLIGHT NAMES, not one destination with two roles: the package
+# builder's duplicate check keys on the DEST column alone ("two filemap rows
+# claim the same destination"), so one dest carrying a client row and a server
+# row would abort the build.
+#
+# ROLE SPLIT. p5-accept and p5-client-preflight are client-only: the acceptance
+# runner drives the client's datapath, and the client preflight REFUSES without
+# /etc/p5/transport.key, which makes it a post-install pre-switch check on the
+# client. p5-server-preflight is server-only and read-only; it is ALSO run
+# BEFORE the install, straight out of the unpacked package
+# (`sh $PKG/payload/deploy/server/p5-server-preflight.sh`), which the package
+# layout allows because payload/ carries every file at its repo path.
+# Installing it as well is what lets an operator re-run it months later on a
+# box whose /tmp no longer holds the package.
+755|client|deploy/p5/bond-accept|/usr/sbin/p5-accept
+755|client|deploy/p5/p5-client-preflight.sh|/usr/sbin/p5-client-preflight
+755|server|deploy/server/p5-server-preflight.sh|/usr/sbin/p5-server-preflight
+
+# ---- E4 shaping: the controller (U210) ------------------------------------
+# Placed DISABLED like every other init script here; activation is the DAG's
+# (act_shape_apply), and the leaves refuse to drive it unless it carries the
+# P5 ownership marker on its line 3. The dest is P5's own name: the old
+# spelling /etc/init.d/cake-autorate is P1's live service and a `p1|` row in
+# contract/foreign, which p5_check_dest consults BEFORE the namespace, so a row
+# at that dest is exit 4 (that is bar SH-10b's seed, and this unit's seed A).
+755|client|deploy/p5/init.d/p5-shape|/etc/init.d/p5-shape
+
+# ---- the portal (F17, U217) -----------------------------------------------
+# Mo decided 2026-09-05 that the portal is built before deployment. That is the
+# ONE decision docs/FEATURES.md F17 named -- a second uhttpd listener on the
+# client -- and it covers all eight rows below. Nothing about the portal's
+# behaviour changed to produce them: not a line of cgi/, lib/, www/, catalogue/
+# or init.d/p5-portal moved.
+#
+# THE EXCLUDE GLOB `deploy/p5/portal/*` LEFT THE HEADER IN THIS SAME COMMIT.
+# PK-4's rule is EXACTLY ONE account per file, so a subtree that starts shipping
+# has to lose its exclusion in the commit that ships it or the bar names all
+# eight DOUBLE-COUNTED. deploy/p5/portal/README.md is the one member of the
+# subtree that still ships nowhere, so it kept a line of its own -- the glob was
+# replaced by a file, not deleted.
+#
+# THE CGI'S DEST IS www/cgi-bin/p5-portal AND NOT cgi/p5-portal, and the reason
+# is mechanical rather than stylistic: the init script starts uhttpd with
+# `-h $DOCROOT -x /cgi-bin`, DOCROOT is /usr/lib/p5/portal/www
+# (deploy/p5/portal/init.d/p5-portal:30,74), and uhttpd resolves the CGI prefix
+# UNDER the docroot -- while the shipped page fetches the RELATIVE url
+# `cgi-bin/p5-portal` (deploy/p5/portal/www/portal.js:15). So $DOCROOT/cgi-bin/
+# p5-portal is the only destination at which the shipped page can reach the
+# shipped CGI. deploy/p5/portal/README.md's Install section names both routes --
+# "symlinked or installed at <docroot>/cgi-bin/p5-portal" -- and this is the one
+# p5-install can express: it places FILES and records them by sha256, so a
+# symlink would be a path nothing recorded and --remove would leave behind. The
+# CGI resolves its library from $P5_PORTAL_DIR, never from its own directory
+# (deploy/p5/portal/cgi/p5-portal:30), so the destination costs it nothing.
+#
+# PLACED DISABLED. p5-install enables nothing, here or anywhere: /etc/rc.d/
+# S??p5-portal is written by `/etc/init.d/p5-portal enable`, which is an
+# operator step. Two independent things keep an un-configured box quiet -- the
+# absent rc.d flag, and the init script's own refusal to start with no
+# /etc/p5/portal/port declared (init.d/p5-portal:57-59).
+755|client|deploy/p5/portal/cgi/p5-portal|/usr/lib/p5/portal/www/cgi-bin/p5-portal
+755|client|deploy/p5/portal/init.d/p5-portal|/etc/init.d/p5-portal
+644|client|deploy/p5/portal/lib/portal-lib.sh|/usr/lib/p5/portal/lib/portal-lib.sh
+644|client|deploy/p5/portal/catalogue/fields|/usr/lib/p5/portal/catalogue/fields
+644|client|deploy/p5/portal/catalogue/modes|/usr/lib/p5/portal/catalogue/modes
+644|client|deploy/p5/portal/catalogue/probes|/usr/lib/p5/portal/catalogue/probes
+644|client|deploy/p5/portal/www/index.html|/usr/lib/p5/portal/www/index.html
+644|client|deploy/p5/portal/www/portal.js|/usr/lib/p5/portal/www/portal.js
+# ---- the on-box test runner (U228) -----------------------------------------
+# Three more files, same account, same role. 0755 for the two that are EXECUTED
+# -- the CGI execs the runner under setsid, and p5-deadman execs the restore
+# script after re-hashing it -- and 0644 for the catalogue it reads. There is NO
+# row for /usr/lib/p5/portal/results or anything under it: the artifact store is
+# created ON THE BOX by the CGI/runner (contract state=runtime) and IN-16's class
+# of check refuses a filemap row that tries to ship into a runtime path.
+644|client|deploy/p5/portal/catalogue/tests|/usr/lib/p5/portal/catalogue/tests
+755|client|deploy/p5/portal/bin/p5-portal-run|/usr/lib/p5/portal/bin/p5-portal-run
+755|client|deploy/p5/portal/bin/p5-portal-restore|/usr/lib/p5/portal/bin/p5-portal-restore

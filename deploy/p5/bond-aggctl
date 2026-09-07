@@ -1,0 +1,424 @@
+#!/bin/sh
+# bond-aggctl -- M3 agg-controller. The bonded feeder's LIFECYCLE, and nothing
+# else. Extracted from the reconciler by U18; installed as /usr/sbin/p5-aggctl
+# (p5/payload/filemap, p5/contract/paths).
+#
+# WHY IT EXISTS (docs/knowledge/design/module-architecture.md, the M3 row)
+#   M3 = "agg-controller · deploy/p5/ (to be EXTRACTED) · aggregate feeder
+#   lifecycle · interface: agg_env / AGG_SCHED". The same file records the
+#   boundary that has already been violated once: the aggregate datapath must
+#   NOT be fused into the controller that drives it. P2's review
+#   (docs/knowledge/design/p123-simplification-review.md, the "P3/P4 aggregate
+#   orchestration FUSED into P2 controller" finding) located the fusion in the
+#   deployed controller -- the feeder's service install, its engage/disengage
+#   strands and the MTU juggling all inside the field-proven P2 controller --
+#   and prescribed extraction into a separate `bondaggctl`. P5 did HALF of that:
+#   `bondctl` became a thin fact-writer (M5), but every line of the feeder's
+#   lifecycle moved sideways into the RECONCILER (M4). U124 later split that
+#   reconciler into a bin plus five SOURCED libraries -- a file-size split, in
+#   one process, with the module boundary exactly where it was. This file is the
+#   other half: the lifecycle leaves the reconciler's process, not just its file.
+#
+# WHAT THE EXTRACTION FIXES is a MODULE-BOUNDARY violation, not a fact-writer
+#   contract violation. The pre-extraction leaves were already reached only
+#   through `run_action` off a bond.dag row -- no caller ever issued a feeder
+#   action directly. Stated explicitly because "the feeder issues actions
+#   directly" would have been the more serious finding, and it is not what was
+#   there.
+#
+# FACT-WRITER CONTRACT -- where this controller sits. This controller is NOT a
+#   caller and does NOT reconcile: it is an ACTUATOR that only ever runs as a
+#   leaf of an edge the reconciler already chose. It reads no intent, observes
+#   no node, picks no target, and never calls back into the reconciler. Every
+#   verb below is a single idempotent effect. That is why it can be extracted
+#   without becoming another caller picking its own edge.
+#
+# N-GENERIC. The source list is an INPUT, positional, of any length. There is no
+#   primary, no [2], no head -1, no per-source constant and no branch on the
+#   count anywhere below; the only thing the count is compared against is the
+#   ARITY FLOOR (>= MIN_AGG_SOURCES), which has no upper bound.
+#
+# CONTEXT is passed by the caller, never discovered here: BOND_DIR, RUN_DIR,
+#   AGG_SVC, AGG_BIN, WG_DEV, IP. Source DISCOVERY is not this module's job (it
+#   is the reconciler's probe registry); this module is TOLD the ordered set,
+#   and told the facts that ride agg_env beside it. That is what keeps the
+#   reconciler's one-observation-per-pass property: a controller that re-probed
+#   would build against a different world than the one converged() compared, and
+#   NG7's order-stability bar would be a lie.
+#
+# WHAT DID **NOT** MOVE, deliberately: `node()`, `desired()`, `converged()`, the
+#   bond.dag walk, and every guard/action/verify NAME. bond.dag and
+#   orchestration/bond_model.py are untouched by this extraction.
+#
+# BUSYBOX-SAFE POSIX sh: no bashisms, no [[ ]], no arrays, no fractional sleep.
+
+BOND_DIR="${BOND_DIR:-/etc/p5}"
+RUN_DIR="${RUN_DIR:-/var/run/p5}"
+AGG_SVC="${AGG_SVC:-/etc/init.d/p5-datapath}"
+AGG_BIN="${AGG_BIN:-/usr/sbin/p5-datapath}"
+WG_DEV="${WG_DEV:-wgclient1}"
+# THE FEEDER'S SERVICE NAME, as `ubus call service list` and `pgrep` see it. It
+# is the basename of $AGG_BIN and is DERIVED from it rather than written twice:
+# the reconciler's own liveness probe is `svc_running p5-datapath`, and two
+# copies of that string in two modules is exactly the drift this extraction must
+# not introduce.
+AGG_NAME="${AGG_BIN##*/}"
+TAG="bond-aggctl"
+# `ip`, taken as a VARIABLE for the reason U69 measured: `ip` is a busybox
+# APPLET and busybox ash is a STANDALONE shell, so a bare name reaches busybox's
+# own applet and no caller can shim it from outside the process. The reconciler
+# resolves it by an explicit $PATH walk and hands the resolved value down; the
+# fallback here is the bare name, which is what a non-standalone shell would do.
+IP="${IP:-ip}"
+# MIN_AGG_SOURCES is the ARITY OF AGGREGATION, not a WAN count and not a "two
+# WANs" assumption. Aggregation means distributing ONE flow across MORE THAN ONE
+# source; with a single source there is nothing to distribute across and the
+# "aggregate" IS that source -- which is `eco`. The floor follows from the
+# DEFINITION of the operation, not from a measurement and not from a pick, it has
+# no upper bound, and it never rises with N. == bond_model.py MIN_AGG_SOURCES.
+# It lives HERE, with the aggregate it describes; the reconciler asks for it
+# (`arity-floor`) rather than keeping a second copy.
+MIN_AGG_SOURCES=2
+# AGG_W_NEUTRAL is the datapath's OWN per-path prior, not a number picked here:
+# `parseW` in p4-bondagg/daemon/main.go builds N weights and substitutes exactly
+# this value for any entry that is missing or unparseable. Emitting N copies of it
+# states "no prior" for every path, symmetrically. See agg_weights().
+#
+# Cited by SYMBOL, not by line number, and the number is why: `git show
+# <rev>:p4-bondagg/daemon/main.go | grep -n '^func parseW'` gave four different
+# values in five days across the branches that touched it.
+#
+# WHAT THE NUMBER IS, precisely: an ABSOLUTE per-path kb/s quantity, not a scale
+# and not a unit. In `Sched` it is floorKb, and rateKb is clamped to floorKb*0.25
+# on every decrease and set to floorKb*0.10 on a spike (p4-bondagg/daemon/paths.go,
+# NewSched and the AIMD decrease arms), so it is a hard lower bound on the send
+# rate in real kb/s. In `CapEst` it is the initial Chat and a prior*0.10 floor.
+# Scaling every entry by the same factor therefore CHANGES BEHAVIOUR; it does not
+# merely change units. It has no derivation on record and none is invented here.
+AGG_W_NEUTRAL=10000
+# MTU_AGG / MTU_NORMAL: the tunnel MTU strand, moved here with the feeder it
+# belongs to (P2's review: the MTU juggling inside the controller is part of what
+# must be extracted; a crash between engage and disengage strands the tunnel at
+# the bonded MTU). The VALUES are unchanged by this extraction -- a value change
+# is a behaviour change and this is a refactor.
+# OPEN QUESTION, reported not guessed (no-arbitrary-constants, ROADMAP U18b):
+# neither value is derived anywhere in the repo, and the DELTA does not reconcile
+# with the wire format -- MTU_NORMAL - MTU_AGG = 12, while the aggregate frame
+# header is 16 bytes (p4-bondagg/daemon/frame.go, `HdrLen`), so the reservation is
+# 4 bytes short of the header it is presumably reserving for. Owner is the
+# datapath/MTU work, and it needs the box to settle, not a guess here.
+MTU_AGG=1408
+MTU_NORMAL=1420
+
+# No log() here on purpose: this controller has nothing to narrate. Every verb is
+# a single effect whose outcome the reconciler already observes, so the only
+# things it writes are a `fail` (which the caller's converge() reads as an action
+# failure, exactly as the in-process `fail` did) and the agg_w arity WARN.
+#
+# `fail` EXITS 1. In the reconciler the identical `fail` also exited 1, inside the
+# per-action SUBSHELL converge() runs every leaf in (U116), and arrived at the
+# action loop as an ordinary non-zero status. Across a process boundary it arrives
+# the same way: exit 1 from this process -> non-zero from the wrapper -> the same
+# `_arc` converge() already keys on. The ONE declared difference is the syslog tag.
+fail() { echo "$TAG: FATAL: $*" >&2; logger -t "$TAG" "FATAL: $*" 2>/dev/null; exit 1; }
+mkrun() { [ -d "$RUN_DIR" ] || mkdir -p "$RUN_DIR" 2>/dev/null; }
+
+# ---- the feeder's OWN liveness probe ---------------------------------------
+# ONE implementation of "is the feeder running", owned by the module that owns
+# the feeder. Same shape as the reconciler's generic svc_running (ubus service
+# list, pgrep only as the off-box/no-ubus fallback -- D5).
+agg_running() {
+    if command -v ubus >/dev/null 2>&1; then
+        ubus call service list 2>/dev/null | grep -q "\"$AGG_NAME\"" && return 0
+        # ubus present but service not listed: treat pgrep as the tiebreak
+    fi
+    pgrep -f "/usr/sbin/$AGG_NAME" >/dev/null 2>&1
+}
+agg_enabled() { "$AGG_SVC" enabled 2>/dev/null; }
+
+# ============ the APPLIED RECORD (crash-consistent restart gating) ==========
+# WHAT WAS WRONG, before U125. `agg_env_changed` was a PRE-action crumb dropped
+# right after the `mv` and removed after the bounce. The engage row runs env_gen
+# then agg_enable then the restart, so a kill between the `mv` and the restart --
+# several actions wide, not a narrow window -- left agg_env NEW, the feeder
+# running the OLD config, and the crumb set. The next reconcile never read the
+# crumb, because converged() compares a fresh build against the FILE, sees them
+# equal, and short-circuits before any edge is walked. The feeder fed traffic
+# over a stale source set FOREVER.
+#
+# WHAT REPLACES IT. `$BOND_DIR/agg_env.applied` -- a byte copy of the config the
+# RUNNING feeder was started with, written only after a SUCCESSFUL restart.
+# Restart iff `! applied_current || ! agg_running`.
+#
+# WRITE-ATOMICITY is deliberately NOT needed: a torn or truncated copy compares
+# UNEQUAL, which forces a restart. That is the safe direction, so temp+rename
+# would buy nothing.
+apply_record() {   # $1 = basename under $BOND_DIR
+    cat "$BOND_DIR/$1" > "$BOND_DIR/$1.applied" 2>/dev/null
+}
+# same_file a b -- TRUE iff both exist and are byte-identical.
+#
+# THREE TIERS, and the ladder is load-bearing rather than defensive dressing.
+# Under the crumb, a missing `cmp` made converged() always false (an edge walked
+# every tick) but the crumb still gated the restart, so there was no bounce. Under
+# the applied record the SAME missing `cmp` would restart the feeder on every ~10s
+# tick. Whether GL.iNet's busybox ships `cmp` is NOT CHECKED (repo is not the
+# world), so "unknown" must never read as "differs".
+# The tier is PROBED BEHAVIOURALLY, not with `command -v`: under busybox's
+# standalone shell an applet name resolves without consulting $PATH, so `command
+# -v cmp` answers yes on a build whose `cmp` a caller has shimmed away. Comparing
+# a file with ITSELF is the functional probe. Cached per process.
+_SAMEFILE_TIER=""
+same_file() {
+    [ -f "$1" ] && [ -f "$2" ] || return 1
+    if [ -z "$_SAMEFILE_TIER" ]; then
+        # QUOTED (SC2209): these are TIER NAMES, not commands to substitute.
+        if cmp -s "$1" "$1" 2>/dev/null; then _SAMEFILE_TIER='cmp'
+        elif [ -n "$(cksum < "$1" 2>/dev/null)" ]; then _SAMEFILE_TIER='cksum'
+        else _SAMEFILE_TIER='shell'; fi
+    fi
+    case "$_SAMEFILE_TIER" in
+        cmp)   cmp -s "$1" "$2" 2>/dev/null ;;
+        # `[ -n "$_sf1" ]` first: a cksum that FAILS prints nothing on both sides,
+        # and "" = "" would read as SAME -- believing something wrong, the one
+        # direction this whole mechanism exists to rule out.
+        cksum) _sf1=$(cksum < "$1" 2>/dev/null)
+               [ -n "$_sf1" ] && [ "$_sf1" = "$(cksum < "$2" 2>/dev/null)" ] ;;
+        # Pure shell. The BYTE-COUNT term is load-bearing, not belt-and-braces:
+        # `$(cat)` strips trailing newlines from BOTH sides, so the content test
+        # alone would call two files that differ only in trailing newlines equal.
+        *)     [ "$(wc -c < "$1" 2>/dev/null)" = "$(wc -c < "$2" 2>/dev/null)" ] &&
+               [ "$(cat "$1" 2>/dev/null)" = "$(cat "$2" 2>/dev/null)" ] ;;
+    esac
+}
+applied_current() { same_file "$BOND_DIR/agg_env" "$BOND_DIR/agg_env.applied"; }
+
+# ---- agg_env generation ----------------------------------------------------
+# agg_weights: the AGG_W vector for $1 paths, POSITIONALLY aligned with AGG_PATHS.
+# Prints the vector on stdout; any complaint goes to stderr (build_agg_env captures
+# this, so a warning must never land inside agg_env).
+#
+# NOT DERIVED, and deliberately NOT INVENTED. The shipped value was `20000,15000`:
+# two numbers with no measurement behind them, AND 2-shaped -- so on the box's own
+# 4-WAN hardware paths 1 and 2 were PRIVILEGED by constants nobody measured while
+# paths 3..N silently fell through to the daemon's parseW default.
+#   - $BOND_DIR/agg_w (operator/measured) is USED, but only when it carries exactly
+#     N positive integers. A stale 2-entry file on a 4-source box would bind weights
+#     to the WRONG paths -- silently, positionally. Refusing that is U6.
+#   - Otherwise: N copies of AGG_W_NEUTRAL, the daemon's own per-path prior. Equal
+#     weights == NO prior, the honest statement when nothing has been measured.
+#     Emitting an EMPTY AGG_W would NOT achieve this IN THE MODE THIS FILE STARTS.
+#     The daemon has two weight-reading entry points and one that reads none:
+#       AGG_MODE=client|server -- the retained EIF PUSH reference. runClient and
+#         runServer both resolve parseW(env("AGG_W", "20000,15000"), N), so an
+#         unset or empty AGG_W re-applies the 2-shaped 20000,15000 and paths 0/1
+#         are privileged. Neither shipped stanza starts this mode any more (U111);
+#         it is reachable only by hand-editing agg_env's AGG_MODE, and the
+#         explicit N-copy vector stays load-bearing for that path.
+#       AGG_MODE=pull-client -- the E2a PULL datapath (U7). The shipped stanza
+#         STARTS this mode (U111); it reads no per-path weights at all: AGG_W
+#         unset, empty and set are the same state, and an AGG_W that is set is
+#         logged as IGNORED (pullrun.go, pullNoPrior). ROADMAP U36.
+# OPEN QUESTION (reported, not guessed): what a MEASURED per-source weight should
+# be. CapEst converges per path on-path; whether an a-priori weight speeds that
+# convergence or biases it is untested, and the box exposes no measurement this
+# generator could read at config-build time.
+agg_weights() {   # $1 = N
+    _wn=$1
+    # FIRST LINE ONLY: agg_env is sourced by the procd unit, so a multi-line
+    # agg_w must never be able to inject extra lines into it.
+    _wf=$(head -1 "$BOND_DIR/agg_w" 2>/dev/null)
+    if [ -n "$_wf" ]; then
+        _wt=$(printf '%s' "$_wf" | tr ',' '\n' | grep -c .)
+        _wg=$(printf '%s' "$_wf" | tr ',' '\n' | grep -c '^[1-9][0-9]*$')
+        if [ "$_wt" = "$_wn" ] && [ "$_wg" = "$_wn" ]; then
+            printf '%s\n' "$_wf"; return 0
+        fi
+        echo "$TAG: WARN: $BOND_DIR/agg_w has $_wt entr(ies) for $_wn paths (need $_wn positive integers) - using the neutral prior" >&2
+        logger -t "$TAG" "WARN: agg_w arity $_wt != paths $_wn - neutral prior" 2>/dev/null
+    fi
+    _wo=""; _wi=1
+    while [ "$_wi" -le "$_wn" ]; do _wo="${_wo}${AGG_W_NEUTRAL},"; _wi=$((_wi+1)); done
+    printf '%s\n' "${_wo%,}"
+}
+
+# build_agg_env: emit the DESIRED agg_env for the facts it is HANDED to $1. A PURE
+# generator (its only side effect is writing $1) so BOTH env-apply
+# (write-idempotency) and the reconciler's converged() (cmp a fresh build against
+# the live agg_env) share ONE builder -- the short-circuit compares apples to
+# apples across the process boundary exactly as it did in one process.
+#
+# N-GENERIC. Enroll EVERY source it is handed, in the order it is handed them --
+# the caller's mode_wans order (primary first, then by metric), the SAME order
+# Layer-1's `sources` tuple carries, since the artifact and the model are checked
+# against one bond.dag. The caller decides WHICH sources the mode enrols; that is
+# a MODE question answered by the probe registry that can see the box, not a
+# feeder-lifecycle question.
+#
+# ARITY: this builder refuses only the EMPTY set (N=0 -- nothing to feed). The
+# per-mode arity floor is the ENTRY guard `sources_for_mode`, not a term here, and
+# that split is deliberate: a box already running an aggregate mode whose live
+# source count has FALLEN below the floor must still be able to rebuild its env
+# over the sources that remain (the U19 churn-sustainment `switch`), and a builder
+# that failed on arity would take that recovery away.
+build_agg_env() {   # $1=out $2=listen $3=server $4=mode $5=sched $6=spotty $7=lightning $8..=sources
+    _out="$1"; _listen="$2"; _server="$3"; _mode="$4"; _sched="$5"; _sp="$6"; _lg="$7"
+    shift 7
+    _WN=0; _WP=""
+    for _w in "$@"; do
+        [ -n "$_w" ] || continue
+        _WN=$((_WN+1)); _WP="${_WP}${_w},"
+    done
+    _WP="${_WP%,}"
+    [ "$_WN" -ge 1 ] || fail "no live WAN underlays for mode $_mode"
+    _WV=$(agg_weights "$_WN")
+    # AGG_SPOTTY / AGG_LIGHTNING -- U15b's standing spotty-class duplicator
+    # (p4-bondagg/daemon/lightning.go). Emitted UNCONDITIONALLY, same as
+    # AGG_PATHS/AGG_W: an empty AGG_SPOTTY (nothing metered) or AGG_LIGHTNING=0
+    # (no operator fact) is the correct fail-safe and the daemon logs it either
+    # way -- this is not a guess, it is the honest DEFAULT.
+    # NAME COLLISION, stated: that env var is the SPOTTY-CLASS duplicator, NOT
+    # the `lightning` MODE. ADR-003 renames it AGG_SPOTTY_DUP; that rename spans
+    # the daemon and the operator fact, and is U133's to land.
+    #
+    # AGG_SCHED is the WHOLE of the between-modes difference at this layer,
+    # together with AGG_PATHS. It rides agg_env, so ANY mode flip is a byte change
+    # in agg_env -> agg_env differs from agg_env.applied -> `restart` bounces the
+    # datapath EXACTLY once, then the record is rewritten and the box is quiet.
+    # No new edge, no new node, no crumb.
+    # The RESOLUTION of mode -> scheduler stays with the reconciler's
+    # AGG_SCHED_TABLE (the ONE fix site, xctl-probe.sh agg_sched_of); this module
+    # is handed the answer, and emitting it is the whole of its part.
+    {
+        echo "AGG_LISTEN=$_listen"
+        echo "AGG_SERVER=$_server"
+        echo "AGG_PATHS=$_WP"
+        echo "AGG_W=$_WV"
+        echo "AGG_SCHED=$_sched"
+        echo "AGG_SPOTTY=$_sp"
+        echo "AGG_LIGHTNING=$_lg"
+    } > "$_out"
+}
+
+env_apply() {   # same args as build_agg_env minus <out>
+    # EFFECT-IDEMPOTENT: build agg_env into a temp and swap ONLY on a byte change
+    # (WRITE-idempotency, no file churn). This cmp-guard is about FILE CHURN, which
+    # is a different property from restart-gating: the restart is gated on `agg_env`
+    # vs `agg_env.applied` (see applied_current). A DELTA that walks the engage edge
+    # without a real env move (e.g. an ep-drift heal) leaves the two files equal ->
+    # `restart` is a no-op and only ep_agg re-pins.
+    mkrun
+    _TMP="$BOND_DIR/.agg_env.new"
+    build_agg_env "$_TMP" "$@"
+    if cmp -s "$_TMP" "$BOND_DIR/agg_env" 2>/dev/null; then
+        rm -f "$_TMP" 2>/dev/null
+    else
+        mv "$_TMP" "$BOND_DIR/agg_env"
+    fi
+    # applied_wans: the operator-facing record of WHICH sources are enrolled,
+    # written from the SAME argv build_agg_env just enrolled, so the two can never
+    # disagree. It moved here WITH the builder for exactly that reason -- keeping
+    # it on the reconciler side would have re-created the two-call-sites-agreeing-
+    # by-convention shape this extraction removes.
+    # The stored form is single-space (Layer-2 NG5 asserts "eth1 usb0 eth0"), and
+    # it is JOINED from the positional set here rather than re-split out of a
+    # newline list, so no IFS or glob exposure is created by the move.
+    shift 7
+    _AW=""
+    for _w in "$@"; do
+        [ -n "$_w" ] || continue
+        _AW="${_AW}${_AW:+ }${_w}"
+    done
+    if [ "$_AW" != "$(cat "$BOND_DIR/applied_wans" 2>/dev/null)" ]; then
+        printf '%s' "$_AW" > "$BOND_DIR/applied_wans"
+    fi
+    # RETURN 0 ON EVERY NON-FATAL PATH, deliberately. Non-zero from this process
+    # is reserved for `fail`, which is what the reconciler's converge() reads as an
+    # action failure; a swallowed `rm`/`printf` status must not masquerade as that.
+    return 0
+}
+
+# ---- feeder lifecycle ------------------------------------------------------
+# NO SERVICE-INSTALL VERB, and its absence is deliberate rather than an omission:
+# U126 deleted the on-demand fallback that wrote the procd unit at runtime,
+# because the PACKAGE places the one canonical stanza (p5/payload/filemap,
+# deploy/p5/init.d/bond-agg -> /etc/init.d/p5-datapath). Re-introducing a runtime
+# writer here would recreate the two-writers state Layer-2 AGG-L9-a/AGG-L9-b
+# exist to refuse.
+agg_restart() {
+    # EFFECT-IDEMPOTENT: ensure-running, not restart-always. Bounce the datapath
+    # ONLY when the config on disk differs from the config the RUNNING feeder was
+    # started with, OR the feeder is not running. An ep-drift heal (env unchanged,
+    # feeder up) is a NO-OP here -- no restart, no datapath silence.
+    # The record is written only on a SUCCESSFUL restart: a `.applied` written after
+    # a failed one would claim a config is running that is not, and the next
+    # reconcile would believe it. (`fail` exits, so the write below is unreachable
+    # on failure -- stated because it is the reason there is no explicit else.)
+    if ! applied_current || ! agg_running; then
+        "$AGG_SVC" restart || fail "$AGG_NAME start failed"
+        apply_record agg_env   # writes BOND_DIR/agg_env.applied
+    fi
+    return 0
+}
+agg_restart_if_enabled() {
+    # `switch` leaf (live mode change): same EFFECT-IDEMPOTENT guard as
+    # agg_restart, and the same disabled-box gate as env-apply-if-enabled. A no-op
+    # `switch` (mode unchanged) does not bounce a healthy datapath.
+    # A failed restart returns 1 HERE rather than calling `fail`: the pre-extraction
+    # function drew exactly that distinction (WARN + non-zero, not FATAL), and the
+    # `switch` row's remaining leaves are best-effort behind it.
+    agg_enabled || return 0
+    if ! applied_current || ! agg_running; then
+        if "$AGG_SVC" restart; then
+            apply_record agg_env   # writes BOND_DIR/agg_env.applied
+        else
+            echo "$TAG: WARN: restart failed" >&2
+            logger -t "$TAG" "WARN: restart failed" 2>/dev/null
+            return 1
+        fi
+    fi
+}
+
+# ================= entry point =============================================
+# CLOSED VERB SURFACE. An unknown verb EXITS NON-ZERO and prints the usage: a
+# controller that silently succeeded on one would let a mis-wired or renamed
+# delegation look healthy forever, and the reconciler's converge() would read
+# "action done" from a call that did nothing.
+case "${1:-}" in
+    env-build) shift; [ $# -ge 7 ] || fail "usage: env-build <out> <listen> <server> <mode> <sched> <spotty> <lightning> [src...]"
+               build_agg_env "$@" ;;
+    env-apply) shift; [ $# -ge 6 ] || fail "usage: env-apply <listen> <server> <mode> <sched> <spotty> <lightning> [src...]"
+               env_apply "$@" ;;
+    env-apply-if-enabled) shift
+               [ $# -ge 6 ] || fail "usage: env-apply-if-enabled <listen> <server> <mode> <sched> <spotty> <lightning> [src...]"
+               agg_enabled || exit 0
+               env_apply "$@" ;;
+    # arity-ok: the aggregate is DEFINED over this source set. `>=` has no upper
+    # bound, so N=3,4,...,k all pass identically -- an ARITY test, never a "two
+    # WANs" test. Counts the SAME list build_agg_env enrols.
+    arity-ok)  shift
+               _n=0; for _s in "$@"; do [ -n "$_s" ] && _n=$((_n+1)); done
+               [ "$_n" -ge "$MIN_AGG_SOURCES" ] ;;
+    # arity-floor: the floor itself, so the reconciler's per-mode floor
+    # (min_sources_for_mode) reads it from the module that owns it instead of
+    # keeping a second copy that can drift.
+    arity-floor) echo "$MIN_AGG_SOURCES" ;;
+    enable)    "$AGG_SVC" enable 2>/dev/null ;;
+    disable)   "$AGG_SVC" disable 2>/dev/null ;;
+    stop)      "$AGG_SVC" stop 2>/dev/null ;;
+    restart)   agg_restart ;;
+    restart-if-enabled) agg_restart_if_enabled ;;
+    running)   agg_running ;;
+    enabled)   agg_enabled ;;
+    installed) [ -x "$AGG_BIN" ] ;;
+    # applied-current: "the running feeder is fed by the config on disk". The one
+    # available statement about what is RUNNING, and converged()'s term for it.
+    applied-current) applied_current ;;
+    mtu)       case "${2:-}" in
+                 agg)    "$IP" link set "$WG_DEV" mtu "$MTU_AGG"    2>/dev/null ;;
+                 normal) "$IP" link set "$WG_DEV" mtu "$MTU_NORMAL" 2>/dev/null ;;
+                 *) echo "usage: $TAG mtu agg|normal" >&2; exit 1 ;;
+               esac ;;
+    *) echo "usage: $TAG env-build|env-apply|env-apply-if-enabled|arity-ok|arity-floor|enable|disable|stop|restart|restart-if-enabled|running|enabled|installed|applied-current|mtu agg|normal" >&2
+       exit 1 ;;
+esac
