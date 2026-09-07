@@ -1,0 +1,170 @@
+#!/bin/sh
+# /usr/lib/p5/portal/bin/p5-portal-restore — the portal's ROLLBACK, and the
+# `--restore-script` p5-portal-run pins into every disruptive deadman record.
+# BUSYBOX-SAFE POSIX sh. Takes NO arguments.
+#
+# IT IS SHA-PINNED. p5-deadman hashes this file at arm time and re-hashes it
+# before it runs (p5/bin/p5-deadman do_arm / fire_one): a tampered or truncated
+# rollback is REFUSED and the record is kept armed, because a rollback that runs
+# something other than what was reviewed is worse than no rollback. That is why
+# it takes no arguments -- there is nothing to pin about an argv the record does
+# not carry, so everything it needs is in the job record it finds for itself.
+#
+# WHY IT REPLAYS INTENT INSTEAD OF UNDOING ACTIONS. The portal is a fact writer
+# and the reconciler derives the edge (bond-xctl:161). So a rollback is not "put
+# the qdisc back, restart the feeder" -- it is: put the FACTS back to what they
+# were before the job, then ask the reconciler to converge. One code path, no
+# service verbs, and it is correct even if the job died halfway through a change.
+# The set of externals this file may reach is therefore small and fixed, and bar
+# RS-STATIC reads it off this file:
+#     kill -TERM / -KILL "-<pid>" of the job's own process GROUP, off the pid in
+#     the record (no `--`: neither dash nor busybox ash's kill BUILTIN takes it)
+#     $BONDCTL on | off | mode <a literal from catalogue/modes>
+#     $XCTL reconcile | node
+#     $LOGGER, so an operator can see what a rollback did on a box with no console
+# (U230 adds the E1 branch's `ip route del <sink>/32` + the PRIOR re-add; the bar
+# already names those two shapes and nothing else.)
+#
+# IT IS EXEMPT FROM PC-2's `ip route` / `kill ` scan BY NAME, together with
+# bin/p5-e1-probe, and the exemption is a literal list inside the bar -- adding a
+# third exempt file means editing the bar, which is the point.
+#
+# WHY IT NEVER KILLS THE GROUP IT IS RUNNING IN. Two callers: the deadman (timer,
+# cron boot limb, or a human `fire`), which runs in its own session, and
+# p5-portal-run's own normal end, which runs INSIDE the job group. Killing the
+# group there would kill the runner mid-footer and turn every clean disruptive
+# run into an INCOMPLETE artifact. So the kill is skipped when the record's pid
+# is this process's own process group -- a real safety property, not a test hook,
+# and it is read out of /proc rather than declared by an environment flag.
+
+set -u
+
+P5_PORTAL_DIR="${P5_PORTAL_DIR:-/usr/lib/p5/portal}"
+# shellcheck disable=SC1091
+. "$P5_PORTAL_DIR/lib/portal-lib.sh"
+
+LOGGER="${LOGGER:-logger}"
+say() {
+    "$LOGGER" -t p5-portal "restore: $*" 2>/dev/null
+    echo "restore: $*"
+}
+
+field() {   # $1 = key, $2 = file
+    sed -n "s/^$1=//p" "$2" 2>/dev/null | head -1
+}
+
+# ---- find the job that owes a rollback --------------------------------------
+# The newest record whose artifact never became a `.txt`. `.txt` exists only
+# after p5-portal-run wrote its `### ended` footer and renamed the file, so its
+# presence IS "that job finished"; there is no second flag to fall out of step
+# with it. Newest is decided on the id's own two clock fields, so no `stat` fork
+# and no dependence on mtimes a copy would rewrite.
+PICK=""; B_EP=-1; B_UP=-1
+for M in "$P5_RESULTS_DIR"/*.meta; do
+    [ -f "$M" ] || continue
+    I=${M##*/}; I=${I%.meta}
+    p5_run_id_sane "$I" || continue
+    [ -f "$P5_RESULTS_DIR/$I.txt" ] && continue
+    # Already put back once. The record is KEPT as evidence of an interrupted
+    # run (nothing in this product deletes an artifact), so the marker is what
+    # stops a later fire from replaying a rollback that already succeeded.
+    [ -n "$(field P5_PORTAL_RESTORED "$M")" ] && continue
+    EP=${I%%-*}; R=${I#*-}; UP=${R%%-*}
+    case "$EP$UP" in ''|*[!0-9]*) continue ;; esac
+    if [ "$EP" -gt "$B_EP" ] || { [ "$EP" -eq "$B_EP" ] && [ "$UP" -gt "$B_UP" ]; }; then
+        PICK="$M"; B_EP="$EP"; B_UP="$UP"
+    fi
+done
+
+if [ -z "$PICK" ]; then
+    # NO RECORD. There is no intent to replay -- so reconcile to the facts that
+    # are on disk and stop. That is not a weaker rollback: the facts are the
+    # desired state by definition, and the reconciler is the only thing entitled
+    # to derive an edge from them. This is the path a fresh install takes when a
+    # deadman record outlived the results directory (bar RUN-10).
+    say "no unfinished job record under $P5_RESULTS_DIR -- reconciling to the stored facts and nothing else"
+    "$XCTL" reconcile; RC=$?
+    say "node after reconcile: $("$XCTL" node 2>/dev/null) (reconcile rc=$RC)"
+    exit "$RC"
+fi
+
+ID=$(field P5_PORTAL_ID "$PICK")
+PID=$(field P5_PORTAL_PID "$PICK")
+BOUND=$(field P5_PORTAL_BOUND_S "$PICK")
+PRE_RC=$(field P5_PORTAL_PRE_RC "$PICK")
+PRE_MODE=$(field P5_PORTAL_PRE_MODE "$PICK")
+PRE_AUTO=$(field P5_PORTAL_PRE_AUTO "$PICK")
+PRE_NODE=$(field P5_PORTAL_PRE_NODE "$PICK")
+say "job $ID: pre rc=$PRE_RC mode=$PRE_MODE auto=$PRE_AUTO node=$PRE_NODE"
+
+# ---- 1. stop the job, unless it is the one calling us -----------------------
+# THE ORDER MATTERS AND IT IS THE HEAL RACE (portal plan cross-cutting defect 3):
+# nothing is put back while the job is still moving traffic, or the job's next
+# write lands on top of the rollback.
+case "$PID" in ''|*[!0-9]*) PID="" ;; esac
+MYPG=$(awk '{print $5}' "$P5_PROC/self/stat" 2>/dev/null)
+case "$MYPG" in ''|*[!0-9]*) MYPG="" ;; esac
+case "$BOUND" in ''|*[!0-9]*) BOUND=0 ;; esac
+if [ -n "$PID" ] && [ "$PID" = "$MYPG" ]; then
+    say "the job group -$PID is my own (called from the runner's normal end): not killing it"
+elif [ -n "$PID" ] && p5_job_alive "$PID"; then
+    # The runner is spawned with setsid, so its pid IS its process group id and
+    # the negated pid reaches every process the job started.
+    # NO `--` BEFORE THE NEGATED PID, and this is measured, not stylistic.
+    # `kill -TERM -- "-$PID"` is what POSIX's kill UTILITY takes, but this runs
+    # under the SHELL BUILTIN, and neither of the two shells this product runs on
+    # accepts it: dash answers `kill: Illegal number: -` (exit 2) and busybox ash
+    # answers `invalid number '--'`. Both accept `kill -TERM "-$PID"`, measured
+    # 2026-09-05 on Ubuntu 24.04 dash and busybox 1.36.1 with a setsid'd child.
+    # Written the POSIX way, the rollback would log a kill it never performed --
+    # and bar RUN-3 caught exactly that here before this line was fixed.
+    say "kill -TERM -$PID"
+    kill -TERM "-$PID" 2>/dev/null
+    # Wait for it to go, bounded by the job's OWN declared bound_s -- the number
+    # the operator already accepted as the longest this disturbance may last. No
+    # new constant is invented here.
+    W=0
+    while [ "$W" -lt "$BOUND" ] && p5_job_alive "$PID"; do
+        sleep 1
+        W=$((W + 1))
+    done
+    if p5_job_alive "$PID"; then
+        say "kill -KILL -$PID (still alive after ${BOUND}s)"
+        kill -KILL "-$PID" 2>/dev/null
+    fi
+else
+    say "job group -${PID:-?} is already gone"
+fi
+
+# ---- 2. put the FACTS back, then let the reconciler derive the edge ---------
+# `p5 on|off` is the lifecycle FACT (bondctl:114-115 writes/clears $BOND_DIR/rc
+# and reconciles); `p5 mode <v>` is the mode fact plus ADR-003 §2's auto rule,
+# which is bondctl's and is deliberately not re-implemented here. The recorded
+# mode is matched against catalogue/modes before it reaches a command line -- the
+# record is a file on the box and this file treats a file's contents with the
+# same suspicion the CGI treats a request's.
+if [ "$PRE_RC" = 1 ]; then "$BONDCTL" on; else "$BONDCTL" off; fi
+if [ "$PRE_AUTO" = 1 ]; then
+    # auto was on, so the intent was `eco` and the mode fact was ecod's POSITION,
+    # not a choice. Restoring the position would pin a mode the operator never
+    # picked (ADR-003 rule 4); restoring the INTENT is what puts the box back.
+    "$BONDCTL" mode eco
+else
+    M=$(p5_match_literal "$(p5_modes_all)" "$PRE_MODE") || M=""
+    [ -n "$M" ] && "$BONDCTL" mode "$M"
+fi
+"$XCTL" reconcile; RRC=$?
+
+# ---- 3. did it actually go back? -------------------------------------------
+# Exit 0 ONLY on a match. A non-zero exit makes p5-deadman KEEP the record armed,
+# so `check` tries again on the deadman's own cadence -- the timer, the boot limb
+# after a power cut, or a human. There is no waiting constant here because there
+# is no wait: the retry belongs to the mechanism that owns the deadline.
+NOW=$("$XCTL" node 2>/dev/null)
+if [ "$NOW" = "$PRE_NODE" ]; then
+    printf 'P5_PORTAL_RESTORED=%s\n' "$(date -u '+%s' 2>/dev/null || echo 0)" >> "$PICK"
+    say "node is back at '$NOW' (reconcile rc=$RRC)"
+    exit 0
+fi
+say "MISMATCH: node is '$NOW', the job started from '$PRE_NODE' (reconcile rc=$RRC) -- the deadman record is KEPT so this is tried again"
+exit 1
