@@ -1,0 +1,61 @@
+# deploy/p5/portal/catalogue/tests — the ENUMERATED on-box test list.
+#
+# m9-portal-design.md §3b: "Enumerated actions only. The runner exposes a fixed
+# list of named tests. It does NOT accept a command, a path, or a test name
+# interpolated into a shell."
+#
+# So the REQUEST supplies only a NAME, matched against column 1 by exact literal
+# match (the CGI's start_test), and the runner RE-VALIDATES it against this same
+# file before it resolves anything. The program is NOT in this file: column 3 is
+# a SYMBOLIC HEAD out of a closed set the runner carries in its own `case`, so a
+# catalogue edit -- or a corrupted catalogue -- cannot name a program to run.
+# Bar RUN-C1 asserts every head here is in that set; JOB-M2 shows what a runner
+# WITHOUT the closed case would do with a head this file could then supply.
+#
+# fields: name|class|head|bound|label
+#
+# CLASS is the HARD SPLIT (design §3b guard 1). `ro` rows are safe any time and
+# take no deadman; `disruptive` rows perturb the datapath, are confirmed by the
+# operator against the server's own text, are bounded in seconds and are rolled
+# back by p5-portal-restore whether they end or not. THE TWO LIFECYCLE ROUND
+# TRIPS SHIP AT THE FOOT OF THIS FILE (U229); the E1 edge-vs-mid probe is U230's
+# and is not here yet. The confirm path that gates them is the CGI's
+# `start_test` disruptive branch, and a row added here WITHOUT a matching arm in
+# the runner's closed head case still cannot run (unknown head -> exit 2, empty
+# artifact). Bar RUN-C2 refuses any disruptive row this file grows that the
+# harness's own literal list does not name.
+#
+# BOUND is REQUIRED for a disruptive row and EMPTY for a read-only one -- the
+# runner refuses a disruptive row with no bound rather than invent a window (the
+# p5-deadman `--after` rule). It is EITHER a literal number of seconds OR the
+# symbol `DERIVED` (U229), which tells the runner to compute the window from the
+# installed sources instead: for a lifecycle round trip the deadline is not an
+# opinion but the engage row's `retries` out of the installed bond.dag, times
+# verify_agg's own worst case, plus one watchdog supervision cycle. The runner
+# prints that arithmetic in the artifact header and bar DIS-5 recomputes it from
+# the same three files, so a DAG whose retries budget changes moves the bound
+# with no edit here -- and a typed number here would be a constant nobody would
+# ever re-derive.
+#
+# NO ARGV, NO PATH, NO TIMER: the label is operator text and the only thing the
+# page renders from this file besides the name and the class.
+accept|ro|ACCEPT||P5's own acceptance battery (`p5-accept`, F23). Phase A runs read verbs only; phase B builds a sandbox under one mktemp dir and removes it on exit -- it writes nothing in /etc/p5, starts and stops no service, and sends no packet (deploy/p5/bond-accept, "WHAT THIS CHANGES ON THE BOX"). Minutes, not seconds.
+converged_tick|ro|XCTL_TICK||Three `p5-reconciler reconcile` passes in a row on the live facts. A level-triggered reconciler on a converged box walks NO edge, so this is read-only in effect: pass 1 shows what it would do, passes 2 and 3 show it does nothing twice. On a box that is NOT converged it walks the one edge the facts already ask for -- the same edge any fact write would have walked.
+#
+# THE TWO DISRUPTIVE ROUND TRIPS (U229). Both are LAYER-2 classes that need only
+# a fact write plus a reconcile -- no service verb, no raw kill, no packet the
+# datapath would not otherwise send -- which is exactly why these two and not the
+# feeder kill R1 section 3b also listed: killing a service from a CGI is the
+# controller the portal must never become (design guard 1), so it is STRUCK.
+#
+# COLUMN 4 IS THE SYMBOL `DERIVED`, NOT A NUMBER, and that is the point. How long
+# a lifecycle round trip may take is not an opinion: it is the engage row's
+# `retries` out of the INSTALLED bond.dag, times verify_agg's own worst case,
+# plus one watchdog supervision cycle. The runner computes it at run time from
+# those sources and prints the arithmetic in the artifact header, so a DAG whose
+# retries budget changes moves the bound with no edit here -- and bar DIS-5
+# recomputes the same number from the same three files and reddens if the runner
+# ever stops agreeing with them. A typed number here would be a constant nobody
+# would ever re-derive, which is the shape this product refuses.
+lifecycle_roundtrip|disruptive|ROUNDTRIP_LIFECYCLE|DERIVED|Takes the bond OFF and puts it back ON. For the off half the tunnel runs DIRECT over one uplink: anything mid-flight that cannot survive a re-handshake drops, and throughput is one link's. The box is put back by replaying the lifecycle intent that was on it before, never by a service verb. Refused outright when the bond is already off -- engaging a box the operator left off is not a round trip.
+mode_roundtrip|disruptive|ROUNDTRIP_MODE|DERIVED|Pins a manual mode from the catalogue and then returns to what was in force. Under the supervised policy this STOPS bond-ecod (ADR-003 rule 4: a manual mode clears auto) and the restore re-enables `eco` rather than the position ecod had escalated to -- so bond-ecod is stopped and restarted, and its EWMA baseline restarts from cold. The restore is fact-exact, not state-exact.

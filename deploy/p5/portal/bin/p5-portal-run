@@ -1,0 +1,451 @@
+#!/bin/sh
+# /usr/lib/p5/portal/bin/p5-portal-run <name> <id> — the portal's DETACHED
+# executor. BUSYBOX-SAFE POSIX sh.
+#
+# WHAT THIS IS. The CGI does not run a test; it starts one and answers 202. This
+# file is what it starts, under `setsid` with no descriptor of the request's
+# (lib/portal-lib.sh p5_detach), so the job outlives both the response and
+# uhttpd's script timeout. It takes exactly two arguments and neither of them is
+# a program: a test NAME that must be a row in catalogue/tests, and an artifact
+# ID that must match the id grammar. Everything else it needs it reads out of the
+# catalogue and the library.
+#
+# THE FOUR GUARDS OF design §3b, and where each one lives:
+#   1. HARD SPLIT        class comes from the catalogue, not the caller. `ro` runs
+#                        straight; `disruptive` writes its pre-state and arms the
+#                        deadman BEFORE the tool starts, and rolls back after.
+#   2. BOUNDED + SELF-REVERTING  a disruptive row is armed with p5-deadman
+#                        --after <bound> --restore-script p5-portal-restore, so
+#                        the rollback happens whether this process reaches its end
+#                        or is killed, and survives a power cut through the
+#                        deadman's own boot limb. Arm fails -> NOTHING runs.
+#   3. ENUMERATED ONLY   the name is re-matched here against catalogue/tests
+#                        (the CGI already did; this is the defence in depth the
+#                        design asks for), and the program is resolved from a
+#                        CLOSED case over column 3's SYMBOLIC head. A head this
+#                        file does not know is exit 2 and an empty artifact.
+#   4. ARTIFACT          header first, tool output, footer last. A file with no
+#                        `### ended` line is an INCOMPLETE run, and that is the
+#                        only thing that distinguishes one -- so the footer is
+#                        written by the same code path that finishes the job, and
+#                        `.part` becomes `.txt` only after it.
+#
+# THIS FILE IS SCANNED BY BAR PC-2 like the CGI and the library: no init-script
+# action, no uci write, no wg, no tc, no ip, no `/tmp`, no eval. The only
+# externals it may reach are the tool its head resolves to, the reconciler, the
+# controller, p5-deadman and the restore script -- and bar RUN-7 asserts that
+# from the runtime ledger, not from this comment.
+
+set -u
+
+P5_PORTAL_DIR="${P5_PORTAL_DIR:-/usr/lib/p5/portal}"
+# The library is resolved at run time from the install root (the harness points
+# it at the shipped tree out of a worktree), so there is no static path for the
+# linter to follow. It is linted in its own right by the same gate.
+# shellcheck disable=SC1091
+. "$P5_PORTAL_DIR/lib/portal-lib.sh"
+# p5-common.sh, for p5_hash ONLY -- this product has exactly one sha256
+# implementation and one place that proves the tool computes sha256 against a
+# test vector (p5/lib/p5-common.sh:350-357). Sourced SECOND on purpose: it
+# defines p5_die/p5_log/p5_err with the EXIT-CODE meaning a non-CGI wants, and
+# they replace the library's HTTP-shaped p5_die, which must never run here (it
+# would print a header to a file and exit 0 on an error). Absent -> the sha lines
+# read `unavailable` and the run goes on: a missing library must not silently
+# turn into a missing artifact.
+# shellcheck disable=SC1090
+[ -r "$P5_COMMON" ] && . "$P5_COMMON"
+
+# ============================ THE DERIVED BOUND (U229) =======================
+# HOW LONG A DISRUPTIVE ROW MAY LAST IS NOT AN OPINION, and for the two lifecycle
+# round trips it is not a number anybody should type either. The window is the
+# time the executor itself may spend trying to put the box back:
+#
+#   bound_s = retries x verify_worst_s + cycle_s
+#
+#     retries        field 7 of the `engage` row of the INSTALLED DAG -- the
+#                    convergence budget the executor will actually spend before
+#                    it takes `onfail` (bond.dag `engage`, read here exactly as
+#                    lib/xctl-dag.sh `_dag_row_raw` reads it: comments dropped,
+#                    `awk -F'|'` on an 8-field row).
+#     verify_worst_s the worst case of ONE verify_agg attempt-set, transcribed
+#                    from lib/xctl-dag.sh `verify_agg`: 3 re-pin attempts, each
+#                    12 x `sleep 1` in the wg re-pin loop plus 3 hold checks of
+#                    (`ping -c 2 -W 3` = 2 x 3 s) + (`sleep 3`).
+#     cycle_s        one watchdog supervision cycle -- the cadence at which
+#                    something else on this box may move the node underneath the
+#                    job (deploy/p5/bond-watchdog `CYCLE`, read as its own
+#                    `${CYCLE:-N}` default rather than restated).
+#
+# TWO OF THE THREE ARE READ AT RUN TIME, so a DAG or a watchdog whose numbers
+# change moves the bound with NO edit here. The third is a transcription, and it
+# is gated: bar DIS-5 re-derives all three from the same files -- including
+# verify_agg's three loop bounds, its `ping -W` and its `sleep` -- and goes RED
+# if this expression stops agreeing with the code it claims to be reading. That
+# is the difference between a constant and a derivation nobody rechecks.
+DAG="${DAG:-/usr/lib/p5/dag}"
+P5_WATCHDOG="${P5_WATCHDOG:-/usr/sbin/p5-watchdog}"
+P5_VERIFY_WORST_S=$(( 3 * (12 + 3 * (2 * 3 + 3)) ))
+
+dag_retries() {   # field 7 of the engage row, or nothing
+    grep -v '^[[:space:]]*#' "$DAG" 2>/dev/null \
+      | awk -F'|' 'NF==8 && $1=="engage" {print $7; exit}'
+}
+wdog_cycle() {    # the watchdog's own CYCLE default, or nothing
+    # The sed script is single-quoted ON PURPOSE: ${CYCLE:-...} is the TEXT this
+    # is looking for inside another file, not something to expand here.
+    # shellcheck disable=SC2016
+    sed -n 's/^CYCLE="${CYCLE:-\([0-9][0-9]*\)}".*/\1/p' "$P5_WATCHDOG" 2>/dev/null | head -1
+}
+bound_derived() {  # prints the seconds; non-zero when a source could not be read
+    _bdr=$(dag_retries); case "$_bdr" in ''|*[!0-9]*) return 1 ;; esac
+    _bdc=$(wdog_cycle);  case "$_bdc" in ''|*[!0-9]*) return 1 ;; esac
+    printf '%s' "$(( _bdr * P5_VERIFY_WORST_S + _bdc ))"
+}
+bound_why() {      # the arithmetic, for the artifact header and for DIS-5
+    printf 'retries=%s (%s engage) verify_worst_s=%s (xctl-dag.sh verify_agg) cycle_s=%s (%s CYCLE)' \
+        "$(dag_retries)" "$DAG" "$P5_VERIFY_WORST_S" "$(wdog_cycle)" "$P5_WATCHDOG"
+}
+# The poll budget below is that same cycle and NOT a number of its own. `p5
+# on|off|mode` is synchronous -- bondctl writes the fact and calls the reconciler
+# in the same process (deploy/p5/bondctl, the `on)` and `off)` arms) -- so the
+# node is already where it is going when the verb returns. This poll exists for
+# the concurrent supervision tick, which is why one cycle is exactly the right
+# amount of patience and no more.
+POLL_MAX=$(wdog_cycle); case "$POLL_MAX" in ''|*[!0-9]*) POLL_MAX=0 ;; esac
+
+# ---- the read-only bound query (U229) ---------------------------------------
+# `p5-portal-run --bound <name>` prints the window a disruptive row declares and
+# exits. It runs no tool, writes no file, touches no fact and takes no lock. It
+# exists so the CGI's confirm dialog can quote the operator a NUMBER without this
+# product growing a SECOND implementation of the derivation above: one
+# implementation, two readers. The name is matched against the catalogue by the
+# same literal match every other entry point uses, so this arm widens no surface.
+if [ "${1:-}" = --bound ]; then
+    _qn=$(p5_match_literal "$(p5_cat_keys tests)" "${2:-}") || exit 2
+    _qb=$(p5_cat_field tests "$_qn" 4)
+    [ "$_qb" = DERIVED ] && { _qb=$(bound_derived) || exit 3; }
+    case "$_qb" in ''|*[!0-9]*|0) exit 3 ;; esac
+    printf '%s\n' "$_qb"
+    exit 0
+fi
+
+NAME=${1:-}; ID=${2:-}
+if [ -z "$NAME" ] || [ -z "$ID" ]; then
+    echo "usage: p5-portal-run <name> <id>" >&2; exit 2
+fi
+p5_run_id_sane "$ID" || { echo "p5-portal-run: refusing id '$ID'" >&2; exit 2; }
+
+# GUARD 3, half one: the name must BE a row. The catalogue's own copy of the
+# literal is what is used from here on; the argument is dropped.
+N=$(p5_match_literal "$(p5_cat_keys tests)" "$NAME") || {
+    echo "p5-portal-run: '$NAME' is not a row in catalogue/tests" >&2; exit 2; }
+CLASS=$(p5_cat_field tests "$N" 2)
+HEAD=$(p5_cat_field tests "$N" 3)
+BOUND=$(p5_cat_field tests "$N" 4)
+
+# GUARD 3, half two: THE CLOSED CASE. Column 3 is a symbol, and the program it
+# stands for is named here and nowhere else, so neither a catalogue edit nor a
+# corrupted file can introduce a program. Mutant JOB-M2 deletes this and shows a
+# catalogue-supplied head executing.
+case "$HEAD" in
+  ACCEPT)    TOOL="$P5_ACCEPT" ;;
+  XCTL_TICK) TOOL="$XCTL" ;;
+  # U229's two round trips (both disruptive). Their "tool" is the CONTROLLER --
+  # every step either one takes is `p5 on|off|mode`, and the reconciler derives
+  # the edge. That is what makes them fact writes and not a second lifecycle, and
+  # it is why the `### sha256` line below hashes bondctl for these rows: the
+  # thing whose bytes decide what happened IS bondctl.
+  ROUNDTRIP_LIFECYCLE) TOOL="$BONDCTL" ;;
+  ROUNDTRIP_MODE)      TOOL="$BONDCTL" ;;
+  *)         echo "p5-portal-run: unknown head '$HEAD'" >&2; exit 2 ;;
+esac
+
+case "$CLASS" in
+  ro|disruptive) ;;
+  *) echo "p5-portal-run: unknown class '$CLASS'" >&2; exit 2 ;;
+esac
+
+ART="$P5_RESULTS_DIR/$ID.part"
+FINAL="$P5_RESULTS_DIR/$ID.txt"
+META="$P5_RESULTS_DIR/$ID.meta"
+LABEL="portal-$N"
+[ -d "$P5_RESULTS_DIR" ] || mkdir -p "$P5_RESULTS_DIR" 2>/dev/null
+[ -w "$P5_RESULTS_DIR" ] || { echo "p5-portal-run: $P5_RESULTS_DIR is not writable" >&2; exit 5; }
+
+# The lock was taken by the CGI, which wrote its own `$!`. Write it again from
+# the job itself: `$!` is the session leader and so is `$$` here, but a CGI that
+# was killed between the take and the write would otherwise leave a lock with no
+# pid, which p5_job_take reads as LIVE for ever.
+printf '%s\n' "$$" > "$P5_JOB_LOCK/pid" 2>/dev/null
+
+now_epoch() { date -u '+%s' 2>/dev/null || echo 0; }
+now_up() {
+    _nu=$(p5_readfile "$P5_UPTIME"); _nu=${_nu%% *}; _nu=${_nu%%.*}
+    case "$_nu" in ''|*[!0-9]*) _nu=0 ;; esac
+    printf '%s' "$_nu"
+}
+hash_of() {
+    _ho=''
+    command -v p5_hash >/dev/null 2>&1 && _ho=$(p5_hash "$1" 2>/dev/null)
+    printf '%s' "${_ho:-unavailable}"
+}
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+
+# ---- guard 4: the header goes down BEFORE the tool runs ---------------------
+# A file that exists with a header and no footer is a run that was interrupted.
+# Written the other way round -- everything buffered and flushed at the end -- a
+# killed job leaves NOTHING, and "nothing" is indistinguishable from "never
+# started". The whole INCOMPLETE state depends on this order.
+{
+    echo "### job $N id=$ID class=$CLASS"
+    echo "### started $(now_epoch) $(now_up)"
+    echo "### box $(p5_readfile "$P5_SYSINFO_MODEL")"
+    echo "### version $(sed -n 's/^P5_VERSION=//p' "$P5_STAMP_FILE" 2>/dev/null | head -1)"
+    echo "### sha256 $(hash_of "$SELF") $(hash_of "$TOOL")"
+} > "$ART"
+
+RESTORE_STATE=n/a
+DM_STATE=n/a
+
+# ---- guards 1 + 2: the disruptive pre-roll ----------------------------------
+# ORDER IS THE PROPERTY: pre-state -> meta on disk -> ARM -> only then the tool.
+# Arming after the tool starts leaves a window in which the disturbance is live
+# and nothing on the box owes a rollback, which is precisely the state a box with
+# no console must never be in. The seed for bar RUN-8 moves the spawn above the
+# arm and the bar goes red.
+if [ "$CLASS" = disruptive ]; then
+    # `DERIVED` (U229) is resolved HERE, from the installed sources, and the
+    # arithmetic goes into the artifact. A source that cannot be read falls into
+    # the same refusal as a row with no bound at all: this file will not invent a
+    # window, and it will not fall back to a number either -- a fallback deadline
+    # is exactly the constant the derivation exists to abolish.
+    BOUND_WHY=''
+    if [ "$BOUND" = DERIVED ]; then
+        BOUND_WHY=$(bound_why)
+        BOUND=$(bound_derived) || BOUND=''
+    fi
+    case "$BOUND" in
+      ''|*[!0-9]*|0)
+        echo "### ended $(now_epoch) $(now_up) rc=2 restore=n/a deadman=no_bound" >> "$ART"
+        echo "p5-portal-run: disruptive row '$N' declares no bound_s -- refusing" >> "$ART"
+        [ -n "$BOUND_WHY" ] && echo "p5-portal-run: the derivation read $BOUND_WHY" >> "$ART"
+        mv "$ART" "$FINAL"; p5_job_release "$ID"; exit 2 ;;
+    esac
+    PRE_RC=0;   [ -f "$BOND_DIR/rc" ]   && PRE_RC=1
+    PRE_AUTO=0; [ -f "$BOND_DIR/auto" ] && PRE_AUTO=1
+    PRE_MODE=$(p5_raw_mode)
+    PRE_NODE=$("$XCTL" node 2>/dev/null)
+    {
+        echo "# p5 portal job record. Read by p5-portal-restore."
+        echo "P5_PORTAL_ID=$ID"
+        echo "P5_PORTAL_NAME=$N"
+        echo "P5_PORTAL_PID=$$"
+        echo "P5_PORTAL_BOUND_S=$BOUND"
+        echo "P5_PORTAL_PRE_RC=$PRE_RC"
+        echo "P5_PORTAL_PRE_MODE=$PRE_MODE"
+        echo "P5_PORTAL_PRE_AUTO=$PRE_AUTO"
+        echo "P5_PORTAL_PRE_NODE=$PRE_NODE"
+        echo "P5_PORTAL_ARTIFACT=$ART"
+    } > "$META"
+    echo "### pre rc=$PRE_RC mode=$PRE_MODE auto=$PRE_AUTO node=$PRE_NODE bound_s=$BOUND" >> "$ART"
+    # The arithmetic, in the artifact, so the operator reading a pulled-back file
+    # can see WHERE the deadline came from -- and so DIS-5 has something to
+    # compare its own recomputation against.
+    [ -n "$BOUND_WHY" ] && echo "### bound $BOUND = $BOUND_WHY" >> "$ART"
+    # --no-timer is passed THROUGH, never chosen: it is p5-deadman's own flag and
+    # it appears only when the harness's no-op sleep would make the timer fire at
+    # t=0 (P5_PORTAL_DM_TIMER=0, lib/portal-lib.sh). Bar RUN-11 asserts the
+    # DEFAULT argv has no such flag.
+    if [ "$P5_PORTAL_DM_TIMER" = 0 ]; then
+        "$P5_DEADMAN" arm --after "$BOUND" --restore-script "$P5_RESTORE" \
+                          --label "$LABEL" --no-timer >> "$ART" 2>&1
+    else
+        "$P5_DEADMAN" arm --after "$BOUND" --restore-script "$P5_RESTORE" \
+                          --label "$LABEL" >> "$ART" 2>&1
+    fi
+    ARM_RC=$?
+    if [ "$ARM_RC" != 0 ]; then
+        echo "### ended $(now_epoch) $(now_up) rc=5 restore=n/a deadman=arm_failed" >> "$ART"
+        mv "$ART" "$FINAL"; p5_job_release "$ID"; exit 5
+    fi
+fi
+
+# ---- the tool ---------------------------------------------------------------
+# THREE reconciles for XCTL_TICK, and the number is derived, not tuned: one walks
+# whatever edge the stored facts already ask for, the second shows the walk
+# converged, and the third shows the no-op is stable. Two cannot tell a converged
+# box from one that alternates; more than three tells you nothing four did not.
+# ============================ U229: THE TWO ROUND TRIPS ======================
+# WHAT THESE MAY DO, AND IT IS THE WHOLE LIST: `$BONDCTL on|off|mode <literal>`
+# and `$XCTL node`. No init script, no kill, no wg, no ip, no direct fact write --
+# a round trip that wrote $BOND_DIR itself would be a second implementation of
+# the ADR-003 rule table, and a round trip that restarted a service would be the
+# controller the portal must never become. Bar DIS-4 reads that list off these
+# function bodies rather than off this comment.
+
+# poll_node WANT -> 0 when the reconciler reports WANT. Budget: one supervision
+# cycle (see POLL_MAX above). Not a settle timer: the verbs are synchronous.
+poll_node() {
+    _pn=0
+    while : ; do
+        [ "$("$XCTL" node 2>/dev/null)" = "$1" ] && return 0
+        [ "$_pn" -ge "$POLL_MAX" ] && return 1
+        sleep 1; _pn=$((_pn + 1))
+    done
+}
+
+# THE REFUSAL LINE, QUOTED FROM THE VERB'S OWN OUTPUT and not from `logread`.
+# bond-xctl's log() writes to stdout AND to syslog (deploy/p5/bond-xctl `log()`),
+# and this runner already has that stdout -- it is in the artifact, two lines up.
+# Reading it back out of the file we just wrote costs nothing and keeps `logread`
+# out of the portal's argv allowlist entirely, which is worth more than the
+# convenience of a second reader.
+refusal_line() {
+    _rl=$(grep -E 'refused|does not apply|FAILED|missing' "$ART" 2>/dev/null | tail -1)
+    printf '%s' "${_rl:-the reconciler printed no refusal: the node simply did not arrive}"
+}
+
+# The mode this row pins is CHOSEN FROM THE CATALOGUE, never typed: the first
+# `implemented` row whose verb is `mode` that is neither `eco` (selecting eco is
+# the auto POLICY, not a manual pin -- ADR-003 rule 4) nor the mode already in
+# force. So the row carries no parameter, and no request byte can reach it.
+pick_other_mode() {
+    for _pm in $(p5_modes_impl); do
+        [ "$(p5_cat_field modes "$_pm" 2)" = mode ] || continue
+        [ "$_pm" = eco ] && continue
+        [ "$_pm" = "$PRE_MODE" ] && continue
+        printf '%s' "$_pm"; return 0
+    done
+    return 1
+}
+
+rt_lifecycle() {
+    # REFUSED FROM `off`. The round trip is off-and-back; from a box that is
+    # already off the only "round trip" available starts by ENGAGING a bond the
+    # operator deliberately left down, which is a state change nobody asked for
+    # and a bigger one than the test. Refuse, and say so in the artifact.
+    if [ "$PRE_RC" != 1 ]; then
+        echo "RESULT FAIL lifecycle_roundtrip: the bond is already off (no rc fact), and engaging a box that is off is not a round trip -- turn the bond on first"
+        return 3
+    fi
+    echo "--- pre: rc=$PRE_RC node=$PRE_NODE"
+    echo "--- off: the lifecycle fact is cleared and the reconciler derives the disengage edge"
+    "$BONDCTL" off; _l_off=$?
+    if poll_node off; then
+        _l1=0; echo "--- node=off reached (rc=$_l_off)"
+    else
+        _l1=1; echo "--- node is '$("$XCTL" node 2>/dev/null)', not 'off' (rc=$_l_off)"
+    fi
+    echo "--- on: the fact is written back and the reconciler derives the engage edge"
+    "$BONDCTL" on; _l_on=$?
+    if poll_node "$PRE_NODE"; then
+        _l2=0; echo "--- node=$PRE_NODE reached (rc=$_l_on)"
+    else
+        _l2=1; echo "--- node is '$("$XCTL" node 2>/dev/null)', not '$PRE_NODE' (rc=$_l_on)"
+    fi
+    if [ "$_l1" = 0 ] && [ "$_l2" = 0 ]; then
+        echo "RESULT PASS lifecycle_roundtrip: off and back to '$PRE_NODE'"
+        return 0
+    fi
+    echo "RESULT FAIL lifecycle_roundtrip: $(refusal_line)"
+    return 1
+}
+
+rt_mode() {
+    _m_to=$(pick_other_mode) || {
+        echo "RESULT FAIL mode_roundtrip: the catalogue offers no implemented manual mode besides 'eco' and the one already in force ('$PRE_MODE')"
+        return 3; }
+    echo "--- pre: mode=$PRE_MODE auto=$PRE_AUTO node=$PRE_NODE"
+    echo "--- pin: selecting '$_m_to' clears auto and stops bond-ecod (ADR-003 rule 4, applied by bondctl clear_auto_if_manual)"
+    "$BONDCTL" mode "$_m_to"; _m_rc=$?
+    if [ "$_m_rc" != 0 ]; then
+        # bondctl RESTORES THE PRIOR MODE ITSELF on a refused entry into an
+        # aggregate mode (its own duty, not an edge). So this arm records the rc
+        # and stops: a second restore here would be this file re-implementing
+        # what the CLI already did, and the two would drift.
+        echo "--- refused (rc=$_m_rc): bondctl has already restored the prior mode itself; this row does not restore twice"
+        echo "RESULT FAIL mode_roundtrip: $(refusal_line)"
+        return 1
+    fi
+    if poll_node engaged && [ "$(p5_raw_mode)" = "$_m_to" ]; then
+        _m1=0; echo "--- node=engaged with mode='$_m_to'"
+    else
+        _m1=1; echo "--- node is '$("$XCTL" node 2>/dev/null)' with mode='$(p5_raw_mode)', wanted engaged/'$_m_to'"
+    fi
+    echo "--- return: back to the INTENT that was in force, not to the position ecod had escalated to"
+    if [ "$PRE_AUTO" = 1 ]; then
+        "$BONDCTL" mode eco; _m_back=$?
+    else
+        _m_pre=$(p5_match_literal "$(p5_modes_all)" "$PRE_MODE") || _m_pre=''
+        if [ -n "$_m_pre" ]; then "$BONDCTL" mode "$_m_pre"; _m_back=$?
+        else _m_back=0; echo "--- no prior mode fact to replay; the rollback below reconciles to the stored facts"; fi
+    fi
+    if [ "$_m1" = 0 ] && [ "$_m_back" = 0 ]; then
+        echo "RESULT PASS mode_roundtrip: pinned '$_m_to' and returned (auto was $PRE_AUTO)"
+        return 0
+    fi
+    echo "RESULT FAIL mode_roundtrip: $(refusal_line)"
+    return 1
+}
+
+run_head() {
+    case "$HEAD" in
+      ACCEPT)
+        "$P5_ACCEPT" ;;
+      XCTL_TICK)
+        _t=1
+        while [ "$_t" -le 3 ]; do
+            echo "--- reconcile $_t of 3"
+            "$XCTL" reconcile; _trc=$?
+            echo "--- rc=$_trc node=$("$XCTL" node 2>/dev/null)"
+            [ "$_trc" = 0 ] || return "$_trc"
+            _t=$((_t + 1))
+        done ;;
+      ROUNDTRIP_LIFECYCLE)
+        rt_lifecycle ;;
+      ROUNDTRIP_MODE)
+        rt_mode ;;
+      *)
+        echo "p5-portal-run: unknown head '$HEAD'"; return 2 ;;
+    esac
+}
+run_head >> "$ART" 2>&1
+RC=$?
+
+# ---- the roll back, and the confirm ----------------------------------------
+# RESTORE IS A REPLAY OF INTENT, NEVER A SERVICE VERB, and it is ONE
+# implementation: this normal end calls the same p5-portal-restore the deadman
+# would have fired, so the crash path and the clean path cannot drift. The script
+# skips the group kill when it is running INSIDE that group, which is exactly
+# this call (see its own header).
+if [ "$CLASS" = disruptive ]; then
+    if "$P5_RESTORE" >> "$ART" 2>&1; then RESTORE_STATE=ok; else RESTORE_STATE=mismatch; fi
+    # CONFIRM ONLY WHEN THE NODE IS ACTUALLY BACK (U229). `confirm` RETIRES the
+    # armed record, so confirming after a mismatch would throw away the one thing
+    # that is still going to retry the rollback -- on the deadman's own cadence,
+    # through its timer and its boot limb after a power cut. The design says the
+    # record is KEPT until the node is verified (portal plan section 8, RESTORE);
+    # this branch is what keeps it. Before this unit the confirm was
+    # unconditional and a failed rollback disarmed itself.
+    if [ "$RESTORE_STATE" = ok ]; then
+        if "$P5_DEADMAN" confirm --label "$LABEL" >> "$ART" 2>&1; then
+            DM_STATE=confirmed
+        else
+            # The record is still armed and will fire. Say so IN the artifact: the
+            # operator has to disarm it by hand, and a footer that read `n/a` would
+            # hide a live rollback owed on a box nobody can reach.
+            DM_STATE=ARMED-LEFT
+        fi
+    else
+        DM_STATE=ARMED-LEFT
+        echo "restore did NOT put the node back, so the deadman record is LEFT ARMED and will be retried on its own cadence" >> "$ART"
+    fi
+fi
+
+echo "### ended $(now_epoch) $(now_up) rc=$RC restore=$RESTORE_STATE deadman=$DM_STATE" >> "$ART"
+# Same filesystem, so the rename is atomic: a reader either sees a `.part` (this
+# run has not finished) or a complete `.txt`. There is no third state in which a
+# half-written file is being served as a result.
+mv "$ART" "$FINAL"
+p5_job_release "$ID"
+exit "$RC"
