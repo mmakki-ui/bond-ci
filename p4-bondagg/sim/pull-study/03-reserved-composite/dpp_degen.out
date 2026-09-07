@@ -1,0 +1,29 @@
+====================================================================================
+CHECK 1 -- imports clean (UNMODIFIED physics)
+====================================================================================
+  reserved_meter, reserved_dp, ackclock_sim, nsched_model imported OK
+  D'' constants: target_ms=40.0 (ackclock 'ewma' cap threshold, reused verbatim)
+====================================================================================
+CHECK 2 -- reserved_meter.SimD('pull') byte-matches ackclock_sim.Sim('pull'),
+           and sched='D' stays byte-identical to reserved_dp.SimD('D')
+====================================================================================
+  reserved_meter.SimD('pull') == ackclock_sim.Sim('pull')  over 24 seeds: True
+  reserved_meter.SimD('D')    == reserved_dp.SimD('D')     over 24 seeds: True
+====================================================================================
+CHECK 3 / P5 -- DEGENERATE RIGS: Dpp reprints pull byte-for-byte, res_tx=0
+====================================================================================
+  ALL-STEADY N2 (eth+wifi)     load=0.65  reprints_pull=24/24  res_tx_max=0  mir_offered_max=0  armed_max=0.0000  OK
+  ALL-STEADY N2 (eth+wifi)     load=0.85  reprints_pull=24/24  res_tx_max=0  mir_offered_max=0  armed_max=0.0000  OK
+  ALL-STEADY N3 (eth+wifi+eth) load=0.65  reprints_pull=24/24  res_tx_max=0  mir_offered_max=0  armed_max=0.0000  OK
+  ALL-STEADY N3 (eth+wifi+eth) load=0.85  reprints_pull=24/24  res_tx_max=0  mir_offered_max=0  armed_max=0.0000  OK
+  ALL-SPOTTY N3 correlated     load=0.65  reprints_pull=24/24  res_tx_max=0  mir_offered_max=0  armed_max=0.0000  OK
+  ALL-SPOTTY N3 correlated     load=0.85  reprints_pull=24/24  res_tx_max=0  mir_offered_max=0  armed_max=0.0000  OK
+  ALL-SPOTTY N3 independent    load=0.65  reprints_pull=24/24  res_tx_max=0  mir_offered_max=0  armed_max=0.0000  OK
+  ALL-SPOTTY N3 independent    load=0.85  reprints_pull=24/24  res_tx_max=0  mir_offered_max=0  armed_max=0.0000  OK
+====================================================================================
+P5 VERDICT: sched='Dpp' reprints pull rows byte-for-byte with admitted-dup
+bytes res_tx=0, across ALL-STEADY(N2,N3) and ALL-SPOTTY(N3 correlated+independent)
+x loads(0.65,0.85), 24 seeds each: PASS
+====================================================================================
+
+elapsed 429.0s
