@@ -1,0 +1,226 @@
+#!/bin/sh
+# /usr/lib/p5/portal/bin/p5-portal-run <name> <id> — the portal's DETACHED
+# executor. BUSYBOX-SAFE POSIX sh.
+#
+# WHAT THIS IS. The CGI does not run a test; it starts one and answers 202. This
+# file is what it starts, under `setsid` with no descriptor of the request's
+# (lib/portal-lib.sh p5_detach), so the job outlives both the response and
+# uhttpd's script timeout. It takes exactly two arguments and neither of them is
+# a program: a test NAME that must be a row in catalogue/tests, and an artifact
+# ID that must match the id grammar. Everything else it needs it reads out of the
+# catalogue and the library.
+#
+# THE FOUR GUARDS OF design §3b, and where each one lives:
+#   1. HARD SPLIT        class comes from the catalogue, not the caller. `ro` runs
+#                        straight; `disruptive` writes its pre-state and arms the
+#                        deadman BEFORE the tool starts, and rolls back after.
+#   2. BOUNDED + SELF-REVERTING  a disruptive row is armed with p5-deadman
+#                        --after <bound> --restore-script p5-portal-restore, so
+#                        the rollback happens whether this process reaches its end
+#                        or is killed, and survives a power cut through the
+#                        deadman's own boot limb. Arm fails -> NOTHING runs.
+#   3. ENUMERATED ONLY   the name is re-matched here against catalogue/tests
+#                        (the CGI already did; this is the defence in depth the
+#                        design asks for), and the program is resolved from a
+#                        CLOSED case over column 3's SYMBOLIC head. A head this
+#                        file does not know is exit 2 and an empty artifact.
+#   4. ARTIFACT          header first, tool output, footer last. A file with no
+#                        `### ended` line is an INCOMPLETE run, and that is the
+#                        only thing that distinguishes one -- so the footer is
+#                        written by the same code path that finishes the job, and
+#                        `.part` becomes `.txt` only after it.
+#
+# THIS FILE IS SCANNED BY BAR PC-2 like the CGI and the library: no init-script
+# action, no uci write, no wg, no tc, no ip, no `/tmp`, no eval. The only
+# externals it may reach are the tool its head resolves to, the reconciler, the
+# controller, p5-deadman and the restore script -- and bar RUN-7 asserts that
+# from the runtime ledger, not from this comment.
+
+set -u
+
+P5_PORTAL_DIR="${P5_PORTAL_DIR:-/usr/lib/p5/portal}"
+# The library is resolved at run time from the install root (the harness points
+# it at the shipped tree out of a worktree), so there is no static path for the
+# linter to follow. It is linted in its own right by the same gate.
+# shellcheck disable=SC1091
+. "$P5_PORTAL_DIR/lib/portal-lib.sh"
+# p5-common.sh, for p5_hash ONLY -- this product has exactly one sha256
+# implementation and one place that proves the tool computes sha256 against a
+# test vector (p5/lib/p5-common.sh:350-357). Sourced SECOND on purpose: it
+# defines p5_die/p5_log/p5_err with the EXIT-CODE meaning a non-CGI wants, and
+# they replace the library's HTTP-shaped p5_die, which must never run here (it
+# would print a header to a file and exit 0 on an error). Absent -> the sha lines
+# read `unavailable` and the run goes on: a missing library must not silently
+# turn into a missing artifact.
+# shellcheck disable=SC1090
+[ -r "$P5_COMMON" ] && . "$P5_COMMON"
+
+NAME=${1:-}; ID=${2:-}
+if [ -z "$NAME" ] || [ -z "$ID" ]; then
+    echo "usage: p5-portal-run <name> <id>" >&2; exit 2
+fi
+p5_run_id_sane "$ID" || { echo "p5-portal-run: refusing id '$ID'" >&2; exit 2; }
+
+# GUARD 3, half one: the name must BE a row. The catalogue's own copy of the
+# literal is what is used from here on; the argument is dropped.
+N=$(p5_match_literal "$(p5_cat_keys tests)" "$NAME") || {
+    echo "p5-portal-run: '$NAME' is not a row in catalogue/tests" >&2; exit 2; }
+CLASS=$(p5_cat_field tests "$N" 2)
+HEAD=$(p5_cat_field tests "$N" 3)
+BOUND=$(p5_cat_field tests "$N" 4)
+
+# GUARD 3, half two: THE CLOSED CASE. Column 3 is a symbol, and the program it
+# stands for is named here and nowhere else, so neither a catalogue edit nor a
+# corrupted file can introduce a program. Mutant JOB-M2 deletes this and shows a
+# catalogue-supplied head executing.
+case "$HEAD" in
+  ACCEPT)    TOOL="$P5_ACCEPT" ;;
+  XCTL_TICK) TOOL="$XCTL" ;;
+  *)         echo "p5-portal-run: unknown head '$HEAD'" >&2; exit 2 ;;
+esac
+
+case "$CLASS" in
+  ro|disruptive) ;;
+  *) echo "p5-portal-run: unknown class '$CLASS'" >&2; exit 2 ;;
+esac
+
+ART="$P5_RESULTS_DIR/$ID.part"
+FINAL="$P5_RESULTS_DIR/$ID.txt"
+META="$P5_RESULTS_DIR/$ID.meta"
+LABEL="portal-$N"
+[ -d "$P5_RESULTS_DIR" ] || mkdir -p "$P5_RESULTS_DIR" 2>/dev/null
+[ -w "$P5_RESULTS_DIR" ] || { echo "p5-portal-run: $P5_RESULTS_DIR is not writable" >&2; exit 5; }
+
+# The lock was taken by the CGI, which wrote its own `$!`. Write it again from
+# the job itself: `$!` is the session leader and so is `$$` here, but a CGI that
+# was killed between the take and the write would otherwise leave a lock with no
+# pid, which p5_job_take reads as LIVE for ever.
+printf '%s\n' "$$" > "$P5_JOB_LOCK/pid" 2>/dev/null
+
+now_epoch() { date -u '+%s' 2>/dev/null || echo 0; }
+now_up() {
+    _nu=$(p5_readfile "$P5_UPTIME"); _nu=${_nu%% *}; _nu=${_nu%%.*}
+    case "$_nu" in ''|*[!0-9]*) _nu=0 ;; esac
+    printf '%s' "$_nu"
+}
+hash_of() {
+    _ho=''
+    command -v p5_hash >/dev/null 2>&1 && _ho=$(p5_hash "$1" 2>/dev/null)
+    printf '%s' "${_ho:-unavailable}"
+}
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+
+# ---- guard 4: the header goes down BEFORE the tool runs ---------------------
+# A file that exists with a header and no footer is a run that was interrupted.
+# Written the other way round -- everything buffered and flushed at the end -- a
+# killed job leaves NOTHING, and "nothing" is indistinguishable from "never
+# started". The whole INCOMPLETE state depends on this order.
+{
+    echo "### job $N id=$ID class=$CLASS"
+    echo "### started $(now_epoch) $(now_up)"
+    echo "### box $(p5_readfile "$P5_SYSINFO_MODEL")"
+    echo "### version $(sed -n 's/^P5_VERSION=//p' "$P5_STAMP_FILE" 2>/dev/null | head -1)"
+    echo "### sha256 $(hash_of "$SELF") $(hash_of "$TOOL")"
+} > "$ART"
+
+RESTORE_STATE=n/a
+DM_STATE=n/a
+
+# ---- guards 1 + 2: the disruptive pre-roll ----------------------------------
+# ORDER IS THE PROPERTY: pre-state -> meta on disk -> ARM -> only then the tool.
+# Arming after the tool starts leaves a window in which the disturbance is live
+# and nothing on the box owes a rollback, which is precisely the state a box with
+# no console must never be in. The seed for bar RUN-8 moves the spawn above the
+# arm and the bar goes red.
+if [ "$CLASS" = disruptive ]; then
+    case "$BOUND" in
+      ''|*[!0-9]*|0)
+        echo "### ended $(now_epoch) $(now_up) rc=2 restore=n/a deadman=no_bound" >> "$ART"
+        echo "p5-portal-run: disruptive row '$N' declares no bound_s -- refusing" >> "$ART"
+        mv "$ART" "$FINAL"; p5_job_release "$ID"; exit 2 ;;
+    esac
+    PRE_RC=0;   [ -f "$BOND_DIR/rc" ]   && PRE_RC=1
+    PRE_AUTO=0; [ -f "$BOND_DIR/auto" ] && PRE_AUTO=1
+    PRE_MODE=$(p5_raw_mode)
+    PRE_NODE=$("$XCTL" node 2>/dev/null)
+    {
+        echo "# p5 portal job record. Read by p5-portal-restore."
+        echo "P5_PORTAL_ID=$ID"
+        echo "P5_PORTAL_NAME=$N"
+        echo "P5_PORTAL_PID=$$"
+        echo "P5_PORTAL_BOUND_S=$BOUND"
+        echo "P5_PORTAL_PRE_RC=$PRE_RC"
+        echo "P5_PORTAL_PRE_MODE=$PRE_MODE"
+        echo "P5_PORTAL_PRE_AUTO=$PRE_AUTO"
+        echo "P5_PORTAL_PRE_NODE=$PRE_NODE"
+        echo "P5_PORTAL_ARTIFACT=$ART"
+    } > "$META"
+    echo "### pre rc=$PRE_RC mode=$PRE_MODE auto=$PRE_AUTO node=$PRE_NODE bound_s=$BOUND" >> "$ART"
+    # --no-timer is passed THROUGH, never chosen: it is p5-deadman's own flag and
+    # it appears only when the harness's no-op sleep would make the timer fire at
+    # t=0 (P5_PORTAL_DM_TIMER=0, lib/portal-lib.sh). Bar RUN-11 asserts the
+    # DEFAULT argv has no such flag.
+    if [ "$P5_PORTAL_DM_TIMER" = 0 ]; then
+        "$P5_DEADMAN" arm --after "$BOUND" --restore-script "$P5_RESTORE" \
+                          --label "$LABEL" --no-timer >> "$ART" 2>&1
+    else
+        "$P5_DEADMAN" arm --after "$BOUND" --restore-script "$P5_RESTORE" \
+                          --label "$LABEL" >> "$ART" 2>&1
+    fi
+    ARM_RC=$?
+    if [ "$ARM_RC" != 0 ]; then
+        echo "### ended $(now_epoch) $(now_up) rc=5 restore=n/a deadman=arm_failed" >> "$ART"
+        mv "$ART" "$FINAL"; p5_job_release "$ID"; exit 5
+    fi
+fi
+
+# ---- the tool ---------------------------------------------------------------
+# THREE reconciles for XCTL_TICK, and the number is derived, not tuned: one walks
+# whatever edge the stored facts already ask for, the second shows the walk
+# converged, and the third shows the no-op is stable. Two cannot tell a converged
+# box from one that alternates; more than three tells you nothing four did not.
+run_head() {
+    case "$HEAD" in
+      ACCEPT)
+        "$P5_ACCEPT" ;;
+      XCTL_TICK)
+        _t=1
+        while [ "$_t" -le 3 ]; do
+            echo "--- reconcile $_t of 3"
+            "$XCTL" reconcile; _trc=$?
+            echo "--- rc=$_trc node=$("$XCTL" node 2>/dev/null)"
+            [ "$_trc" = 0 ] || return "$_trc"
+            _t=$((_t + 1))
+        done ;;
+      *)
+        echo "p5-portal-run: unknown head '$HEAD'"; return 2 ;;
+    esac
+}
+run_head >> "$ART" 2>&1
+RC=$?
+
+# ---- the roll back, and the confirm ----------------------------------------
+# RESTORE IS A REPLAY OF INTENT, NEVER A SERVICE VERB, and it is ONE
+# implementation: this normal end calls the same p5-portal-restore the deadman
+# would have fired, so the crash path and the clean path cannot drift. The script
+# skips the group kill when it is running INSIDE that group, which is exactly
+# this call (see its own header).
+if [ "$CLASS" = disruptive ]; then
+    if "$P5_RESTORE" >> "$ART" 2>&1; then RESTORE_STATE=ok; else RESTORE_STATE=mismatch; fi
+    if "$P5_DEADMAN" confirm --label "$LABEL" >> "$ART" 2>&1; then
+        DM_STATE=confirmed
+    else
+        # The record is still armed and will fire. Say so IN the artifact: the
+        # operator has to disarm it by hand, and a footer that read `n/a` would
+        # hide a live rollback owed on a box nobody can reach.
+        DM_STATE=ARMED-LEFT
+    fi
+fi
+
+echo "### ended $(now_epoch) $(now_up) rc=$RC restore=$RESTORE_STATE deadman=$DM_STATE" >> "$ART"
+# Same filesystem, so the rename is atomic: a reader either sees a `.part` (this
+# run has not finished) or a complete `.txt`. There is no third state in which a
+# half-written file is being served as a result.
+mv "$ART" "$FINAL"
+p5_job_release "$ID"
+exit "$RC"
