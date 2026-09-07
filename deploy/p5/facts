@@ -1,0 +1,78 @@
+# deploy/p5/facts -- THE FACT LEDGER (U133).  REPO-ONLY DATA: this file is not
+# installed.  It is deliberately absent from p5/payload/filemap and from
+# p5-install's map -- a file under /etc/p5 would collide with the installer's
+# own namespace refusal (IN-16, p5/contract/paths:229-232).
+#
+# Every file under $BOND_DIR (= /etc/p5, deploy/p5/bond-xctl:37) gets ONE row
+# here, with a WRITER, its READERS, a STATED DEFAULT for when it is absent, and
+# a DISPOSITION.  deploy/p5/test-facts.sh sweeps the tree and refuses any
+# reference that has no row (UNDECLARED), any row nobody reads (ORPHAN), and any
+# cite that no longer resolves (STALE-CITE).  The bar is MECHANICAL: it greps,
+# it does not read this prose.  A hand-written list is what U124 invalidated --
+# it moved bond-xctl's 1000+ lines into lib/ and every `bond-xctl:NNN` cite on
+# the U133 ROADMAP row died silently.
+#
+# ROW FORMAT   name|kind|root|writer|readers|default|disposition
+#
+#   kind      control   = a person's INTENT, set through a CLI/UI verb
+#             operator  = a person's MEASURED declaration; no CLI today, and
+#                         that is legal ONLY because the row says so
+#             derived   = the reconciler computes it every tick
+#             secret    = install-time material
+#             subtree   = a DIRECTORY under the fact root, not a fact
+#             forbidden = a fact name that exists only as a REJECTED design
+#   root      /etc/p5 for every real P5 fact.  /etc/bond means a STALE root
+#             (pre-ADR-005) and is reported as a named ROOT-MISMATCH waiver.
+#   writer    `path:line ...`   a real writer
+#             OPERATOR          declared operator-written: legal, no CLI
+#             NONE              no writer: a COUNTED escalation waiver, and the
+#                               disposition MUST start with ESCALATED:
+#   readers   `path:line ...`, or NONE (only with an UNBUILT: disposition)
+#   default   what happens when the file is ABSENT, then `@` and the cite that
+#             ESTABLISHES it.  Measured from code, never asserted.
+#
+# CITE FORM   path:line          -- the line must still contain the fact name
+#             path:line~TOKEN    -- the line must contain TOKEN instead.  Used
+#                                   where the write is through the portal's
+#                                   catalogue-bounded dynamic key ($_k), which
+#                                   never spells the fact name.
+#
+# NOT SWEPT, and stated here rather than hidden in a regex:
+#   * names beginning with `.` are write temps (.agg_env.new,
+#     deploy/p5/lib/xctl-actions.sh:151), not facts.
+#   * $BOND_DIR/$k, /$_k, /$key are the portal's dynamic key
+#     (deploy/p5/portal/cgi/p5-portal:137,333,347).  They are resolved through
+#     the catalogue that bounds them, deploy/p5/portal/catalogue/fields; a
+#     catalogue key with no row here is a FAIL.
+#   * harness writes (orchestration/ecosim/**, deploy/p5/bond-accept) are NOT
+#     writers.  bond-accept is P5's on-box acceptance runner
+#     (deploy/p5/bond-accept:1-9).  Counting it would let `mode` look like it
+#     had a writer on paths that do not ship.
+#
+# THE $BOND_DIR SPELLING AND THE LITERAL SPELLING ARE ONE FACT, ONE ROW.  agg_env is
+# the row that proves the checker greps both spellings: it is referenced ONLY as
+# the literal /etc/p5/agg_env at deploy/p5/init.d/bond-agg:22,28.
+#
+rc|control|/etc/p5|deploy/p5/bondctl:114 deploy/p5/bondctl:115|deploy/p5/bond-ecod:203 deploy/p5/lib/xctl-probe.sh:2|absent = desired() is `off`, so a box with no stored intent converges to DIRECT rather than to whatever the feeder happens to be doing@deploy/p5/lib/xctl-probe.sh:2|KEEP -- complete. U114 made this THE engagement fact: it is the INTENT half of the reconciler pair and is deliberately not readable off the mechanism (node() still reads the feeder's rc.d flag, ecosim bar EF-5 pins the two halves apart). Presence-only, no content.
+mode|control|/etc/p5|deploy/p5/bondctl:134 deploy/p5/bondctl:145 deploy/p5/bondctl:177|deploy/p5/lib/xctl-probe.sh:362 deploy/p5/bond-ecod:206 deploy/p5/bondctl:194 deploy/p5/portal/lib/portal-lib.sh:596|lightning -- an unchosen fall-through, which under ADR-003 as amended by U119 means EVERY live source carries EVERY frame, metered ones included@deploy/p5/lib/xctl-probe.sh:362|KEEP the writer; THE ABSENT DEFAULT IS ESCALATED TO MO, see the U133 row in docs/ROADMAP.md. Nobody chose it. It is NOT U17b's: U17b (docs/ROADMAP.md:3315 -- :3311 is U17g, a wrong cite in the first build of this row) is install-time migration of an EXISTING `speed` value and says nothing about an absent file.
+auto|control|/etc/p5|deploy/p5/bondctl:82 deploy/p5/bondctl:98 deploy/p5/bondctl:185|deploy/p5/bond-ecod:189 deploy/p5/bondctl:98 deploy/p5/bondctl:194 deploy/p5/portal/cgi/p5-portal:137 deploy/p5/portal/lib/portal-lib.sh:597 deploy/p5/portal/lib/portal-lib.sh:598 deploy/p5/portal/lib/portal-lib.sh:605|absent = auto policy OFF; every reader is a `[ -f ]` test@deploy/p5/bond-ecod:189|KEEP -- complete
+shape|control|/etc/p5|deploy/p5/bondctl:163 deploy/p5/portal/cgi/p5-portal:333~_k|deploy/p5/lib/xctl-shape.sh:40 deploy/p5/bondctl:203|on -- the `*)` arm of the case@deploy/p5/lib/xctl-shape.sh:40|KEEP -- complete
+wg_if|operator|/etc/p5|OPERATOR|deploy/p5/lib/xctl-shape.sh:31 deploy/p5/shape-install:281 deploy/p5/init.d/p5-shape:114|absent = the shaper falls back to $WG_DEV and p5-shape REFUSES TO START, logging it@deploy/p5/init.d/p5-shape:168|OPERATOR-WRITTEN, INTERIM (U214, 2026-09-05): the deploy ladder makes the operator the writer at S2 -- they run `wg show interfaces` on the client and write the answer to /etc/p5/wg_if before `p5-shape-install install`, and the runbook step carrying that line is U213's (IN FLIGHT as of 2026-09-05). That is a REAL writer, not a waiver, which is why this row is no longer writer=NONE. A DERIVED writer is still wanted -- derive from `wg show interfaces` in the reconciler -- and is still not built: it needs an arm in orchestration/ecosim/p5/bin/wg, and the `wg show interfaces` output shape on this firmware is UNVERIFIED (one command settles it: ssh root@${CLIENT_LAN_IP} "wg show interfaces"). The "M8/E6 discovery" attributed at deploy/p5/lib/xctl-shape.sh:25 DOES NOT EXIST -- there is no E6 fact-writer anywhere in the tree.
+wg-logical|derived|/etc/p5|NONE|deploy/p5/97-bond:20 deploy/p5/97-bond:21|absent = the hotplug hook exits 0 SILENTLY, so on a clean box every wg ifup is a no-op and the auto-resume the hook exists for never happens@deploy/p5/97-bond:20|ESCALATED: DELETE THE FACT and derive in the hook from `uci -q get network.$INTERFACE.proto`, LOGGING the unclassifiable arm. NOT built by U133: deploy/p5/97-bond is not owned by this unit, and the uci probe is UNVERIFIED on GL firmware (ssh root@${CLIENT_LAN_IP} "uci show network | grep -i proto"). Its only writer anywhere is p2-engarde/bootstrap-bond.sh:79, which is the OLD stack writing /etc/bond -- a different product, a different directory.
+metered|operator|/etc/p5|NONE|deploy/p5/lib/xctl-probe.sh:163 deploy/p5/lib/xctl-probe.sh:164|absent = only the GL_CELL_PROTOS proto test classifies a source, and a USB tether is unclassifiable by construction@deploy/p5/lib/xctl-probe.sh:163|ESCALATED: GIVE IT A WRITER -- a `bondctl metered add/rm/list` verb validating the name against the box's own source set. NOT built by U133: deploy/p5/bondctl is not owned by this unit. Today the only way to classify a metered source is hand-editing a file on the box.
+spotty_dup|operator|/etc/p5|NONE|deploy/p5/lib/xctl-probe.sh:358|absent, or content other than exactly "1", = 0 (OFF) -- the same fail-safe default the daemon applies@deploy/p5/lib/xctl-probe.sh:358|ESCALATED: GIVE IT A WRITER (a `bondctl spotty-dup on/off` verb; deploy/p5/bondctl is not owned by U133). RENAMED HERE from `lightning`, which collided with the user-facing MODE name (ADR-003 sec 2, executed by the U119 status line, ADR-003:152-154). THE ENV KEY AGG_LIGHTNING IS UNCHANGED ON PURPOSE: renaming it touches p4-bondagg/daemon/lightning.go and BOTH procd stanzas atomically and belongs to U47a/U138.
+agg_w|operator|/etc/p5|NONE|deploy/p5/lib/xctl-actions.sh:111 deploy/p5/lib/xctl-actions.sh:111|absent or arity-mismatched = N copies of the neutral prior, with a WARN on the mismatch@deploy/p5/lib/xctl-actions.sh:111|ESCALATED: DELETE THE READER -- the shipped pull datapath logs the AGG_W it produces as IGNORED (p4-bondagg/daemon/pullrun.go). NOT executed by U133: deleting it INVERTS the ecosim bar at orchestration/ecosim/p5/run.sh:905 (:576 is that bar's FIXTURE line), which asserts an operator agg_w IS honoured, and that inversion needs its own bar and its own A/B rather than riding on a ledger unit. The NEUTRAL N-vector emission must SURVIVE the deletion: an unset AGG_W re-applies a 2-shaped prior in the retained push reference.
+applied_wans|derived|/etc/p5|deploy/p5/lib/xctl-actions.sh:170|deploy/p5/bond-ecod:345 deploy/p5/lib/xctl-actions.sh:170|absent = empty string; bond-ecod reads ""@deploy/p5/bond-ecod:345|KEEP -- complete
+agg_env|derived|/etc/p5|deploy/p5/lib/xctl-actions.sh:160|deploy/p5/init.d/bond-agg:23 deploy/p5/init.d/bond-agg:29 deploy/p5/lib/xctl-actions.sh:206 deploy/p5/lib/xctl-actions.sh:206 deploy/p5/lib/xctl-dag.sh:336 deploy/p5/lib/xctl-probe.sh:319|absent = the procd unit returns 1 and the feeder does not start@deploy/p5/init.d/bond-agg:23|KEEP -- complete. THIS ROW IS THE LITERAL-SPELLING PROOF: its procd readers never spell $BOND_DIR, so a checker that greps only $BOND_DIR would certify a false clean.
+agg_env.applied|derived|/etc/p5|deploy/p5/lib/xctl-actions.sh:289 deploy/p5/lib/xctl-actions.sh:305|deploy/p5/lib/xctl-actions.sh:289 deploy/p5/lib/xctl-actions.sh:305 deploy/p5/lib/xctl-dag.sh:473|absent = the feeder is restarted, because `_same_file` is FALSE when either side is missing -- the safe direction, and the reason write-atomicity is not needed here@deploy/p5/lib/xctl-actions.sh:289|KEEP -- complete. U125's crash-consistency record: a byte copy of the config the RUNNING feeder was started with, written strictly AFTER a successful restart, so a kill between the config `mv` and the bounce leaves agg_env and agg_env.applied UNEQUAL and the next reconcile restarts. It replaced a PRE-action crumb that converged() could not see, which fed traffic over a stale source set forever.
+shape_bounds|operator|/etc/p5|OPERATOR|deploy/p5/shape-install:558 deploy/p5/shape-install:559 deploy/p5/shape-install:652 deploy/p5/shape-install:654|absent = shape-install PRINTS `IN MISSING BOND_DIR/shape_bounds ... [U24/OBJ-F]` and later REFUSES with die 3@deploy/p5/shape-install:559|KEEP as writer=OPERATOR. Inventing a writer would mean inventing the six rates it declares, and the whole point of OBJ-F is that they are MEASURED. Its absence is already reported and refused in code, not silent. Owner named in-file: U24/OBJ-F.
+shape_reflectors|operator|/etc/p5|OPERATOR|deploy/p5/shape-install:560 deploy/p5/shape-install:561 deploy/p5/shape-install:670 deploy/p5/shape-install:671|absent = `IN MISSING` on the inventory line, empty = die 3@deploy/p5/shape-install:561|KEEP as writer=OPERATOR, same reason as shape_bounds. Owner U24/OBJ-F.
+tput_floor|operator|/etc/p5|OPERATOR|deploy/p5/bond-watchdog:95|131072 (1 Mbit/s), the inline fall-through, stated in the comment on the same line@deploy/p5/bond-watchdog:95|KEEP as writer=OPERATOR -- a throughput floor is a REQUIREMENT a person declares, and the default is stated in code where the reader is.
+watchdog.off|operator|/etc/p5|OPERATOR|deploy/p5/bond-watchdog:104|absent = the watchdog is ENABLED; the file is a kill-switch@deploy/p5/bond-watchdog:104|KEEP as writer=OPERATOR. A kill-switch with a CLI writer is a footgun: disabling the watchdog must take a human on the box. Declared, deliberately not written.
+floor_kbit|control|/etc/p5|deploy/p5/portal/cgi/p5-portal:333~_k deploy/p5/portal/cgi/p5-portal:347~_k|NONE|absent = the field renders disabled and the CGI refuses with no_envelope@deploy/p5/portal/catalogue/fields:46|UNBUILT: write-only BY DESIGN and ALREADY DECLARED SO -- the catalogue's own `consumer` column says `unbuilt`, and the page renders that plainly instead of implying the control works. Consumer owner U24/OBJ-F. Not a defect; rowed so the next sweep does not re-raise it.
+profile|control|/etc/p5|deploy/p5/portal/cgi/p5-portal:333~_k deploy/p5/portal/cgi/p5-portal:347~_k|deploy/p5/bond-ecod:127|absent = balanced, i.e. the escalation constants bond-ecod has always shipped -- apply_profile treats an absent fact and `balanced` as the same run@deploy/p5/bond-ecod:127|KEEP -- complete (U227). READER BUILT: bond-ecod's apply_profile re-reads this fact at the top of every cycle, so a portal write lands without a restart. `balanced` is the ONLY name with a derivation on record and it is the shipped set itself; conservative/aggressive are refused by the portal (501 profile_unimplemented, via the catalogue's `impl` column) and, if hand-written on the box, run balanced with one log line per change. Until this unit the row read UNBUILT/readers=NONE, which was true.
+transport.key|secret|/etc/p5|p5/bin/p5-install:530|deploy/p5/p5-client-preflight.sh:61 deploy/server/p5-server-preflight.sh:363|absent = both daemons run with transport authentication OFF, and both preflights refuse@deploy/p5/p5-client-preflight.sh:61|KEEP -- complete (U115). Rowed because it lives in the fact root and is INVISIBLE to a $BOND_DIR sweep: it is only ever spelled as a literal path.
+portal|subtree|/etc/p5|deploy/p5/portal/lib/portal-lib.sh:48|deploy/p5/portal/init.d/p5-portal:29|absent = the portal creates its own state dir@deploy/p5/portal/lib/portal-lib.sh:48|NOT-A-FACT: /etc/p5/portal is P5_STATE_DIR, the portal's own subtree (floor_envelope, port). Rowed so the mechanical sweep stays COMPLETE instead of carrying a silent exception.
+deadman|subtree|/etc/p5|p5/contract/paths:150|p5/contract/paths:149|absent = no armed deadman records@p5/contract/paths:149|NOT-A-FACT: /etc/p5/deadman is E0's record directory, declared separately in the path contract and never installed.
+exclude|forbidden|/etc/bond|NONE|deploy/p5/portal/catalogue/fields:10|the fact DOES NOT EXIST and must not@deploy/p5/portal/catalogue/fields:10|ESCALATED: NOT-A-FACT, REFUSED BY DESIGN. A per-source exclude fact would duplicate native netifd metrics (ADR-003 sec 4 / OBJ-A); portal bar PC-4 asserts no catalogue field writes one. Rowed so the name cannot be quietly reintroduced without this ledger flagging it.
+port|operator|/etc/p5|OPERATOR|deploy/p5/portal/init.d/p5-portal:57 deploy/p5/portal/init.d/p5-portal:59|absent = /etc/init.d/p5-portal REFUSES TO START and logs "no port declared"; no number is invented, and the same refusal covers a non-numeric or out-of-range value@deploy/p5/portal/init.d/p5-portal:59|KEEP as writer=OPERATOR. A LISTEN PORT IS A DECLARATION, NOT A DERIVATION: inventing one here would put a second listener on a router with no console at a number nobody chose, which is the constant-shipping failure IN-16 exists to stop. Same shape as shape_bounds/shape_reflectors -- refuse and say so rather than guess. It lives in the portal's own state subtree (the `portal` row above), so a $BOND_DIR sweep never sees it: the file is only ever spelled "$P5_STATE_DIR/port". U217 gave it a contract row (`file|client|/etc/p5/portal/port`, state=runtime) so the installer still cannot write it and --remove still takes it away with the product.
