@@ -1,0 +1,64 @@
+
+##############################################################################
+# pull_study  --  PUSH(ETA-argmin) vs PULL(work-conserving)  seeds=8
+##############################################################################
+==============================================================================
+EXP1  STEADY SPOTTY  N=2  tether(swing 5-53Mb +periodic 400ms dropouts)
+      + ethernet(steady 66-90Mb).  offer=85% mean-total.  FEC off.
+==============================================================================
+  PUSH argmin      gp= 78802 util=75.3% loss=13.4% p50=174 p95=340 p99=387 depth= 3104 late=5572 tdrop=1150
+    push tether-share=0.15
+  PUSH +FEC(auto)  gp= 77956 util=74.5% loss=14.3% p50=146 p95=326 p99=413 depth= 3100 late=5796 tdrop=1154   (FEC on push; pull can carry the same per-path FEC)
+  PULL bytes lb=20 gp= 84113 util=80.4% loss= 7.5% p50=183 p95=403 p99=454 depth= 3044 late=6746 tdrop=   0  tshare=0.23
+  PULL bytes lb=40 gp= 84101 util=80.4% loss= 7.5% p50=181 p95=412 p99=471 depth= 3058 late=6765 tdrop=   0  tshare=0.23
+  PULL bytes lb=80 gp= 84003 util=80.3% loss= 7.6% p50=178 p95=411 p99=474 depth= 3176 late=6856 tdrop=4996  tshare=0.23
+  PULL bytes lb=150 gp= 84282 util=80.5% loss= 7.3% p50=176 p95=419 p99=482 depth= 3208 late=6590 tdrop=8278  tshare=0.23
+  PULL ms tgt=40   gp= 77888 util=74.4% loss=14.4% p50=472 p95=652 p99=669 depth= 2606 late=1830 tdrop=   0  tshare=0.07
+  PULL ms tgt=80   gp= 86408 util=82.6% loss= 5.0% p50=219 p95=427 p99=493 depth= 3091 late=4672 tdrop=   0  tshare=0.20
+  PULL ms+lat t=40 gp= 78294 util=74.8% loss=13.9% p50=473 p95=652 p99=669 depth= 2601 late= 516 tdrop=   0
+
+==============================================================================
+EXP2  STALL SEVERITY SWEEP  N=2  (dropout duty cycle rising).  FEC off.
+==============================================================================
+  [none    ] PUSH gp= 79651 loss=12.4% p95=320 tdrop= 1662  |  PULLbytes gp= 83374 loss= 8.3% tdrop=    0 (+5%)  |  PULLms gp= 84277 loss= 7.3% p95=329 tdrop=    0 (+6%)
+  [mild    ] PUSH gp= 79448 loss=12.6% p95=325 tdrop= 1639  |  PULLbytes gp= 83708 loss= 8.0% tdrop=    0 (+5%)  |  PULLms gp= 85777 loss= 5.7% p95=536 tdrop=    0 (+8%)
+  [medium  ] PUSH gp= 78802 loss=13.4% p95=340 tdrop= 1150  |  PULLbytes gp= 84101 loss= 7.5% tdrop=    0 (+7%)  |  PULLms gp= 77888 loss=14.4% p95=652 tdrop=    0 (-1%)
+  [severe  ] PUSH gp= 76054 loss=16.4% p95=376 tdrop=  712  |  PULLbytes gp= 85114 loss= 6.4% tdrop=    0 (+12%)  |  PULLms gp= 78817 loss=13.3% p95=639 tdrop=    0 (+4%)
+  [soft-dip ] PUSH gp= 76763 loss=15.6% p95=303 tdrop= 1834  |  PULLbytes gp= 83986 loss= 7.7% tdrop= 7703 (+9%)  |  PULLms gp= 83082 loss= 8.7% p95=627 tdrop=    0 (+8%)
+
+==============================================================================
+EXP3  N=3  tetherA(swing+dropouts)+tetherB(swing+dropouts,phase)+ethernet
+==============================================================================
+  PUSH argmin      gp= 82813 util=66.3% loss=24.5% p50=206 p95=350 p99=394 depth= 3041 late=13484 tdrop=4233
+  PULL bytes lb=40 gp= 97644 util=78.1% loss=10.9% p50=185 p95=355 p99=424 depth= 3800 late=11743 tdrop=   0
+  PULL ms tgt=40   gp= 93273 util=74.6% loss=14.9% p50=423 p95=634 p99=667 depth= 3302 late=6530 tdrop=   0
+  PULL ms+lat t=40 gp= 94001 util=75.2% loss=14.3% p50=426 p95=634 p99=667 depth= 3429 late=4685 tdrop=   0
+
+==============================================================================
+EXP4  ESTIMATE-LAG  single HARD stall tether@t0=3.0 (0.5s).  push qhat-lag vs pull local-drain.
+==============================================================================
+  PUSH  frames COMMITTED-to-tether in [t0,t0+0.8s]=  782  of which LOST(cap=0 down/taildrop)=  564   <-- estimate-lag waste
+  PULL  frames COMMITTED-to-tether in [t0,t0+0.8s]= 2078  of which LOST=   16   (pull stops committing on real drain)
+  push tether-commit TAIL after t0 (per 20ms, cap=0 so all wasted): last commit @ 740ms
+     8  0  0  0  0 83 19 19 19 15 94 21 20 18 16 100 85 27 27 27  0 24 22 21 11  0  1  0  0  0  0  0  0  0  0  1  1  0  0  0   (20ms bins from t0)
+  windowed goodput (Mb/s) around the stall [t0=3.0, revive=3.5]:
+    t=       2.50  2.75  3.00  3.25  3.50  3.75  4.00  4.25 
+    push:    85.8  79.9  67.0  67.8  53.5  57.6  79.5  89.5 
+    pull:    85.6  90.7  90.9  85.8  86.4  89.4  88.0  85.7 
+
+==============================================================================
+EXP5  LBUF HONESTY SWEEP (rule-8: pull is NOT a free perfect signal)
+==============================================================================
+  -- gate=BYTES (fixed socket budget; overshoots 300ms on a slow link) --
+  lbuf= 10ms  gp= 83662 util=80.0%  loss= 8.0%  p95=401  depth= 2847 tdrop=    0
+  lbuf= 20ms  gp= 84113 util=80.4%  loss= 7.5%  p95=403  depth= 3044 tdrop=    0
+  lbuf= 40ms  gp= 84101 util=80.4%  loss= 7.5%  p95=412  depth= 3058 tdrop=    0
+  lbuf= 80ms  gp= 84003 util=80.3%  loss= 7.6%  p95=411  depth= 3176 tdrop= 4996
+  lbuf=150ms  gp= 84282 util=80.5%  loss= 7.3%  p95=419  depth= 3208 tdrop= 8278
+  lbuf=300ms  gp= 84533 util=80.8%  loss= 7.1%  p95=415  depth= 3211 tdrop= 9931
+  -- gate=MS (local drain-rate EWMA -> time-bounded buffer, no lag) --
+  tgt = 10ms  gp= 71435 util=68.3%  loss=21.5%  p95=623  depth= 2402 tdrop=    0
+  tgt = 20ms  gp= 77623 util=74.2%  loss=14.7%  p95=632  depth= 2606 tdrop=    0
+  tgt = 40ms  gp= 77888 util=74.4%  loss=14.4%  p95=652  depth= 2606 tdrop=    0
+  tgt = 80ms  gp= 86408 util=82.6%  loss= 5.0%  p95=427  depth= 3091 tdrop=    0
+  tgt =150ms  gp= 84959 util=81.2%  loss= 6.6%  p95=521  depth= 3449 tdrop=    0

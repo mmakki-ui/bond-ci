@@ -1,0 +1,167 @@
+#!/bin/sh
+# p5-version -- interrogate an installed P5. THE answer to "what is on this box?"
+#
+#   p5-version              print the stamp (KEY=value, machine-readable)
+#   p5-version --verify     re-hash every recorded file against the record
+#   p5-version --files      print the installed-file record
+#   p5-version --dirs       print the directories the install created
+#   p5-version --contract   print the contract copies this install shipped with
+#
+# WHY A STAMP AT ALL. A box that cannot say what is installed on it cannot be
+# debugged remotely, cannot be checked against the branch that built it, and
+# cannot be trusted after a partial or interrupted deploy. The failure mode
+# this exists to kill is the specific one this project has already hit: an
+# artifact on a box that nobody can tie back to a commit, so a claim about the
+# code says nothing about the box. Every field below is there to make one
+# question answerable without an ssh archaeology session:
+#
+#   P5_GIT_COMMIT / _BRANCH / _DIRTY   exactly which source. DIRTY is carried
+#       and printed rather than refused, because a hand-built package for a lab
+#       box is legitimate -- but it must be visible on the box, not remembered.
+#   P5_PKG_MANIFEST_SHA256   one number that pins the WHOLE payload. Compare it
+#       against the package that was meant to ship.
+#   P5_INSTALLED_UTC / P5_INSTALL_ARCH   when, and on what. Arch is recorded
+#       because the daemon binary is arch-specific and picking the wrong one is
+#       a live risk (`uname -m` has still not been run on either box --
+#       ROADMAP, "Not run, anywhere").
+#   P5_E1_VERDICT   `unmeasured` until the E1 hardware probe (ROADMAP G1) runs.
+#       It gates whether the cap and the standing lightning are enabled
+#       (p5-execution-handover.md:85). Printing `unmeasured` on the box makes
+#       the open gate visible to whoever is standing in front of it.
+#   P5_CONTRACT_VERSION   the on-disk layout schema. An uninstaller that meets
+#       a HIGHER version than it knows must refuse, not guess.
+#
+# --verify is the answer to "is what is on the box still what was installed?".
+# It is drift detection, not authentication: anyone who can change a file can
+# change the record. Authenticating the install is not in scope for E0 (the
+# transport authentication question is ROADMAP U31).
+#
+# BUSYBOX-SAFE POSIX sh.
+
+set -u
+
+P5_TAG="p5-version"
+
+# WHERE THE LIBRARY COMES FROM, and the order matters.
+# The SIBLING copy wins. Running from an unpacked package, ../lib is the
+# package's own library and is the right one. Running from the box, this
+# script sits at /usr/sbin, so ../lib is /usr/lib -- which holds no
+# p5-common.sh -- and the box copy under /usr/lib/p5 is used instead. So the
+# sibling-first order costs nothing on a real box and buys one thing that
+# matters: a box whose /usr/lib/p5/p5-common.sh is CORRUPT can still be
+# inspected and cleaned up from the package, instead of every tool sourcing
+# the broken library and dying. A damaged box must stay reachable by its own
+# repair tools.
+_self_dir=$(dirname "$0")
+if [ -r "$_self_dir/../lib/p5-common.sh" ] || [ -n "${P5_LIB_SRC:-}" ]; then
+    _lib_src="${P5_LIB_SRC:-$_self_dir/../lib}"
+else
+    _lib_src="${P5_ROOT:-}/usr/lib/p5"
+fi
+if [ -r "$_self_dir/../contract/paths" ]; then
+    _con_dir="$_self_dir/../contract"; _con_pfx=""
+else
+    _con_dir="${P5_ROOT:-}/usr/lib/p5"; _con_pfx="contract-"
+fi
+[ -r "$_lib_src/p5-common.sh" ] || {
+    echo "p5-version: ERROR: cannot find p5-common.sh under $_lib_src" >&2
+    exit 5
+}
+. "$_lib_src/p5-common.sh"
+p5_contract_dir "$_con_dir" "$_con_pfx"
+
+usage() {
+    cat >&2 <<'EOF'
+usage: p5-version [--verify|--files|--dirs|--contract|--state]
+
+exit codes: 0 ok | 1 drift found / nothing installed | 2 usage
+EOF
+    exit "$P5_EX_USAGE"
+}
+
+MODE="print"
+case "${1:-}" in
+    "")          MODE=print ;;
+    --verify)    MODE=verify ;;
+    --files)     MODE=files ;;
+    --dirs)      MODE=dirs ;;
+    --contract)  MODE=contract ;;
+    --state)     MODE=state ;;
+    -h|--help)   usage ;;
+    *) echo "p5-version: unknown argument: $1" >&2; usage ;;
+esac
+[ $# -le 1 ] || usage
+
+p5_announce_overrides
+
+# --state answers "what state is this box in?" and is the one mode that works
+# in EVERY state, including the ones with no stamp. It is what an operator on a
+# box that will not install runs first.
+p5_box_state
+if [ "$MODE" = state ]; then
+    echo "P5_BOX_STATE=$P5_STATE"
+    echo "P5_BOX_STATE_WHY=$P5_STATE_WHY"
+    case "$P5_STATE" in
+        clean)      echo "# nothing to do; a fresh install may proceed" ;;
+        installed)  echo "# a completed install; p5-version --verify checks it for drift" ;;
+        # These name /usr/sbin/p5-uninstall unconditionally, and that is safe
+        # HERE and only here, by construction rather than by luck: p5-version
+        # is unlinked in the ordinary payload pass, while p5-uninstall and the
+        # library it needs are held to the plan's final SELFDROP action. So if
+        # this script is running at all, the verb it names is still present.
+        # p5-install cannot make that argument -- it runs from the package, on
+        # a box that may have nothing left -- which is why it resolves its
+        # remedy through p5_recovery_verb instead.
+        incomplete) echo "# a run died half way. Remedy: p5-uninstall --remove --dry-run, then --remove" ;;
+        # --role is SPELLED OUT on this branch and only this one. Everywhere
+        # else p5-uninstall reads P5_ROLE off the stamp; `damaged` is by
+        # definition the state with no stamp to read, so a bare verb would
+        # refuse (exit 2) instead of recovering. Naming the flag here is the
+        # difference between a remedy and a dead end on a box with no console.
+        damaged)    echo "# P5 paths with no stamp and no intent record. Remedy: p5-uninstall --check --role client|server," ;
+                    echo "#   then p5-uninstall --remove --recover --role client|server --dry-run" ;;
+        future)     echo "# use the p5-version that shipped with that install" ;;
+    esac
+    exit "$P5_EX_OK"
+fi
+
+case "$P5_STATE" in
+    installed) : ;;
+    clean)
+        echo "$P5_TAG: no P5 install on this box ($P5_STATE_WHY)"
+        exit "$P5_EX_FAIL" ;;
+    *)
+        p5_err "this box is in state '$P5_STATE': $P5_STATE_WHY"
+        p5_err "Fields below, if any, describe a run that did not finish. Run 'p5-version --state'."
+        [ -r "$P5_STAMP" ] || exit "$P5_EX_FAIL" ;;
+esac
+
+# A stamp written by a LATER contract version describes a layout this build
+# does not know. Print it, say so, and do not pretend to interpret it.
+sv=$(p5_stamp_get P5_CONTRACT_VERSION || echo "")
+if [ -n "$sv" ] && [ "$sv" -gt "$P5_CONTRACT_VERSION" ] 2>/dev/null; then
+    p5_err "stamp declares contract version $sv; this p5-version understands $P5_CONTRACT_VERSION."
+    p5_err "Fields below are printed verbatim and MUST NOT be interpreted by this build."
+fi
+
+case "$MODE" in
+    print)    cat "$P5_STAMP" ;;
+    files)    [ -r "$P5_FILEREC" ] && cat "$P5_FILEREC" || { p5_err "no file record at $P5_FILEREC"; exit "$P5_EX_FAIL"; } ;;
+    dirs)     [ -r "$P5_DIRREC" ] && cat "$P5_DIRREC" || { p5_err "no dir record at $P5_DIRREC"; exit "$P5_EX_FAIL"; } ;;
+    contract)
+        # All THREE are printed, including the inventory. The box derives its
+        # clean predicate and its removal plan from contract-paths, so a reader
+        # who cannot see it cannot check either.
+        echo "# --- contract/namespace as shipped with this install ---"
+        [ -r "$P5_CONTRACT_NS" ] && cat "$P5_CONTRACT_NS"
+        echo "# --- contract/foreign as shipped with this install ---"
+        [ -r "$P5_CONTRACT_FOREIGN" ] && cat "$P5_CONTRACT_FOREIGN"
+        echo "# --- contract/paths as shipped with this install ---"
+        [ -r "$P5_CONTRACT_PATHS" ] && cat "$P5_CONTRACT_PATHS"
+        ;;
+    verify)
+        p5_require_tools
+        p5_verify_files || exit "$P5_EX_FAIL"
+        ;;
+esac
+exit "$P5_EX_OK"
