@@ -1,0 +1,21 @@
+# deploy/p5/shape/vendor/ — the VENDORED cake-autorate payload.
+#
+# EMPTY ON PURPOSE, and this file exists so the empty directory is tracked and
+# its emptiness is a STATED state rather than an accident of git not storing
+# empty directories.
+#
+# G2 answered the HASH half on 2026-08-30 (../cake-autorate.pin FILES block:
+# CAR_ORIGIN=NO-GIT, so there is no commit to pin; the file set is the pin).
+# It did not answer the BYTE half. Hashes are not code, and nothing in this
+# repo may invent bytes to match somebody else's hashes.
+#
+# Consequences, both mechanised rather than trusted:
+#   * `shape-install preflight` exits 3, names "vendored bytes", and installs
+#     nothing (Layer-2 SH-8).
+#   * the manifest job's pin step prints the outstanding state and does not
+#     pass off an empty vendor tree as a verified one.
+#
+# To fill it, from the CLIENT (the GL-MT6000; its address is in docs/):
+#   tar -C /root/cake-autorate -cf - $(sed -n 's/^[0-9a-f]\{64\}  //p' \
+#       deploy/p5/shape/cake-autorate.pin) | gzip -n > car-vendor.tar.gz
+# then unpack flat into this directory (no wrapper dir) and re-run preflight.
