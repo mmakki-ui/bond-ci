@@ -1,0 +1,48 @@
+#!/bin/sh
+# fake /etc/init.d/p5-shape — the E4 shaping CONTROLLER (U22; renamed by U210).
+# Same shape as svc-engarde/svc-agg, plus the procd `running` verb that
+# bond-xctl's shape_now() probes.
+#
+# P5-OWNED-INIT: deploy/p5/init.d/p5-shape
+# ^ THE OWNERSHIP MARKER, and it is HERE because the reconciler now greps
+# $SHAPE_SVC for it before it enables, restarts, disables or stops anything
+# (xctl-shape.sh shape_svc_owned, U210). $SHAPE_SVC in this harness IS this
+# shim, so without this line every SH bar would measure the refusal path
+# instead of the shaping path. It is the same string as the shipped init
+# script's line 3 and shape-install's P5_MARK; a bar asserts all three are
+# byte-equal.
+#
+# restart COUNTS, for the same reason the feeder shims count: a shaping bounce
+# is an effect, and SH-1 asserts a healthy box causes ZERO of them.
+#
+# enable/disable/stop are LEDGERED here and not in the other svc-* shims, and
+# that is deliberate: SH-17/SH-18 assert that a foreign controller receives
+# ZERO service verbs, and "zero" can only be measured against a shim that would
+# have recorded them. A knob that silently records nothing proves nothing.
+#
+# KNOBS ($ECOSIM_STATE):
+#   shape_broken=1   the controller refuses to come up (models a broken or
+#                    absent cake-autorate). start/restart FAIL and `running`
+#                    reports not-running -- the SH-3 INV8 world.
+#
+# THE FOREIGN WORLD IS NOT A KNOB HERE, DELIBERATELY. Ownership is a property of
+# the FILE the reconciler greps, so no runtime flag inside this shim could change
+# what that grep sees. run.sh's sh_foreign builds it instead: a COPY of this file
+# with the marker line stripped, pointed at by SHAPE_SVC. The copy still ledgers
+# every verb, which is what lets SH-17/SH-18 assert ZERO of them against a
+# recorder rather than against silence.
+S="$ECOSIM_STATE"; N=p5-shape
+broke() { [ "$(cat "$S/shape_broken" 2>/dev/null)" = 1 ]; }
+case "$1" in
+  enable)  echo 1 > "$S/enabled.$N"; echo "SVC $N enable" >> "$S/ledger" ;;
+  disable) echo 0 > "$S/enabled.$N"; echo "SVC $N disable" >> "$S/ledger" ;;
+  start)   broke && exit 1; echo 1 > "$S/running.$N"; echo "SVC $N start" >> "$S/ledger" ;;
+  restart) broke && exit 1
+           c=$(cat "$S/restarts.$N" 2>/dev/null || echo 0); echo $((c+1)) > "$S/restarts.$N"
+           echo 1 > "$S/running.$N"; echo "SVC $N restart" >> "$S/ledger" ;;
+  stop)    echo 0 > "$S/running.$N"; echo "SVC $N stop" >> "$S/ledger" ;;
+  enabled) [ "$(cat "$S/enabled.$N" 2>/dev/null)" = 1 ] || exit 1 ;;
+  running) broke && exit 1
+           [ "$(cat "$S/running.$N" 2>/dev/null)" = 1 ] || exit 1 ;;
+esac
+exit 0
