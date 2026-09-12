@@ -1,0 +1,19 @@
+=== MID-drop: pure ack-window (no RTO) vs window+RTO, ack_loss=0 ===
+  pull (collapse baseline)       gp= 55312 loss=39.1 p50= 498 p95= 608 tdrop=  160
+  B window ONLY (rto=None)       gp= 79464 loss=12.5 p50= 361 p95= 606 tdrop=  149
+  B window+RTO350 (canonical)    gp= 86051 loss= 5.3 p50= 209 p95= 335 tdrop=  620
+  B window ONLY no-mirror        gp= 79391 loss=12.6 p50= 358 p95= 607 tdrop=  149
+  -> if 'window ONLY' ~= pull, the RTO timer (not the ack-clock) is the fix.
+
+=== EDGE: same test (does RTO matter at edge?) ===
+  pull                           gp= 90096 loss= 0.8 p50=  72 p95= 262 tdrop=    0
+  B window ONLY (rto=None)       gp= 89167 loss= 1.9 p50=  31 p95= 251 tdrop=    0
+  B window+RTO350                gp= 89167 loss= 1.9 p50=  31 p95= 251 tdrop=    0
+
+=== sweep RTO value at MID (is 350ms tuned? is it a rate knob?) ===
+  B rto=100                      gp= 83720 loss= 7.8 p50= 147 p95= 276 tdrop= 2316
+  B rto=200                      gp= 85676 loss= 5.7 p50= 200 p95= 317 tdrop=  894
+  B rto=350                      gp= 86051 loss= 5.3 p50= 209 p95= 335 tdrop=  620
+  B rto=500                      gp= 86308 loss= 5.0 p50= 220 p95= 340 tdrop=  324
+  B rto=800                      gp= 85642 loss= 5.7 p50= 219 p95= 385 tdrop=  301
+  B rto=None                     gp= 79464 loss=12.5 p50= 361 p95= 606 tdrop=  149
