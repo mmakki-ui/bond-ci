@@ -1,0 +1,16 @@
+#!/bin/sh
+RAW=0
+for a in "$@"; do [ "$a" = "-I" ] && RAW=1; done
+# U66/SC2046: DELIBERATE. cur_health is one whitespace-separated record and the split
+# into $1..$4 is what this shim reads; quoting collapses it to a single positional and
+# every field below falls back to its default, making the stub answer OK unconditionally.
+# shellcheck disable=SC2046
+set -- $(cat "$STUBDIR/cur_health" 2>/dev/null)
+if [ "$RAW" = 1 ]; then
+    [ "$1" = "OK" ] || exit 1
+    echo "64 bytes from x: seq=0 ttl=54 time=${2:-20}.0 ms"
+else
+    [ "${3:-OK}" = "OK" ] || exit 1
+    echo "64 bytes from x: seq=0 ttl=54 time=${4:-141}.0 ms"
+fi
+exit 0

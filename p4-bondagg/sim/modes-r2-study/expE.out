@@ -1,0 +1,18 @@
+rig/load V: gp loss%% p50/p95 | share per source | ngaps gap99 gapmax | late@bestfix
+S3 eth+wifi+cellA   30000 V0: gp= 29798 loss= 0.55 p50=  14 p95=  14 | sh=0.54/0.30/0.16 | ng=12240 g99=  3.0 gmx=  3.0 late=1475.0 (1s)
+S3 eth+wifi+cellA   30000 V1: gp= 29964 loss= 0.00 p50=  11 p95=  11 | sh=1.00/0.00/0.00 | ng=    0 g99=  0.0 gmx=  0.0 late=  0.0 (3s)
+S3 eth+wifi+cellA   60000 V0: gp= 59594 loss= 0.55 p50=  14 p95=  14 | sh=0.55/0.31/0.14 | ng=24458 g99=  3.0 gmx= 21.0 late=2507.0 (6s)
+S3 eth+wifi+cellA   60000 V1: gp= 59926 loss= 0.00 p50=  11 p95=  11 | sh=1.00/0.00/0.00 | ng=    0 g99=  0.0 gmx=  0.0 late=  0.0 (8s)
+S3 eth+wifi+cellA   90000 V0: gp= 89396 loss= 0.55 p50=  14 p95=  14 | sh=0.56/0.31/0.12 | ng=36037 g99=  3.0 gmx=411.0 late=169.0 (12s)
+S3 eth+wifi+cellA   90000 V1: gp= 81738 loss= 9.07 p50=  41 p95=  41 | sh=0.86/0.14/0.00 | ng=55560 g99= 37.0 gmx= 37.0 late=40463.0 (16s)
+S3 eth+wifi+cellA  115000 V0: gp=113746 loss= 0.97 p50=  14 p95=  78 | sh=0.55/0.32/0.13 | ng=48271 g99= 32.0 gmx=411.0 late=331.0 (21s)
+S3 eth+wifi+cellA  115000 V1: gp=105711 loss= 7.96 p50=  41 p95=  91 | sh=0.68/0.30/0.02 | ng=75209 g99= 37.0 gmx=401.0 late=3923.0 (26s)
+S3 eth+wifi+cellA  140000 V0: gp=134780 loss= 3.61 p50=  32 p95= 254 | sh=0.54/0.31/0.15 | ng=61626 g99= 31.0 gmx=411.0 late=532.0 (32s)
+S3 eth+wifi+cellA  140000 V1: gp=127625 loss= 8.72 p50=  54 p95= 278 | sh=0.57/0.33/0.10 | ng=92079 g99= 39.0 gmx=391.0 late=4035.0 (38s)
+S4 cellA+B+C        15000 V0: gp= 14942 loss= 0.26 p50=  12 p95=  13 | sh=0.37/0.36/0.26 | ng= 5993 g99=  1.0 gmx= 10.0 late=5189.0 (39s)
+S4 cellA+B+C        15000 V1: gp= 14623 loss= 2.39 p50=  12 p95= 110 | sh=0.76/0.23/0.01 | ng= 1448 g99=429.0 gmx=459.0 late=147.0 (39s)
+S4 cellA+B+C        30000 V0: gp= 29523 loss= 1.47 p50=  13 p95= 200 | sh=0.39/0.36/0.25 | ng=11987 g99= 30.0 gmx=411.0 late= 59.0 (41s)
+S4 cellA+B+C        30000 V1: gp= 28866 loss= 3.66 p50=  13 p95= 171 | sh=0.66/0.29/0.05 | ng= 4130 g99=449.0 gmx=489.0 late=360.0 (42s)
+S4 cellA+B+C        50000 V0: gp= 46991 loss= 5.90 p50=  43 p95= 422 | sh=0.40/0.35/0.25 | ng=20828 g99= 51.0 gmx=429.0 late=457.0 (44s)
+S4 cellA+B+C        50000 V1: gp= 45991 loss= 7.90 p50=  63 p95= 357 | sh=0.56/0.29/0.15 | ng=17668 g99=439.0 gmx=489.0 late=1072.0 (46s)
+total 46s
