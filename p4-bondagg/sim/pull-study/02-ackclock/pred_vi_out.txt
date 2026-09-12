@@ -1,0 +1,42 @@
+########################################################################################
+# SCHEDULER C PREDICTION (vi): N=3 correlated (EDGE+MID) + A at edge-severe  seeds=24
+########################################################################################
+
+=== N=3 correlated [MID] (2 tethers drop together + eth; both hard-drop regime) ===
+  [correlated N=3 [mid]]
+    scheduler       gp  loss%   p50   p95   p99  tdrop   late
+    pull         89155   19.8   100   230   246   7314  12774
+    A ewma      101352    8.9   110   236   363   4258   5116
+    push        101412    8.8   109   235   363   4242   4721
+    oracle      106161    4.6   101   303   367     40   4596
+    C            81295   26.9   471   605   627    673   2428
+
+=== N=3 correlated [EDGE] (2 tethers drop together + eth; both edge-bottleneck regime) ===
+  [correlated N=3 [edge]]
+    scheduler       gp  loss%   p50   p95   p99  tdrop   late
+    pull        109929    1.2    12   261   311      0   1191
+    A ewma      107967    2.9    62   381   512      0   2911
+    push        107539    3.3    62   361   391      0   3388
+    oracle      110321    0.8    12   251   291      0    830
+    C           109734    1.3    12   271   321      0   1370
+
+=== EDGE-SEVERE (N=2, single tether+eth, 4x 700ms dropouts) -- A/C added as the missing control ===
+  [edge-severe]
+    scheduler       gp  loss%   p50   p95   p99  tdrop   late
+    pull         90388    0.5    52   291   301      0    424
+    A ewma       86633    4.6   272   484   588      0   2065
+    push         86880    4.4   261   461   588      0   2079
+    oracle       90449    0.4    52   282   301      0    368
+    C            90239    0.7    61   292   302      0    561
+
+(elapsed 1909s)
+
+########################################################################################
+# VERDICTS (vi)
+########################################################################################
+[N=3 MID] C gp=81295 loss=26.9 p50=471 p95=605  |  pull gp=89155 loss=19.8  A gp=101352 loss=8.9  push gp=101412 loss=8.8  oracle gp=106161 loss=4.6
+   gp_ok(>=min(pull,A)*0.97)=FAIL  loss_ok(<=A+1.0)=FAIL  p95_ok(<=max(push,A)*1.15)=FAIL  => FAIL
+[N=3 EDGE] C gp=109734 loss=1.3 p50=12 p95=271  |  pull gp=109929 loss=1.2  A gp=107967 loss=2.9  push gp=107539 loss=3.3  oracle gp=110321 loss=0.8
+   gp_ok(>=min(pull,A)*0.97)=PASS  loss_ok(<=A+1.0)=PASS  p95_ok(<=max(push,A)*1.15)=PASS  => PASS
+[edge-severe] C gp=90239 loss=0.7 p50=61 p95=292  |  pull gp=90388 loss=0.5  A gp=86633 loss=4.6  push gp=86880 loss=4.4  oracle gp=90449 loss=0.4
+   gp_ok(>=min(pull,A)*0.97)=PASS  loss_ok(<=A+1.0)=PASS  p95_ok(<=max(push,A)*1.15)=PASS  => PASS

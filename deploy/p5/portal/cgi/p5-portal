@@ -1,0 +1,571 @@
+#!/bin/sh
+# /usr/lib/p5/portal/cgi/p5-portal — M9 portal CGI. BUSYBOX-SAFE POSIX sh.
+#
+# THIS FILE PLUS lib/portal-lib.sh IS THE ENTIRE ATTACK SURFACE (design §5:
+# "Keep the CGI minimal"). Everything else the portal ships is static text.
+#
+# THE CONTRACT. The portal is a CALLER of the reconciler, never a controller
+# (m9-portal-design.md §1). The COMPLETE set of side-effecting externals this
+# file may invoke is four argument vectors and nothing else:
+#
+#     $BONDCTL on
+#     $BONDCTL off
+#     $BONDCTL mode <a literal read out of catalogue/modes>
+#     $XCTL reconcile refresh
+#
+# plus fact-file writes into $BOND_DIR under a catalogue-declared key.
+#
+# THAT LIST IS A STATEMENT ABOUT THIS FILE'S OWN ARGV, AND ABOUT NOTHING FURTHER
+# DOWN THE CHAIN (U23e). THIS FILE runs no init-script start/stop/restart, no
+# shaper CLI, no uci write, no sqm, no wg, no iptables and no bond.dag edge verb
+# -- an edge is reconcile()'s to pick. What the four vectors above GO ON TO DO is
+# bondctl's and the reconciler's business and is gated next door: selecting `eco`
+# reaches bondctl `set_auto_on`, which restarts bond-ecod and starts the watchdog
+# (bondctl:80-81), and any manual mode change reaches bondctl
+# `clear_auto_if_manual`, which stops bond-ecod (bondctl:97). Those are the
+# ADR-003 §2 write table, they are Layer-2's to cover, and the earlier wording
+# here ("there is NO init-script start/stop/restart") read as a claim about the
+# whole effect chain, which was false. Bars PC-2 (static scan of this file) and
+# PC-5 (runtime ledger over every control the portal has) gate the argv; this
+# comment does not.
+#
+# `bondctl on|off|mode` is itself a fact writer (deploy/p5/bondctl) already
+# covered by Layer-2. Routing the portal's mode and lifecycle writes through it
+# is deliberate: the portal then adds NO second implementation of the ADR-003 §2
+# write table (eco SETS auto, every other mode CLEARS it), so the two cannot
+# drift. `shape`/`profile`/`floor_kbit` have no bondctl verb, so those are
+# written directly and followed by `bond-xctl reconcile refresh` -- the same
+# shape, and the same VERB bondctl uses for its own fact writes (bondctl:174,
+# :183): a fact change is a CONFIG change, so on an engaged box it must ride the
+# `switch` edge (xctl-dag.sh:482). Bare `reconcile` there would find converged()
+# false (shape_matches) and walk ENGAGE instead -- mtu_1408, ep_agg and the
+# verify_agg dance whose onfail is `suspend` (bond.dag) -- so a shaping toggle
+# could suspend a healthy tunnel on one transient verify failure. On a box in
+# node=off the verb is inert either way: desired=off ignores $1 and the
+# disengage edge carries shape_apply.
+
+set -u
+P5_PORTAL_DIR="${P5_PORTAL_DIR:-/usr/lib/p5/portal}"
+# The library path is resolved at RUN TIME from the install root (and the harness
+# points it at a mutant copy), so there is no single static path for shellcheck
+# to follow. The file is linted in its own right by the same gate.
+# shellcheck disable=SC1091
+. "$P5_PORTAL_DIR/lib/portal-lib.sh"
+
+p5_read_request
+
+# ---- authentication, before anything else reads or writes -------------------
+# Fails closed. See lib/portal-lib.sh "authentication" for exactly which part of
+# this is established on the box and which part is a labelled hypothesis.
+p5_auth_ok || p5_die "403 Forbidden" auth
+
+emit_kv() { p5_json_str "$1"; printf ':'; p5_json_str "$2"; }
+
+# ---- read: the catalogue ----------------------------------------------------
+emit_catalogue() {
+    printf '{"ok":true,"modes":['
+    _first=1
+    while IFS='|' read -r v verb stt note || [ -n "${v:-}" ]; do
+        case "${v:-}" in ''|'#'*) continue ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv value "$v"
+        printf ','; emit_kv verb "${verb:-}"
+        printf ','; emit_kv status "${stt:-}"
+        printf ','; emit_kv note "${note:-}"
+        printf '}'
+    done < "$P5_CAT_DIR/modes"
+    printf '],"fields":['
+    _first=1
+    # `impl` is COLUMN 6 and OPTIONAL (U227): the subset of the domain a shipped
+    # consumer derives anything from. It is read into its OWN variable, never
+    # left to `lab` -- a five-variable read would append "|balanced" to the
+    # label and the page would render it. Empty = no restriction.
+    while IFS='|' read -r k kind dom cons lab impl || [ -n "${k:-}" ]; do
+        case "${k:-}" in ''|'#'*) continue ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv key "$k"
+        printf ','; emit_kv kind "${kind:-}"
+        printf ','; emit_kv domain "${dom:-}"
+        printf ','; emit_kv consumer "${cons:-}"
+        printf ','; emit_kv label "${lab:-}"
+        printf ','; emit_kv impl "${impl:-}"
+        printf '}'
+    done < "$P5_CAT_DIR/fields"
+    printf '],"probes":['
+    _first=1
+    # Column 2 (the argument vector) is read into the throwaway `_` and NEVER
+    # bound to a name: the page needs the name and the label, and shipping the
+    # argv to the browser would invite a client that thinks it may compose one.
+    # It still has to be CONSUMED as a field -- dropping the variable would make
+    # `lab` swallow `argv|label` whole.
+    while IFS='|' read -r n _ lab || [ -n "${n:-}" ]; do
+        case "${n:-}" in ''|'#'*) continue ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv name "$n"
+        printf ','; emit_kv label "${lab:-}"
+        printf '}'
+    done < "$P5_CAT_DIR/probes"
+    printf '],"tests":['
+    _first=1
+    # Column 3 (the SYMBOLIC head) is read into the throwaway `_` and never
+    # bound, for the same reason the probe argv is: the page needs the name, the
+    # class and the label, and shipping the head to the browser would invite a
+    # client that thinks it may choose one. `bound` IS sent -- it is the number
+    # the confirm dialog has to quote back to the operator.
+    while IFS='|' read -r n cls _ bnd lab || [ -n "${n:-}" ]; do
+        case "${n:-}" in ''|'#'*) continue ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv name "$n"
+        printf ','; emit_kv class "${cls:-}"
+        printf ','; emit_kv bound "${bnd:-}"
+        printf ','; emit_kv label "${lab:-}"
+        printf '}'
+    done < "$P5_CAT_DIR/tests"
+    printf '],"logs":['
+    _first=1
+    # SAME RULE AS THE PROBE ARGV: the browser is sent the NAME and the LABEL and
+    # never the pattern. A page that had the pattern would be a page that could
+    # be talked into composing one. The split is p5_log_row's and not this
+    # loop's, because the datapath row's ERE contains the field separator (see
+    # the catalogue's header); reading it here with a plain three-field `read`
+    # would truncate that pattern and mislabel that row.
+    while IFS='|' read -r n rest || [ -n "${n:-}" ]; do
+        case "${n:-}" in ''|'#'*) continue ;; esac
+        case "${rest:-}" in *'|'*) ;; *) continue ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv name "$n"
+        printf ','; emit_kv label "${rest##*|}"
+        printf '}'
+    done < "$P5_CAT_DIR/logs"
+    printf ']}\n'
+}
+
+# ---- read: state ------------------------------------------------------------
+# THE PAIR (design §2 / ADR-003 rule 5). `intent` and `position` are two DISTINCT
+# fields. `position` is non-empty only under auto. A page that renders one
+# "current mode" field is the defect this section exists to prevent, so the split
+# is made here, server-side, where a bar can test it without a browser.
+emit_state() {
+    _auto=off; [ -f "$BOND_DIR/auto" ] && _auto=on
+    printf '{"ok":true,'
+    emit_kv intent   "$(p5_intent)";   printf ','
+    emit_kv position "$(p5_position)"; printf ','
+    emit_kv auto     "$_auto";         printf ','
+    emit_kv node     "$("$XCTL" node 2>/dev/null)"; printf ','
+    # A fact with no consumer yet is still reported with its stored value, so the
+    # page can say "written, nothing reads it" instead of implying it works.
+    printf '"facts":{'
+    _first=1
+    while IFS='|' read -r k rest || [ -n "${k:-}" ]; do
+        case "${k:-}" in ''|'#'*) continue ;; esac
+        p5_key_sane "$k" || continue
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        emit_kv "$k" "$(p5_readfile "$BOND_DIR/$k")"
+    done < "$P5_CAT_DIR/fields"
+    printf '},'
+    # kmwan's mode -- C3 show-divergence, not a control (INTENT.md OBJ-H hazard 4).
+    emit_kv kmwan "$("$UCI" -q get kmwan.global.mode 2>/dev/null)"; printf ','
+    # the numeric field's envelope: absent means the field is disabled, and why.
+    emit_kv floor_envelope "$(p5_readfile "$P5_STATE_DIR/floor_envelope")"; printf ','
+    # WHAT THIS CGI WOULD ACTUALLY CALL, and who it is. uhttpd hands a CGI no
+    # environment of ours, so the values below are the DEFAULTS at the head of
+    # lib/portal-lib.sh unless something set them -- which is exactly the fact
+    # that was wrong before U220 and that nothing on the page could have shown.
+    # It is also the one measurement the record does not have: the CGI's uid and
+    # PATH on GL's build are a known-unknown (the portal plan's cross-cutting
+    # defect 8), and this makes the page itself answer it at S3, read-only,
+    # before any click. `bondctl_x`/`xctl_x` are `[ -x ]` on the resolved paths,
+    # so "installed but not executable" and "not installed" are distinguishable.
+    # `id -u` is the one extra fork this route pays for; there is no builtin for
+    # it in busybox ash, and it is a read, not an effect (no ledger entry).
+    emit_kv root     "$P5_PORTAL_DIR";         printf ','
+    emit_kv bondctl  "$BONDCTL";               printf ','
+    emit_kv xctl     "$XCTL";                  printf ','
+    _bx=0; [ -x "$BONDCTL" ] && _bx=1
+    _xx=0; [ -x "$XCTL" ]    && _xx=1
+    emit_kv bondctl_x "$_bx";                  printf ','
+    emit_kv xctl_x    "$_xx";                  printf ','
+    emit_kv uid      "$(id -u 2>/dev/null)";   printf ','
+    emit_kv path     "${PATH:-}"
+    printf '}\n'
+}
+
+# ---- read: the source table -------------------------------------------------
+# SEPARATE from ?q=state on purpose. `bond-xctl _sources` asks the box about
+# every declared interface over ubus and is by far the most expensive read the
+# portal makes; folding it into the state poll would make every refresh pay for
+# it. N-GENERIC: whatever rows the box declares, in whatever number and order --
+# no index is privileged, nothing is truncated, no interface name is tested.
+emit_sources() {
+    printf '{"ok":true,"sources":['
+    _first=1
+    "$XCTL" _sources 2>/dev/null | while read -r _if _dev _st _metric _metered; do
+        [ -n "${_if:-}" ] || continue
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv iface "$_if"
+        printf ','; emit_kv device "${_dev:-}"
+        printf ','; emit_kv state "${_st:-}"
+        printf ','; emit_kv metric "${_metric:-}"
+        printf ','; emit_kv metered "${_metered:-}"
+        printf '}'
+    done
+    printf ']}\n'
+}
+
+# ---- read: an ENUMERATED probe ---------------------------------------------
+# The request supplies a NAME only. The argv comes from catalogue/probes and its
+# head token is resolved from a CLOSED symbol set, so no request byte reaches a
+# command line (injection surfaces INJ-1 and INJ-5).
+run_probe() {
+    _want=$(p5_arg name)
+    _names=$(p5_cat_keys probes)
+    _n=$(p5_match_literal "$_names" "$_want") || p5_die "400 Bad Request" unknown_probe
+    _argv=$(p5_cat_field probes "$_n" 2)
+    _head=${_argv%% *}; _rest=${_argv#* }
+    [ "$_rest" = "$_argv" ] && _rest=""
+    case "$_head" in
+      XCTL)    _prog="$XCTL" ;;
+      UCI)     _prog="$UCI" ;;
+      BONDCTL) _prog="$BONDCTL" ;;
+      *)       p5_die "500 Internal Server Error" probe_head ;;
+    esac
+    for _t in $_rest; do
+        case "$_t" in
+          *[!A-Za-z0-9._@:/-]*) p5_die "500 Internal Server Error" probe_argv ;;
+        esac
+    done
+    # $_rest is intentionally unquoted: it is word-split into argv, and every
+    # token has just been proven metacharacter-free and catalogue-sourced.
+    # shellcheck disable=SC2086
+    _out=$("$_prog" $_rest 2>&1); _rc=$?
+    p5_hdr "200 OK"
+    printf '{"ok":true,'; emit_kv probe "$_n"
+    printf ',"rc":%d,' "$_rc"
+    emit_kv output "$_out"
+    printf '}\n'
+}
+
+# ---- read: an ENUMERATED log source ----------------------------------------
+# THE ONLY ROUTE WHOSE BODY IS NOT JSON. Same shape as run_probe: the request
+# supplies a NAME, the name is matched against catalogue/logs by exact literal,
+# and what reaches the command line is the CATALOGUE'S pattern -- so no request
+# byte is on that argv either (injection surface INJ-1). What is different is
+# the body: the ring is streamed straight through as text/plain instead of being
+# captured, escaped and truncated (see p5_hdr_text for why, and LOG-7 for the
+# `</script>` case).
+#
+# ORDER MATTERS AND IS THE WHOLE OF THE ERROR MODEL. Every refusal is decided
+# BEFORE p5_hdr_text writes a byte, because once a 200 header is out there is no
+# way left to say 400. So: unknown name -> 400; unreadable catalogue row, or a
+# pattern the charset refuses OR one `grep -E` cannot compile -> 500; no logread
+# on the box -> 500; only then the header and the stream.
+#
+# EMPTY IS A 200, NOT A 404. "the ring holds no line carrying this tag" is an
+# ANSWER, and the interesting one -- it is what you see when the refusal you are
+# hunting has already been pushed out of the ring by PSTAT at 1 Hz. The page says
+# that in those words rather than printing nothing; a 404 would read as "there is
+# no such log".
+#
+# grep's exit status is deliberately not the route's: `grep -E` exits 1 when it
+# matched nothing, which is the empty case above, and this route has already
+# emitted its header. So the status is fixed at 200 and the body carries the
+# answer.
+emit_log() {
+    _want=$(p5_arg src)
+    _n=$(p5_match_literal "$(p5_cat_keys logs)" "$_want") || p5_die "400 Bad Request" unknown_log
+    _re=$(p5_log_row "$_n" re)      || p5_die "500 Internal Server Error" bad_log_row
+    p5_regex_ok "$_re"              || p5_die "500 Internal Server Error" bad_log_regex
+    [ -x "$LOGREAD" ]               || p5_die "500 Internal Server Error" tool_missing
+    p5_hdr_text "200 OK"
+    # `--` before the pattern: a catalogue row is allowed to start with `-` (a
+    # tag can), and without it grep would read the row as a FLAG -- `-v` would
+    # invert the filter and serve every OTHER line in the ring, which on a GL box
+    # means dropbear and gl_ddns lines. Bar LOG-9 pins this.
+    "$LOGREAD" 2>/dev/null | grep -E -- "$_re"
+    exit 0
+}
+
+# ---- write ------------------------------------------------------------------
+write_mode() {
+    _v_raw=$(p5_arg v)
+    # 1. is it a mode this catalogue knows at all?
+    _v=$(p5_match_literal "$(p5_modes_all)" "$_v_raw") || p5_die "400 Bad Request" unknown_mode
+    # 2. does the EXECUTOR implement it? bond-xctl has no fail-loud arm for an
+    #    unknown mode (its case ends `*) R="$W"`), so an unimplemented value would
+    #    be accepted silently and behave like lightning. Refuse (ADR-003 rule 6).
+    p5_match_literal "$(p5_modes_impl)" "$_v" >/dev/null || p5_die "501 Not Implemented" mode_unimplemented
+
+    # 3. ADR-003 rule 4 -- the confirmation flow. Pinning out of auto leaves the
+    #    mode fact at whatever position bond-ecod escalated to, i.e. a pin the
+    #    user never chose. Refused until the client echoes back what it accepts.
+    _pin=$(p5_pin_needing_confirm "$_v")
+    if [ -n "$_pin" ]; then
+        _c=$(p5_arg confirm)
+        if [ "$_c" != "$_pin" ]; then
+            p5_hdr "409 Conflict"
+            printf '{"ok":false,"error":"confirm_required",'
+            emit_kv pin "$_pin"; printf ','
+            emit_kv selecting "$_v"
+            printf '}\n'
+            exit 0
+        fi
+    fi
+
+    _verb=$(p5_cat_field modes "$_v" 2)
+    case "$_verb" in
+      lifecycle)
+        # `direct` is the lifecycle OFF state, not a mode fact value. bondctl off
+        # clears the rc fact and reconciles. It is NOT a service stop.
+        _out=$("$BONDCTL" off 2>&1); _rc=$?
+        ;;
+      mode)
+        # selecting a bonded mode implies the bond is on; both calls are
+        # level-triggered and idempotent.
+        _out=$("$BONDCTL" on 2>&1); _rc=$?
+        [ "$_rc" -eq 0 ] || { reply_effect "$_rc" "$_v" "$_out"; exit 0; }
+        _out=$("$BONDCTL" mode "$_v" 2>&1); _rc=$?
+        ;;
+      *) p5_die "500 Internal Server Error" bad_verb ;;
+    esac
+    reply_effect "$_rc" "$_v" "$_out"
+}
+
+write_field() {
+    _k_raw=$(p5_arg k)
+    _k=$(p5_match_literal "$(p5_cat_keys fields)" "$_k_raw") || p5_die "400 Bad Request" unknown_field
+    # applied to the CATALOGUE'S key, so even a corrupted catalogue cannot aim
+    # the write outside $BOND_DIR (injection surface INJ-3).
+    p5_key_sane "$_k" || p5_die "500 Internal Server Error" bad_key
+    _kind=$(p5_cat_field fields "$_k" 2)
+    _dom=$(p5_cat_field fields "$_k" 3)
+    _v_raw=$(p5_arg v)
+
+    case "$_kind" in
+      enum)
+        _v=$(p5_match_literal "$_dom" "$_v_raw") || p5_die "400 Bad Request" unknown_value
+        # DOES A SHIPPED CONSUMER IMPLEMENT THIS LITERAL? Exactly the question
+        # write_mode asks of the mode set (`mode_unimplemented` above), asked of
+        # the field set through the catalogue's OPTIONAL column 6. A value the
+        # catalogue lists but nothing derives anything from would otherwise be
+        # written and then silently behave like the consumer's default -- a
+        # control that lies. Refuse instead, and write NO file. Column 6 absent
+        # (every row but `profile` today) = no restriction, the arm is skipped.
+        _impl=$(p5_cat_field fields "$_k" 6)
+        if [ -n "$_impl" ]; then
+            p5_match_literal "$_impl" "$_v" >/dev/null \
+                || p5_die "501 Not Implemented" "${_k}_unimplemented"
+        fi
+        ;;
+      uint)
+        # NO ARBITRARY CONSTANT: the bounds are not in the code and not in the
+        # catalogue. They come from an operator-declared envelope file, and with
+        # no envelope the field is refused rather than given a placeholder
+        # ceiling. OBJ-F (U24) is what will eventually derive the real one.
+        _env="$P5_STATE_DIR/$_dom"
+        [ -r "$_env" ] || p5_die "409 Conflict" no_envelope
+        _line=$(p5_readfile "$_env")
+        _lo=${_line%% *}; _hi=${_line#* }; _hi=${_hi%% *}
+        _lo=$(p5_uint "${_lo:-}") || p5_die "500 Internal Server Error" bad_envelope
+        _hi=$(p5_uint "${_hi:-}") || p5_die "500 Internal Server Error" bad_envelope
+        [ "$_lo" -ge 1 ] || p5_die "500 Internal Server Error" bad_envelope
+        [ "$_hi" -ge "$_lo" ] || p5_die "500 Internal Server Error" bad_envelope
+        _v=$(p5_uint "$_v_raw") || p5_die "400 Bad Request" not_a_number
+        if [ "$_v" -lt "$_lo" ] || [ "$_v" -gt "$_hi" ]; then
+            p5_die "400 Bad Request" out_of_range
+        fi
+        ;;
+      *) p5_die "500 Internal Server Error" bad_kind ;;
+    esac
+
+    # $_v is the CATALOGUE literal (enum) or a re-emitted canonical decimal
+    # (uint). It is never the request's bytes -- so a newline, a quote or a
+    # metacharacter has no path into the fact file (injection surface INJ-4).
+    printf '%s\n' "$_v" > "$BOND_DIR/$_k" || p5_die "500 Internal Server Error" write_failed
+    # `refresh`, not bare `reconcile` -- see THE CONTRACT at the head of this file
+    # and bondctl:174. Bars ORD-1..3 pin this verb per request.
+    _out=$("$XCTL" reconcile refresh 2>&1); _rc=$?
+    reply_effect "$_rc" "$_v" "$_out"
+}
+
+# restore-to-defaults (design §5): REMOVES the fact so the consumer falls back to
+# its own default. Removal, not a written "default value" -- the portal has no
+# business asserting what somebody else's default is.
+reset_field() {
+    _k_raw=$(p5_arg k)
+    _k=$(p5_match_literal "$(p5_cat_keys fields)" "$_k_raw") || p5_die "400 Bad Request" unknown_field
+    p5_key_sane "$_k" || p5_die "500 Internal Server Error" bad_key
+    rm -f "$BOND_DIR/$_k"
+    # a removal is a config change too: same verb as write_field.
+    _out=$("$XCTL" reconcile refresh 2>&1); _rc=$?
+    reply_effect "$_rc" "" "$_out"
+}
+
+reply_effect() {   # $1 = rc, $2 = applied value, $3 = combined output
+    if [ "$1" -eq 0 ]; then p5_hdr "200 OK"; _okv=true
+    else p5_hdr "500 Internal Server Error"; _okv=false; fi
+    printf '{"ok":%s,' "$_okv"
+    emit_kv applied "$2"; printf ','
+    emit_kv intent "$(p5_intent)"; printf ','
+    emit_kv position "$(p5_position)"; printf ','
+    emit_kv detail "$3"
+    printf '}\n'
+}
+
+# ---- the test runner: START (U228) ------------------------------------------
+# THIS CGI DOES NOT RUN A TEST. It validates a NAME, takes the one job slot,
+# starts the detached executor and answers 202 with the artifact id. Everything
+# after that is p5-portal-run's, which is why uhttpd's script timeout -- whatever
+# it is on GL's build, and it is not measured -- cannot truncate a job.
+#
+# The request supplies a name and nothing else. The program, the class and the
+# bound all come from catalogue/tests; the id is built from the clock and the
+# catalogue's own copy of the name. No request byte reaches a command line or a
+# path (injection surfaces INJ-1 and INJ-3), and mutants JOB-M1 and JOB-M2 show
+# what the two naive shapes of this would do.
+start_test() {
+    _want=$(p5_arg name)
+    _tn=$(p5_match_literal "$(p5_cat_keys tests)" "$_want") || p5_die "400 Bad Request" unknown_test
+    _cls=$(p5_cat_field tests "$_tn" 2)
+    case "$_cls" in
+      ro) ;;
+      disruptive)
+        # THE HARD SPLIT (design §3b guard 1). The confirm echo, the bound and
+        # the `deadman_armed` refusal are U229/U230's hunk; until one of them
+        # lands, a disruptive row cannot be started from the page AT ALL. 501,
+        # not 403: the row is real and the mechanism below it is built and
+        # barred -- what is missing is the operator's confirmation path, and
+        # saying so is the difference between "not yet" and "never" (the same
+        # shape as the `max` mode at write_mode's step 2).
+        p5_die "501 Not Implemented" disruptive_not_built ;;
+      *) p5_die "500 Internal Server Error" bad_class ;;
+    esac
+
+    [ -d "$P5_RESULTS_DIR" ] || mkdir -p "$P5_RESULTS_DIR" 2>/dev/null
+    [ -w "$P5_RESULTS_DIR" ] || p5_die "500 Internal Server Error" results_dir
+    p5_space_ok "$_tn" || p5_die "409 Conflict" no_space
+
+    _id=$(p5_run_id "$_tn")
+    if ! p5_job_take "$_tn" "$_id"; then
+        p5_hdr "409 Conflict"
+        printf '{"ok":false,"error":"busy",'
+        emit_kv name "$(p5_readfile "$P5_JOB_LOCK/name")"; printf ','
+        emit_kv id   "$(p5_readfile "$P5_JOB_LOCK/id")"
+        printf '}\n'
+        exit 0
+    fi
+    if ! p5_detach "$P5_RUNNER" "$_tn" "$_id"; then
+        p5_job_release "$_id"
+        p5_die "500 Internal Server Error" spawn_failed
+    fi
+    # The job also writes this from its own `$$`; both are the session leader.
+    # Written here as well so a lock can never sit with no pid in it, which
+    # p5_job_take is obliged to read as "still running".
+    printf '%s\n' "$P5_JOB_PID" > "$P5_JOB_LOCK/pid" 2>/dev/null
+    p5_hdr "202 Accepted"
+    printf '{"ok":true,'
+    emit_kv id "$_id";     printf ','
+    emit_kv name "$_tn";   printf ','
+    emit_kv class "$_cls"
+    printf '}\n'
+}
+
+# ---- the test runner: READ --------------------------------------------------
+emit_job() {
+    printf '{"ok":true,'
+    if [ -d "$P5_JOB_LOCK" ]; then
+        _jp=$(p5_readfile "$P5_JOB_LOCK/pid")
+        if p5_job_alive "$_jp"; then _run=true; else _run=false; fi
+        printf '"running":%s,' "$_run"
+        emit_kv name "$(p5_readfile "$P5_JOB_LOCK/name")"; printf ','
+        emit_kv id   "$(p5_readfile "$P5_JOB_LOCK/id")";   printf ','
+        emit_kv pid  "$_jp"
+    else
+        printf '"running":false,'
+        emit_kv name ""; printf ','
+        emit_kv id   ""; printf ','
+        emit_kv pid  ""
+    fi
+    printf '}\n'
+}
+
+# STATUS COMES FROM THE FILE NAME, and that is the whole state machine:
+#   <id>.part + a live lock naming it -> RUNNING
+#   <id>.part otherwise               -> INCOMPLETE (no `### ended` footer, and
+#                                        nothing is going to write one)
+#   <id>.txt                          -> DONE (the rename happens after the
+#                                        footer, so a .txt cannot be half a run)
+# `.meta` is the runner's own record and is neither listed nor served.
+emit_results() {
+    _lid=""; _lpid=""
+    if [ -d "$P5_JOB_LOCK" ]; then
+        _lid=$(p5_readfile "$P5_JOB_LOCK/id"); _lpid=$(p5_readfile "$P5_JOB_LOCK/pid")
+        p5_job_alive "$_lpid" || _lid=""
+    fi
+    printf '{"ok":true,"results":['
+    _first=1
+    for _rf in "$P5_RESULTS_DIR"/*.txt "$P5_RESULTS_DIR"/*.part; do
+        [ -f "$_rf" ] || continue
+        _rid=${_rf##*/}; _rext=${_rid##*.}; _rid=${_rid%.*}
+        p5_run_id_sane "$_rid" || continue
+        if [ "$_rext" = txt ]; then _st=DONE
+        elif [ "$_rid" = "$_lid" ]; then _st=RUNNING
+        else _st=INCOMPLETE; fi
+        _rb=$(wc -c < "$_rf" 2>/dev/null); _rb=${_rb# }
+        case "$_rb" in ''|*[!0-9]*) _rb=0 ;; esac
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{'; emit_kv id "$_rid"
+        printf ',"bytes":%s,' "$_rb"
+        emit_kv status "$_st"
+        printf '}'
+    done
+    printf ']}\n'
+}
+
+# THE ONLY REQUEST-DERIVED TOKEN THAT REACHES A PATH IS A MATCHED LISTING ENTRY.
+# The id is not parsed, not stripped and not "sanitised": it is compared against
+# the ids actually on disk, and on a match the DIRECTORY'S copy is what is
+# joined. `../port`, an absolute path and a plausible-but-absent id are all the
+# same answer -- 400 -- because none of them is in the set (INJ-3).
+emit_result() {
+    _want=$(p5_arg id)
+    _rid=$(p5_match_literal "$(p5_result_ids | tr '\n' ' ')" "$_want") || p5_die "400 Bad Request" unknown_result
+    _rp=$(p5_result_path "$_rid")
+    # `if !`, not `A && B || C`: with the `||` form, C runs whenever the pair is
+    # false OR B itself fails, which is a different predicate from the one meant.
+    if ! { [ -n "$_rp" ] && [ -r "$_rp" ]; }; then p5_die "400 Bad Request" unknown_result; fi
+    p5_hdr_text "200 OK" "$_rid.txt"
+    cat "$_rp"
+}
+
+# ---- dispatch ---------------------------------------------------------------
+case "${REQUEST_METHOD:-GET}" in
+  GET)
+    case "$(p5_arg q)" in
+      catalogue) p5_hdr "200 OK"; emit_catalogue ;;
+      state)     p5_hdr "200 OK"; emit_state ;;
+      sources)   p5_hdr "200 OK"; emit_sources ;;
+      probe)     run_probe ;;
+      job)       p5_hdr "200 OK"; emit_job ;;
+      results)   p5_hdr "200 OK"; emit_results ;;
+      result)    emit_result ;;
+      log)       emit_log ;;
+      *)         p5_die "400 Bad Request" unknown_query ;;
+    esac
+    ;;
+  POST)
+    case "$(p5_arg k)" in
+      '')     p5_die "400 Bad Request" missing_key ;;
+      mode)   write_mode ;;
+      run)    start_test ;;
+      *)      if [ "$(p5_arg op)" = reset ]; then reset_field; else write_field; fi ;;
+    esac
+    ;;
+esac

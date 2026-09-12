@@ -1,0 +1,78 @@
+name: e0
+# The E0 skeleton battery, the same command `bash scripts/ci-local.sh e0` runs.
+#
+# U258's FIRST cut of this header claimed "this arm had no workflow, so every unit with a bar
+# in p5/test/run.sh could only be gated on one local box". THAT WAS FALSE, and the file that
+# disproves it is two directories away: emulator-gate.yml:962 and :976 both run
+# `sh p5/test/run.sh` in the `p5-skeleton` job, and :1085 runs it a third time in
+# `p5-package-battery` against a built package. The arm has been on the mirror all along.
+#
+# What this workflow actually adds is a separately NAMED and separately DISPATCHABLE square:
+# `gh workflow run e0.yml --ref <branch>` runs the ~8-minute battery on its own instead of
+# emulator-gate's 16 jobs, and a red e0 reads as e0 rather than as one job inside a bundle.
+# What it COSTS is a duplicate run on the mirror -- sync-public-ci.sh:230-273 rewrites EVERY
+# workflow's trigger to push:['**'] unconditionally and aborts on any workflow that lacks a
+# push trigger, so this file cannot opt out of the mirror's push. De-duplicating means
+# dropping the `p5-skeleton` job from emulator-gate.yml, which is not this unit's file.
+#
+# On the mirror the RB family SKIPS: sync-public-ci.sh publishes docs/deploy-p5-server.md and
+# not docs/deploy-p5-runbook.md, and run.sh's RB_PRESENT guard turns the client-runbook bars
+# into skipbar lines rather than failures. That is the mirror's shape, not a weakened gate --
+# a full checkout still measures them.
+on:
+  # RETARGETED BY scripts/sync-public-ci.sh. The SOURCE is workflow_dispatch-only so the
+  # PRIVATE repo (paid Actions minutes) starts nothing; the mirror is public and free, and
+  # carries ONE BRANCH PER UNIT under test, so it fires on all of them. A unit whose branch
+  # triggered no run reads as NO EVIDENCE, which is the state that made five units
+  # unverifiable at once.
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  e0:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: e0 skeleton battery
+        # `sh ...; rc=$?` is the idiom busybox.yml:75-78 already records as fatal: GitHub runs
+        # a run: block under `bash --noprofile --norc -eo pipefail`, so a failing arm kills the
+        # step ON THAT LINE and `rc=$?` is never read. Measured A/B on that exact shell:
+        # failing arm -> step rc=1 with NO output at all (the tail and the FAIL grep never run);
+        # passing arm -> the "lines naming a failure" header prints with nothing under it. The
+        # verdict was right and the diagnosis was inverted -- printed only when there is
+        # nothing to print. So: `|| _rc=$?` (the -e-safe idiom), ALWAYS print, decide after.
+        #
+        # The inner timeout exists for the same reason it does in busybox.yml: a hang must
+        # leave a LOCATION behind, not just a red square. Bound chosen LOOSE on purpose. The
+        # battery measured 8m20s (500s) on WSL in the mirror-shaped tree, 225 bars / 27
+        # skipped -- but the SAME tree ran at roughly a third of that rate with three other
+        # harnesses on the box, i.e. this number moves with the machine, and a bound that goes
+        # red on a slow runner is a false red in the one gate most units depend on. Since the
+        # job cap (30 min) bounds a hang anyway, the only thing the inner bound buys is that
+        # the log gets PRINTED, so it is set just under the cap: 1500s, leaving 300s for the
+        # printing steps. Too loose costs 5 late minutes; too tight costs a spurious red.
+        run: |
+          _rc=0
+          timeout -k 30 1500 sh p5/test/run.sh > /tmp/e0.log 2>&1 || _rc=$?
+          echo "e0 arm exit: $_rc"
+          echo "--- lines naming a failure ---"
+          grep -nE '^FAIL' /tmp/e0.log | head -20 || true
+          echo "--- last 40 lines ---"
+          tail -40 /tmp/e0.log || true
+          case "$_rc" in
+            0) ;;
+            124|137)
+              echo "::error::e0 battery HUNG (1500s, killed). The LAST BAR ABOVE is where it stopped."
+              exit 1 ;;
+            *)
+              echo "::error::e0 battery exited $_rc"
+              exit 1 ;;
+          esac
+      - name: log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e0-log
+          path: /tmp/e0.log

@@ -1,0 +1,78 @@
+# deploy/p5/portal/catalogue/logs — the ENUMERATED log source table (U223).
+#
+# m9-portal-design.md §3b Logs: "read-only tail of the daemon, bond-ecod, the
+# watchdog and the reconciler's decisions". deploy/p5/portal/README.md used to
+# say the log tail was deferred because "every path would have to be enumerated
+# anyway". That reason is WITHDRAWN and the README says so: there is no path to
+# enumerate. Every P5 writer logs to the box's syslog RING (p5/contract/paths
+# refuses /var/log), so the enumerated thing is a closed set of eight TAGS, and
+# this file is that set. A request supplies a NAME; the pattern comes from HERE.
+#
+# fields: name|regex|label
+#
+# COLUMN 2 IS AN ERE AND MAY CONTAIN THE FIELD SEPARATOR. `logs` is the one
+# catalogue whose payload can legitimately carry a `|` (the datapath row's
+# alternation), so it is NOT read with p5_cat_field. The reader is ONE function,
+# `p5_log_row NAME re|label` (lib/portal-lib.sh, function at :393), and it splits
+# the row at the LAST `|` instead of the first, so column 2 keeps its own pipe
+# and column 3 is the remainder. A LABEL THEREFORE MUST NOT CONTAIN `|` -- it
+# would move that boundary. Bars LOG-1j/k round-trip the datapath row.
+#
+# EVERY REGEX IS CHECKED TWICE BEFORE A HEADER IS WRITTEN, and a row that fails
+# EITHER check is a 500 naming the row, never a quietly-dropped source:
+#   1. CHARSET, against ^[A-Za-z0-9_|()[]:. \-]+$ (p5_regex_sane).
+#   2. COMPILES: one line piped through `grep -E -- <regex>` (p5_regex_compiles
+#      -- ONE line and not none, because busybox grep compiles lazily). The
+#      charset admits `[` and `(` WITHOUT their closers, so `a[b` passes check 1
+#      and is still not an ERE. Without check 2 that row reached grep only AFTER
+#      the 200 header was out, and the route served 200 WITH AN EMPTY BODY --
+#      i.e. it said "the ring holds no such line", which is exactly the answer
+#      this surface must never give falsely. Bars LOG-5e..h.
+# Note what the charset excludes: `/` (so a row cannot
+# become a path), `*` `?` `+` `{` `$` `^` (so a row cannot become a catastrophic
+# backtracker), and every shell metacharacter. The pattern is passed to
+# `grep -E --` as ONE argument after `--`, so a row beginning with `-` is a
+# pattern and not a flag (bar LOG-9).
+#
+# THE READ IS `logread | grep -E -- <regex>` AND NOTHING ELSE. No tail constant:
+# the bound is logd's own ring (uci system.@system[0].log_size), which is the
+# box's declaration, not ours. KNOWN HAZARD, and the page prints it: when the
+# datapath is engaged its PSTAT line runs at 1 Hz, so an older line -- the
+# refusal you are looking for -- can already have been pushed out of the ring.
+# The card shows the first and last line it got so ABSENCE IS NEVER READ AS "it
+# never happened". Whether the daemon should stop emitting PSTAT to syslog once
+# it writes $AGG_STATS, or the operator should raise log_size, waits on the ring
+# size being MEASURED on the box (U231); no constant is invented here.
+#
+# TAG AMBIGUITY, S1..S4: the old stack writes bond-xctl / bondctl / bond-ecod
+# too (deploy/p5/bond-accept). Until the old half is removed at S4 those three
+# rows can carry BOTH stacks' lines. The page says so; this file does not try to
+# disambiguate them, because nothing in a syslog line distinguishes them.
+#
+# Each tag below was read off the artifact that writes it:
+#   reconciler bond-xctl      deploy/p5/bond-xctl TAG=
+#   cli        bondctl        deploy/p5/bondctl TAG=
+#   ecod       bond-ecod      deploy/p5/bond-ecod log()
+#   watchdog   bond-watchdog  deploy/p5/bond-watchdog log()
+#   shaper     p5-shape       deploy/p5/init.d/p5-shape logger -t
+#   portal     p5-portal      deploy/p5/portal/init.d/p5-portal logger -t
+#   deadman    p5-deadman     p5/bin/p5-deadman P5_TAG=
+#   datapath   -- the ONE known-unknown. The Go daemon logs to stderr and procd
+#              forwards it (deploy/p5/init.d/bond-agg procd_set_param stderr 1),
+#              so the ident is procd's for the instance and has NEVER been read
+#              on a box. The row matches the expected ident OR the daemon's own
+#              PSTAT prefix (p4-bondagg/daemon/pullrun.go), so it finds the
+#              stats line whatever the ident turns out to be. That is why this
+#              row, alone, needs the alternation.
+#
+# NOT A ROW: `all`. GL's ring also carries dropbear and gl_ddns lines, which are
+# named scrub keys -- a whole-ring tail would serve them to the page and into
+# any artifact pulled back. `hook` is absent until 97-bond ships.
+reconciler| bond-xctl: |The reconciler's decisions: which edge it walked, which guard refused, which action failed. "Why is it in this state" is answered here, not by a packet counter.
+cli| bondctl: |The CLI's own fact writes: mode changes, the auto policy going on or off, shape.
+ecod| bond-ecod: |The supervised policy: what it measured, why it escalated to lightning, when it came back to eco.
+watchdog| bond-watchdog: |The 10s level-triggered loop. A line here means it found and reconciled a delta.
+datapath| (p5-datapath|PSTAT )|The Go daemon: the 1 Hz PSTAT counters, cap state, auth. Matches the expected procd ident OR the PSTAT prefix, because the ident has not been read on a box.
+shaper| p5-shape: |The shaper service: why it refused to start, and what it attached to.
+portal| p5-portal: |This portal's own service: the address and port it bound, or why it refused to bind.
+deadman| p5-deadman: |The deadman: records armed, confirmed, and fired. A fired record is a restore that ran without you.
