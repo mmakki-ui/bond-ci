@@ -1,0 +1,37 @@
+
+== canon edge/pull 0.85 (30s)
+   fixed  40ms: p50=  12 p95= 231 p99= 261 late=4520.0
+   fixed 120ms: p50=  12 p95= 232 p99= 261 late=1388.0
+   fixed 223ms: p50=  12 p95= 232 p99= 261 late=470.0
+   fixed 343ms: p50=  12 p95= 232 p99= 261 late=390.0
+   D-rule W=0.5s: p50=  12 p95= 232 p99= 252 late=6053.0
+   D-rule W=1.0s: p50=  12 p95= 232 p99= 251 late=4314.0
+   D-rule W=3.0s: p50=  12 p95= 241 p99= 342 late=2539.0
+
+== canon mid/Dc 0.85 (520s)
+   fixed  40ms: p50=  68 p95= 330 p99= 348 late=16489.0
+   fixed 120ms: p50=  89 p95= 350 p99= 372 late=6344.5
+   fixed 223ms: p50= 109 p95= 363 p99= 390 late=2524.0
+   fixed 343ms: p50= 129 p95= 367 p99= 455 late=1611.5
+   D-rule W=0.5s: p50= 139 p95= 373 p99= 551 late=299.0
+   D-rule W=1.0s: p50= 139 p95= 375 p99= 557 late=241.5
+   D-rule W=3.0s: p50= 193 p95= 618 p99= 638 late= 46.5
+
+== S2 eth+wifi pull 90k (639s)
+   fixed  40ms: p50=  14 p95=  14 p99=  14 late=5996.0
+   fixed 120ms: p50=  14 p95=  14 p99=  14 late=2046.0
+   fixed 223ms: p50=  14 p95=  14 p99=  14 late=394.0
+   fixed 343ms: p50=  14 p95=  14 p99=  14 late=231.0
+   D-rule W=0.5s: p50=  14 p95=  14 p99=  14 late=24664.0
+   D-rule W=1.0s: p50=  14 p95=  14 p99=  14 late=23018.0
+   D-rule W=3.0s: p50=  14 p95=  14 p99=  14 late=16400.0
+
+== S3 all pull 140k (715s)
+   fixed  40ms: p50=  22 p95= 244 p99= 264 late=13270.0
+   fixed 120ms: p50=  24 p95= 251 p99= 264 late=4355.0
+   fixed 223ms: p50=  24 p95= 251 p99= 264 late=1271.0
+   fixed 343ms: p50=  24 p95= 254 p99= 264 late=928.0
+   D-rule W=0.5s: p50=  24 p95= 254 p99= 264 late=5485.0
+   D-rule W=1.0s: p50=  24 p95= 254 p99= 264 late=5483.0
+   D-rule W=3.0s: p50=  44 p95= 261 p99= 342 late=4529.0
+total 715s
