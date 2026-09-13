@@ -1,0 +1,44 @@
+# deploy/p5/portal/catalogue/tests — the ENUMERATED on-box test list.
+#
+# m9-portal-design.md §3b: "Enumerated actions only. The runner exposes a fixed
+# list of named tests. It does NOT accept a command, a path, or a test name
+# interpolated into a shell."
+#
+# So the REQUEST supplies only a NAME, matched against column 1 by exact literal
+# match (the CGI's start_test), and the runner RE-VALIDATES it against this same
+# file before it resolves anything. The program is NOT in this file: column 3 is
+# a SYMBOLIC HEAD out of a closed set the runner carries in its own `case`, so a
+# catalogue edit -- or a corrupted catalogue -- cannot name a program to run.
+# Bar RUN-C1 asserts every head here is in that set; JOB-M2 shows what a runner
+# WITHOUT the closed case would do with a head this file could then supply.
+#
+# fields: name|class|head|bound|label
+#
+# CLASS is the HARD SPLIT (design §3b guard 1). `ro` rows are safe any time and
+# take no deadman; `disruptive` rows perturb the datapath, are confirmed by the
+# operator against the server's own text, are bounded in seconds and are rolled
+# back by p5-portal-restore whether they end or not. ONE disruptive row ships
+# today -- `e1`, U230's edge-vs-mid instrument; U229's two lifecycle round trips
+# are the others the design names, and bar RUN-C2 carries the whole set as a
+# literal, so adding a fourth means editing a bar.
+#
+# BOUND is seconds, and it is REQUIRED for a disruptive row and EMPTY for a read-
+# only one -- the runner refuses a disruptive row with no bound rather than
+# invent a window (the p5-deadman `--after` rule: how long a disturbance may last
+# is not derivable from anything this product can measure, so it is declared).
+#
+# THE ONE SYMBOLIC BOUND IS `PLAN`, and it exists because e1's deadline is NOT a
+# constant: it is N x (SECS + the ping waits) + the sink probe's own --max-time,
+# where N is how many sources this box routes over RIGHT NOW and SECS is what the
+# operator wrote in /etc/p5/portal/e1_budget. A number in this column would be a
+# second copy of that arithmetic, drifting from the instrument's. So column 4
+# reads `PLAN` and the runner resolves it the same way it resolves column 3: by a
+# closed case, which for E1 runs `p5-e1-probe --plan <MiB> <SECS>` -- a path that
+# prints the bound and exits BEFORE any side effect -- and REFUSES to arm, and so
+# to run, if that number does not come back.
+#
+# NO ARGV, NO PATH, NO TIMER: the label is operator text and the only thing the
+# page renders from this file besides the name and the class.
+accept|ro|ACCEPT||P5's own acceptance battery (`p5-accept`, F23). Phase A runs read verbs only; phase B builds a sandbox under one mktemp dir and removes it on exit -- it writes nothing in /etc/p5, starts and stops no service, and sends no packet (deploy/p5/bond-accept, "WHAT THIS CHANGES ON THE BOX"). Minutes, not seconds.
+converged_tick|ro|XCTL_TICK||Three `p5-reconciler reconcile` passes in a row on the live facts. A level-triggered reconciler on a converged box walks NO edge, so this is read-only in effect: pass 1 shows what it would do, passes 2 and 3 show it does nothing twice. On a box that is NOT converged it walks the one edge the facts already ask for -- the same edge any fact write would have walked.
+e1|disruptive|E1|PLAN|E1 EDGE-vs-MID: saturates each routed WAN source in turn with an upload of the MiB declared in /etc/p5/portal/e1_budget, and while a source is under test it pins ALL of this box's traffic to one anycast sink IP onto that source -- so tunnel packets on it share the saturated link and bond-ecod may escalate, returning by itself after its clean window. Bounded by the budget's own seconds per source; the exact deadline is the instrument's own `--plan` bound_s and the confirm text quotes it. One /32 host route is the only thing it changes, and the deadman puts it back.

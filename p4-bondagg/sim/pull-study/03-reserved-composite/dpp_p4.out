@@ -1,0 +1,22 @@
+==============================================================================
+P4 -- D'' (sched='Dpp') vs pull, N2 EDGE (cellA+eth), bottleneck='edge'
+T=9.0s SEEDS=24 nom=107000
+==============================================================================
+load=0.65
+  pull : gp= 69330.3 loss= 0.19% p95=  22.0ms p99=  31.0ms
+  Dpp  : gp= 69037.9 loss= 0.61% p95=  45.0ms p99=  62.0ms  res_tx=15015 mir_off=15174 mir_aged=0 armed_frac=0.8667
+  Dpp vs pull gp dev = -0.422%  (bar: |dev|<=1%)  -> OK
+  Dpp gp vs expected target 69330: dev = -0.421%
+  ROW: PASS
+
+load=0.85
+  pull : gp= 87438.2 loss= 3.74% p95= 232.0ms p99= 261.0ms
+  Dpp  : gp= 86263.4 loss= 5.03% p95= 271.0ms p99= 291.0ms  res_tx=13623 mir_off=23306 mir_aged=244 armed_frac=0.8656
+  Dpp vs pull gp dev = -1.344%  (bar: |dev|<=1%)  -> FAIL
+  Dpp gp vs expected target 87438: dev = -1.343%
+  Dpp loss=5.03% (bar: <=4.2%) -> FAIL
+  ROW: FAIL
+
+==============================================================================
+P4 VERDICT: FAIL
+==============================================================================

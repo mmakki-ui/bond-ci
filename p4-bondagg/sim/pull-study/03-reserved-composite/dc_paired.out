@@ -1,0 +1,14 @@
+==========================================================================================
+load=0.85  (Dc loss - ewma loss) per seed, pts:
+  +0.78  +0.93  +0.84  +0.86  +0.83  +0.88  +0.94  +0.82  +0.85  +0.88  +0.86  +0.84  +0.86  +0.86  +0.93  +0.83  +0.84  +0.83  +0.82  +0.82  +0.79  +0.89  +0.85  +0.84
+  Dc loss median=7.188%  ewma loss median=6.334%  diff-of-medians=0.854 pts
+  median-of-paired-diffs=0.845 pts   mean-of-paired-diffs=0.852 pts
+  seeds with (Dc-ewma) > 0.5pt : 24 / 24
+  min diff=0.779  max diff=0.943
+==========================================================================================
+load=0.95  (Dc loss - ewma loss) per seed, pts:
+  +0.57  +0.67  +0.66  +0.60  +0.66  +0.82  +0.71  +0.52  +0.54  +0.71  +0.68  +0.64  +0.66  +0.62  +0.65  +0.71  +0.56  +0.64  +0.51  +0.73  +0.64  +0.60  +0.66  +0.72
+  Dc loss median=10.305%  ewma loss median=9.651%  diff-of-medians=0.654 pts
+  median-of-paired-diffs=0.655 pts   mean-of-paired-diffs=0.645 pts
+  seeds with (Dc-ewma) > 0.5pt : 24 / 24
+  min diff=0.507  max diff=0.816
