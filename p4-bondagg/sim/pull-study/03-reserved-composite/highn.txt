@@ -1,0 +1,181 @@
+######################################################################################################################
+# HIGH-N SCORED BATTERY  (N=4 / N=5 heterogeneous)  seeds=24  T=9.0s  rig=mid  medians
+# physics = nsched_model.py UNMODIFIED   composite = reserved_composite.SimD(sched="Dc")
+# references = ackclock_sim.Sim(ewma|pull, mirror=False) + SimD(Dpp)   PAIRED SEEDS
+######################################################################################################################
+#   N2-het  cellA + eth                                        N=2 spotty=1/2 nominal_agg= 107000 kb/s [chain]
+#   N3-het  cellA + cellB + eth                                N=3 spotty=2/3 nominal_agg= 129000 kb/s [chain]
+#   N4-het  cellA + cellB + wifi + eth                         N=4 spotty=2/4 nominal_agg= 174000 kb/s [chain]
+#   N5-het  cellA + cellB + cellC + wifi + eth                 N=5 spotty=3/5 nominal_agg= 191000 kb/s [chain]
+#   N4-teth cellA + cellB + cellC + eth  (tether-heavy 3/1)    N=4 spotty=3/4 nominal_agg= 146000 kb/s 
+#   N5-corr cellA+cellB+cellC (CORRELATED stalls) + wifi + eth N=5 spotty=3/5 nominal_agg= 191000 kb/s 
+######################################################################################################################
+======================================================================================================================
+N2-het  cellA + eth   | N=2 spotty=1 nominal_agg=107000
+======================================================================================================================
+  sched  | load=0.65   gp  loss   p95   p99 sshare   ||  load=0.85   gp  loss   p95   p99 sshare   ||  load=0.95   gp  loss   p95   p99 sshare 
+  Dc     |   68794  0.96    72   108  0.198          ||    84307  7.19   363   390  0.217          ||    91062 10.30   470   559  0.235        
+  ewma   |   65848  5.20   175   226  0.198          ||    85083  6.33   329   357  0.202          ||    91726  9.65   439   549  0.226        
+  pull   |   60578 12.79   210   233  0.253          ||    78682 13.38   217   241  0.248          ||    74184 26.93   308   395  0.250        
+  Dpp    |   68295  1.68    89   109  0.253          ||    79341 12.66   238   276  0.248          ||    69333 31.71   345   428  0.250        
+
+======================================================================================================================
+N3-het  cellA + cellB + eth   | N=3 spotty=2 nominal_agg=129000
+======================================================================================================================
+  sched  | load=0.65   gp  loss   p95   p99 sshare   ||  load=0.85   gp  loss   p95   p99 sshare   ||  load=0.95   gp  loss   p95   p99 sshare 
+  Dc     |   80900  3.40   152   194  0.308          ||    99204  9.41   301   374  0.341          ||   106145 13.28   504   574  0.348        
+  ewma   |   78277  6.53   204   244  0.302          ||    99752  8.91   284   334  0.317          ||   106912 12.65   494   572  0.344        
+  pull   |   69642 16.84   236   252  0.374          ||    88636 19.06   242   262  0.375          ||    77195 36.93   306   432  0.369        
+  Dpp    |   76978  8.08   202   254  0.374          ||    88864 18.85   260   286  0.375          ||    70378 42.50   334   454  0.369        
+
+======================================================================================================================
+N4-het  cellA + cellB + wifi + eth   | N=4 spotty=2 nominal_agg=174000
+======================================================================================================================
+  sched  | load=0.65   gp  loss   p95   p99 sshare   ||  load=0.85   gp  loss   p95   p99 sshare   ||  load=0.95   gp  loss   p95   p99 sshare 
+  Dc     |  109493  3.07    88   105  0.223          ||   136706  7.45   256   332  0.247          ||   147436 10.70   444   504  0.253        
+  ewma   |  106631  5.60   204   244  0.221          ||   137376  7.00   242   294  0.226          ||   148571 10.01   413   474  0.249        
+  pull   |   98047 13.20   236   252  0.277          ||   123937 16.10   242   254  0.272          ||   106039 35.77   284   372  0.272        
+  Dpp    |  109437  3.12    88   103  0.277          ||   124061 16.01   252   278  0.272          ||    96767 41.39   316   412  0.272        
+
+======================================================================================================================
+N5-het  cellA + cellB + cellC + wifi + eth   | N=5 spotty=3 nominal_agg=191000
+======================================================================================================================
+  sched  | load=0.65   gp  loss   p95   p99 sshare   ||  load=0.85   gp  loss   p95   p99 sshare   ||  load=0.95   gp  loss   p95   p99 sshare 
+  Dc     |  119976  3.24   112   128  0.285          ||   148546  8.39   258   302  0.316          ||   159734 11.86   412   484  0.318        
+  ewma   |  114774  7.44   235   261  0.277          ||   148218  8.59   257   295  0.290          ||   160268 11.56   385   462  0.315        
+  pull   |  104712 15.55   250   264  0.339          ||   131528 18.88   258   274  0.337          ||   110402 39.08   277   297  0.335        
+  Dpp    |  118853  4.15   144   189  0.339          ||   133047 17.95   271   287  0.337          ||   101150 44.18   286   317  0.335        
+
+======================================================================================================================
+N4-teth cellA + cellB + cellC + eth  (tether-heavy 3/1)   | N=4 spotty=3 nominal_agg=146000
+======================================================================================================================
+  sched  | load=0.65   gp  loss   p95   p99 sshare   ||  load=0.85   gp  loss   p95   p99 sshare   ||  load=0.95   gp  loss   p95   p99 sshare 
+  Dc     |   89668  5.39   204   275  0.385          ||   110585 10.78   276   332  0.420          ||   118061 14.77   469   552  0.424        
+  ewma   |   86273  8.98   232   261  0.371          ||   110470 10.87   273   324  0.393          ||   118370 14.55   459   542  0.421        
+  pull   |   76363 19.43   251   264  0.444          ||    96429 22.20   262   283  0.442          ||    82795 40.23   277   295  0.442        
+  Dpp    |   85688  9.59   213   275  0.444          ||    95137 23.24   275   290  0.442          ||    76555 44.74   286   308  0.442        
+
+======================================================================================================================
+N5-corr cellA+cellB+cellC (CORRELATED stalls) + wifi + eth   | N=5 spotty=3 nominal_agg=191000
+======================================================================================================================
+  sched  | load=0.65   gp  loss   p95   p99 sshare   ||  load=0.85   gp  loss   p95   p99 sshare   ||  load=0.95   gp  loss   p95   p99 sshare 
+  Dc     |  118701  4.27   112   204  0.297          ||   147377  9.11   223   272  0.322          ||   159379 12.05   311   375  0.340        
+  ewma   |  113420  8.53   184   243  0.291          ||   146963  9.36   219   264  0.295          ||   159878 11.78   292   354  0.326        
+  pull   |  102985 16.94   246   262  0.339          ||   129609 20.07   254   266  0.337          ||   109879 39.37   277   361  0.335        
+  Dpp    |  118025  4.81   124   204  0.339          ||   131431 18.94   268   289  0.337          ||   100323 44.64   290   404  0.335        
+
+======================================================================================================================
+BAR CHECKS -- B1 no-collapse | B2 loss-parity | B3 spare-load win | B4a no-eviction-spiral
+======================================================================================================================
+----------------------------------------------------------------------------------------------------------------------
+N2-het  cellA + eth
+  B3 load=0.65 WIN : Dc gp=68794 vs ewma=65848 -> PASS | Dc loss=0.96% <= 2% -> PASS
+  B1 load=0.85     : gp Dc=84307 vs 0.99*ewma=84232 -> PASS
+  B2 load=0.85     : loss Dc=7.19% vs ewma+0.5=6.83% -> FAIL   paired Dc-ewma med=+0.845 min=+0.779 max=+0.943  seeds>0.5pt=24/24
+  B1 load=0.95     : gp Dc=91062 vs 0.99*ewma=90808 -> PASS
+  B2 load=0.95     : loss Dc=10.30% vs ewma+0.5=10.15% -> FAIL   paired Dc-ewma med=+0.655 min=+0.507 max=+0.816  seeds>0.5pt=24/24
+  B4a load=0.65    : spotty-class native share Dc=0.198 vs pull=0.253 -> PASS
+  B4a load=0.85    : spotty-class native share Dc=0.217 vs pull=0.248 -> PASS
+  B4a load=0.95    : spotty-class native share Dc=0.235 vs pull=0.250 -> PASS
+----------------------------------------------------------------------------------------------------------------------
+N3-het  cellA + cellB + eth
+  B3 load=0.65 WIN : Dc gp=80900 vs ewma=78277 -> PASS | Dc loss=3.40% <= 2% -> FAIL
+  B1 load=0.85     : gp Dc=99204 vs 0.99*ewma=98754 -> PASS
+  B2 load=0.85     : loss Dc=9.41% vs ewma+0.5=9.41% -> FAIL   paired Dc-ewma med=+0.515 min=+0.418 max=+0.636  seeds>0.5pt=14/24
+  B1 load=0.95     : gp Dc=106145 vs 0.99*ewma=105843 -> PASS
+  B2 load=0.95     : loss Dc=13.28% vs ewma+0.5=13.15% -> FAIL   paired Dc-ewma med=+0.644 min=+0.553 max=+0.711  seeds>0.5pt=24/24
+  B4a load=0.65    : spotty-class native share Dc=0.308 vs pull=0.374 -> PASS
+  B4a load=0.85    : spotty-class native share Dc=0.341 vs pull=0.375 -> PASS
+  B4a load=0.95    : spotty-class native share Dc=0.348 vs pull=0.369 -> PASS
+----------------------------------------------------------------------------------------------------------------------
+N4-het  cellA + cellB + wifi + eth
+  B3 load=0.65 WIN : Dc gp=109493 vs ewma=106631 -> PASS | Dc loss=3.07% <= 2% -> FAIL
+  B1 load=0.85     : gp Dc=136706 vs 0.99*ewma=136002 -> PASS
+  B2 load=0.85     : loss Dc=7.45% vs ewma+0.5=7.50% -> PASS   paired Dc-ewma med=+0.458 min=+0.345 max=+0.553  seeds>0.5pt=7/24
+  B1 load=0.95     : gp Dc=147436 vs 0.99*ewma=147085 -> PASS
+  B2 load=0.95     : loss Dc=10.70% vs ewma+0.5=10.51% -> FAIL   paired Dc-ewma med=+0.690 min=+0.625 max=+0.775  seeds>0.5pt=24/24
+  B4a load=0.65    : spotty-class native share Dc=0.223 vs pull=0.277 -> PASS
+  B4a load=0.85    : spotty-class native share Dc=0.247 vs pull=0.272 -> PASS
+  B4a load=0.95    : spotty-class native share Dc=0.253 vs pull=0.272 -> PASS
+----------------------------------------------------------------------------------------------------------------------
+N5-het  cellA + cellB + cellC + wifi + eth
+  B3 load=0.65 WIN : Dc gp=119976 vs ewma=114774 -> PASS | Dc loss=3.24% <= 2% -> FAIL
+  B1 load=0.85     : gp Dc=148546 vs 0.99*ewma=146736 -> PASS
+  B2 load=0.85     : loss Dc=8.39% vs ewma+0.5=9.09% -> PASS   paired Dc-ewma med=-0.202 min=-0.304 max=-0.009  seeds>0.5pt=0/24
+  B1 load=0.95     : gp Dc=159734 vs 0.99*ewma=158665 -> PASS
+  B2 load=0.95     : loss Dc=11.86% vs ewma+0.5=12.06% -> PASS   paired Dc-ewma med=+0.286 min=+0.157 max=+0.374  seeds>0.5pt=0/24
+  B4a load=0.65    : spotty-class native share Dc=0.285 vs pull=0.339 -> PASS
+  B4a load=0.85    : spotty-class native share Dc=0.316 vs pull=0.337 -> PASS
+  B4a load=0.95    : spotty-class native share Dc=0.318 vs pull=0.335 -> PASS
+----------------------------------------------------------------------------------------------------------------------
+N4-teth cellA + cellB + cellC + eth  (tether-heavy 3/1)
+  B3 load=0.65 WIN : Dc gp=89668 vs ewma=86273 -> PASS | Dc loss=5.39% <= 2% -> FAIL
+  B1 load=0.85     : gp Dc=110585 vs 0.99*ewma=109366 -> PASS
+  B2 load=0.85     : loss Dc=10.78% vs ewma+0.5=11.37% -> PASS   paired Dc-ewma med=-0.092 min=-0.221 max=+0.012  seeds>0.5pt=0/24
+  B1 load=0.95     : gp Dc=118061 vs 0.99*ewma=117187 -> PASS
+  B2 load=0.95     : loss Dc=14.77% vs ewma+0.5=15.05% -> PASS   paired Dc-ewma med=+0.221 min=+0.046 max=+0.309  seeds>0.5pt=0/24
+  B4a load=0.65    : spotty-class native share Dc=0.385 vs pull=0.444 -> PASS
+  B4a load=0.85    : spotty-class native share Dc=0.420 vs pull=0.442 -> PASS
+  B4a load=0.95    : spotty-class native share Dc=0.424 vs pull=0.442 -> PASS
+----------------------------------------------------------------------------------------------------------------------
+N5-corr cellA+cellB+cellC (CORRELATED stalls) + wifi + eth
+  B3 load=0.65 WIN : Dc gp=118701 vs ewma=113420 -> PASS | Dc loss=4.27% <= 2% -> FAIL
+  B1 load=0.85     : gp Dc=147377 vs 0.99*ewma=145493 -> PASS
+  B2 load=0.85     : loss Dc=9.11% vs ewma+0.5=9.86% -> PASS   paired Dc-ewma med=-0.252 min=-0.374 max=-0.131  seeds>0.5pt=0/24
+  B1 load=0.95     : gp Dc=159379 vs 0.99*ewma=158279 -> PASS
+  B2 load=0.95     : loss Dc=12.05% vs ewma+0.5=12.28% -> PASS   paired Dc-ewma med=+0.285 min=+0.133 max=+0.387  seeds>0.5pt=0/24
+  B4a load=0.65    : spotty-class native share Dc=0.297 vs pull=0.339 -> PASS
+  B4a load=0.85    : spotty-class native share Dc=0.322 vs pull=0.337 -> PASS
+  B4a load=0.95    : spotty-class native share Dc=0.340 vs pull=0.335 -> FAIL
+======================================================================================================================
+B4b SPOTTY-SHARE TIMELINE (independent truncated-T reconstruction, load=0.95, 12 seeds)
+======================================================================================================================
+  N2-het  cellA + eth
+    Dc    : 0.266 0.156 0.111 0.353 0.131 0.156 0.389 0.278 0.186   min=0.111 max=0.389 monotonic_up=False -> PASS
+    ewma  : 0.251 0.148 0.111 0.353 0.131 0.156 0.370 0.254 0.186   min=0.111 max=0.370 monotonic_up=False -> -
+  N3-het  cellA + cellB + eth
+    Dc    : 0.382 0.257 0.392 0.378 0.321 0.249 0.445 0.386 0.300   min=0.249 max=0.445 monotonic_up=False -> PASS
+    ewma  : 0.365 0.254 0.392 0.378 0.321 0.249 0.445 0.386 0.300   min=0.249 max=0.445 monotonic_up=False -> -
+  N4-het  cellA + cellB + wifi + eth
+    Dc    : 0.283 0.181 0.294 0.274 0.227 0.178 0.349 0.278 0.202   min=0.178 max=0.349 monotonic_up=False -> PASS
+    ewma  : 0.269 0.177 0.292 0.274 0.227 0.178 0.349 0.278 0.202   min=0.177 max=0.349 monotonic_up=False -> -
+  N5-het  cellA + cellB + cellC + wifi + eth
+    Dc    : 0.337 0.307 0.352 0.360 0.265 0.275 0.374 0.337 0.245   min=0.245 max=0.374 monotonic_up=False -> PASS
+    ewma  : 0.320 0.303 0.352 0.360 0.265 0.275 0.374 0.337 0.245   min=0.245 max=0.374 monotonic_up=False -> -
+  N4-teth cellA + cellB + cellC + eth  (tether-heavy 3/1)
+    Dc    : 0.445 0.411 0.458 0.475 0.367 0.368 0.473 0.453 0.355   min=0.355 max=0.475 monotonic_up=False -> PASS
+    ewma  : 0.425 0.412 0.457 0.475 0.367 0.368 0.473 0.453 0.355   min=0.355 max=0.475 monotonic_up=False -> -
+  N5-corr cellA+cellB+cellC (CORRELATED stalls) + wifi + eth
+    Dc    : 0.337 0.279 0.439 0.344 0.304 0.303 0.403 0.385 0.241   min=0.241 max=0.439 monotonic_up=False -> PASS
+    ewma  : 0.320 0.276 0.439 0.344 0.268 0.257 0.399 0.370 0.241   min=0.241 max=0.439 monotonic_up=False -> -
+======================================================================================================================
+B5 SCALING -- nested chain, IDENTICAL absolute offer = 0.85 x nominal(N5-het) = 162350 kb/s
+   (the motivating regime: every smaller config is genuinely over-subscribed)
+======================================================================================================================
+  config (Dc)                                      N        gp   loss%    p95    p99
+  N2-het  cellA + eth                              2     90252   44.34    460    472
+  N3-het  cellA + cellB + eth                      3    107513   33.69    510    524  dgp=+17261(PASS) dloss=-10.65(PASS)
+  N4-het  cellA + cellB + wifi + eth               4    147269    9.18    396    464  dgp=+39756(PASS) dloss=-24.52(PASS)
+  N5-het  cellA + cellB + cellC + wifi + eth       5    148546    8.39    258    302  dgp=+1277(PASS) dloss=-0.79(PASS)
+  -- ewma (shipped cap) reference on the same chain, same offer --
+  N2-het  cellA + eth                              2     90412   44.24
+  N3-het  cellA + cellB + eth                      3    107491   33.71
+  N4-het  cellA + cellB + wifi + eth               4    148130    8.64
+  N5-het  cellA + cellB + cellC + wifi + eth       5    148218    8.59
+======================================================================================================================
+VERDICT   (honest: bars are reported as measured; nothing was tuned)
+======================================================================================================================
+  11 BAR FAILURE(S):
+    FAIL  B2 N2-het  cellA + eth load=0.85: Dc loss 7.19% > ewma+0.5 = 6.83% (paired median +0.845 pt, 24/24 seeds >0.5pt)
+    FAIL  B2 N2-het  cellA + eth load=0.95: Dc loss 10.30% > ewma+0.5 = 10.15% (paired median +0.655 pt, 24/24 seeds >0.5pt)
+    FAIL  B3(loss) N3-het  cellA + cellB + eth load=0.65: Dc loss 3.40% > 2.00%
+    FAIL  B2 N3-het  cellA + cellB + eth load=0.85: Dc loss 9.41% > ewma+0.5 = 9.41% (paired median +0.515 pt, 14/24 seeds >0.5pt)
+    FAIL  B2 N3-het  cellA + cellB + eth load=0.95: Dc loss 13.28% > ewma+0.5 = 13.15% (paired median +0.644 pt, 24/24 seeds >0.5pt)
+    FAIL  B3(loss) N4-het  cellA + cellB + wifi + eth load=0.65: Dc loss 3.07% > 2.00%
+    FAIL  B2 N4-het  cellA + cellB + wifi + eth load=0.95: Dc loss 10.70% > ewma+0.5 = 10.51% (paired median +0.690 pt, 24/24 seeds >0.5pt)
+    FAIL  B3(loss) N5-het  cellA + cellB + cellC + wifi + eth load=0.65: Dc loss 3.24% > 2.00%
+    FAIL  B3(loss) N4-teth cellA + cellB + cellC + eth  (tether-heavy 3/1) load=0.65: Dc loss 5.39% > 2.00%
+    FAIL  B3(loss) N5-corr cellA+cellB+cellC (CORRELATED stalls) + wifi + eth load=0.65: Dc loss 4.27% > 2.00%
+    FAIL  B4a N5-corr cellA+cellB+cellC (CORRELATED stalls) + wifi + eth load=0.95: spotty-share Dc 0.340 > pull 0.335
+
+elapsed 457.7s

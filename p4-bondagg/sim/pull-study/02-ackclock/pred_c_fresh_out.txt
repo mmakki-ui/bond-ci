@@ -1,0 +1,42 @@
+##############################################################################
+# SCHEDULER C PREDICTIONS  seeds=24
+##############################################################################
+
+=== EDGE (spotty cap on local socket) ===
+  [EDGE]
+    scheduler       gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull         90182    0.7    21   242   261    487      0    613
+    push         89436    1.6    40   291   311    706      0   1299
+    oracle       90374    0.5    12   242   261    487      0    437
+    A ewma       89570    1.4    42   311   331    487      0   1176
+    C            90019    0.9    21   252   271    500      0    763
+  (EDGE elapsed 90s)
+
+=== MID-drop (spotty cap downstream, hard 400ms dropouts) ===
+  [MID-drop]
+    scheduler       gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull         78916   13.1    87   215   240   1672   4997   5974
+    push         87010    4.2   101   326   354   1961   1367   2162
+    oracle       88166    3.0   102   301   326   1506     40   2426
+    A ewma       86985    4.3   102   327   356   1959   1367   2496
+    C            76016   16.3   422   593   626   2008    599   1273
+  (MID-drop elapsed 242s)
+
+=== MID-shape (downstream throttle to 4Mb, NO outage) ===
+  [MID-shape]
+    scheduler       gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull         79007   13.0    86   214   240   1735   4635   6252
+    push         88007    3.1   108   289   310   1887      0   2612
+    oracle       88191    2.9   101   290   312   1172      0   2444
+    A ewma       88045    3.1   107   291   313   1885      0   2578
+    C            75830   16.5   420   593   626   1956    218   1292
+  (MID-shape elapsed 384s)
+
+(elapsed 384s)
+
+##############################################################################
+# VERDICTS
+##############################################################################
+(i) [MID-drop] C loss=16.3 vs A loss=4.3 (C<=A: FAIL)   C p50=422 vs oracle p50=102 (~100ms, within tol: FAIL)   => FAIL
+(i) [MID-shape] C loss=16.5 vs A loss=3.1 (C<=A: FAIL)   C p50=420 vs oracle p50=101 (~100ms, within tol: FAIL)   => FAIL
+(ii) [EDGE] C p95=252 vs pull p95=242 (known baseline 242) vs A p95=311 (known baseline 311)   |delta|=10 (<=10% of pull=24.2: PASS)   => PASS
