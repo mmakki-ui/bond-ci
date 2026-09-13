@@ -1,0 +1,502 @@
+#!/bin/sh
+# /usr/lib/p5/portal/bin/p5-e1-probe — E1 HARDWARE REALITY PROBE, edge vs mid. G1.
+# BUSYBOX-SAFE POSIX sh. It ran on the client on 2026-08-30 under the box's own ash
+# (docs/knowledge/inventory/2026-08-30-e1-probe-verdict.txt) as scripts/e1-probe.sh;
+# U230 moved it under the portal's bin/ and made it the portal's ONE disruptive row.
+# The instrument is unchanged in WHAT IT MEASURES. What changed is the four things a
+# no-console box needs before a UI may start it:
+#   * NO DEFAULTS. The budget is two arguments -- MiB per source and seconds -- and
+#     the portal takes them from the operator's own /etc/p5/portal/e1_budget. A
+#     default budget is a number nobody chose being spent on somebody's data plan.
+#   * `--plan` PRINTS THE BOUND AND EXITS BEFORE ANY SIDE EFFECT, so the runner can
+#     arm the deadman with the instrument's OWN arithmetic instead of a second copy
+#     of it, and the operator's confirm text can quote it.
+#   * IT LEAKS NO ADDRESS. The source's IPv4 and the gateway it pins through are
+#     INTERNAL; the artifact is pulled off the box and read elsewhere.
+#   * A NAMED SOURCE IS MATCHED, not accepted: `src` must be one of the devices this
+#     box actually routes over.
+#
+# THE QUESTION (p5-execution-handover.md, E1): when a WAN source is saturated, where does the
+# queue actually build?
+#
+#   EDGE — the bottleneck is the client's own send path. The qdisc backlog on the source
+#          interface holds a standing queue, so the writer is told it is blocked. Pull alone is
+#          then the oracle, and the cap + standing lightning are mostly tax.
+#   MID  — bytes keep leaving while end-to-end RTT climbs, because the queue is out in the
+#          carrier's network where the client cannot see it. The cap + lightning earn their place.
+#
+# "No mid-network code is trusted until this runs." U15a (cap) and U15b (lightning) are gated on
+# the answer, and so is ADR-004 condition 2.
+#
+# WHAT THE INSTRUMENT CAN AND CANNOT ESTABLISH — read before trusting a verdict.
+#   * The load is a TCP HTTPS upload; the shipped datapath is UDP (WireGuard). Queue LOCATION is
+#     a property of the bottleneck buffer, not of the transport, so TCP is a valid probe for
+#     WHERE the queue builds. But the datapath will FEEL an edge as ENOBUFS/blocked sendto();
+#     TCP feels it as socket blocking. This probe measures location, not the ENOBUFS mechanism.
+#   * TCP Send-Q (ss/netstat) counts sent-but-unacked bytes IN FLIGHT plus locally queued bytes.
+#     It is non-zero on any healthy upload wherever the bottleneck is. It is REPORTED for the
+#     record and is NOT a verdict input.
+#   * EDGE evidence = a STANDING queue in the source's own qdisc: backlog non-zero on more
+#     samples than not (majority rule — "standing" means present more often than absent).
+#   * MID evidence = complete separation of RTT distributions: every answered ping under load
+#     is slower than every answered idle ping, by more than the idle jitter the link itself
+#     showed, while no standing local queue exists. An ordering test against the link's own
+#     measured spread, not a magic ratio.
+#   * If a limb is blind (no tc, a qdisc that reports no backlog such as noqueue, or no ICMP
+#     replies), the verdict that would have needed it is WITHHELD and the blindness is printed.
+#     A blind instrument reports itself; it does not blame the physics.
+#
+# ---------------------------------------------------------------------------------------------
+# WHY THIS IS SAFE, point by point. Read this before running it.
+#
+#   1. CLIENT ONLY, ENFORCED. It refuses to run on anything that is not the Flint 2 client. The
+#      server has no physical access and this script generates load; it must never touch it.
+#      Tunnel interfaces (wg*, engarde) are refused even when named explicitly — loading the
+#      tunnel measures engarde and lands the load on the server path.
+#   2. IT CHANGES ONE THING AND PUTS IT BACK. A single /32 host route to the speed-test sink, so
+#      the load is pinned to ONE source at a time. INT, TERM and HUP abort the probe, kill the
+#      load, remove the route and exit; EXIT covers normal completion. If route(s) for that
+#      address already existed they are captured first and RESTORED line-by-line, and the
+#      restoration is verified and any mismatch printed. While the pin is in place, ALL of this
+#      box's traffic to that one sink IP rides the probed WAN — bounded to one anycast address.
+#      LIMIT: kill -9 and power loss skip every trap; the residue is one /32 host route (cleared
+#      by reboot or `ip route del <sink>/32`) and the lock directory. The lock refusal message
+#      prints the exact heal commands.
+#   3. IT STARTS NO SERVICE, STOPS NONE, RESTARTS NONE. No uci write, no firewall change, no
+#      config file touched, nothing written outside $RUN_DIR (tmpfs, /var/run/p5, cleared by a
+#      reboot — the same volatile root the reconciler's own lock uses). Everything else is a read.
+#   4. THE LOAD IS BOUNDED IN BYTES, NOT JUST TIME, AND NEITHER BOUND IS INVENTED HERE. Both
+#      come in as arguments: MiB per source caps the upload and curl carries the seconds as
+#      --max-time. It prints the total budget before it starts. curl buffers the POST body in
+#      RAM, so peak memory cost is MiB — also bounded. THERE IS NO DEFAULT BUDGET: with no
+#      arguments this refuses (exit 7), because the size of somebody's tethered data bill is a
+#      declaration, not a fall-through.
+#   5. IT IS METERED-AWARE. A tether is somebody's data plan. The script names the cost per
+#      source before spending it, and the portal's confirm text names which sources are metered.
+#   6. IT DOES NOT TOUCH THE TUNNEL. Load is pinned to a WAN source directly, NOT through
+#      wgclient1 — the point is to characterise the source, and routing through the tunnel would
+#      measure engarde instead. Enforced by the tunnel refusal in point 1, not assumed.
+#   7. ONE COPY AT A TIME. A lock ($RUN_DIR/e1probe.lock) refuses a second concurrent copy — two
+#      copies would fight over the same /32 and each would capture the other's pin as "prior".
+#   8. IT PRINTS NO ADDRESS IT DOES NOT HAVE TO. `addr:` says present/none and `pinned:` says
+#      "via gateway", because the artifact leaves the box. The ONE exception is a `prior:` line:
+#      a route that already existed for the sink is echoed VERBATIM, because p5-portal-restore
+#      replays those words after a kill -9 and a rollback cannot replay what it cannot read.
+#
+# Cost: <MiB> uploaded per source, over up to <SECS> per source. Both are arguments.
+#
+#   p5-e1-probe --plan 10 20         # print the plan and the deadman bound; NO side effect
+#   p5-e1-probe 10 20                # 10 MiB / 20 s on every routed WAN source
+#   p5-e1-probe 10 20 usb0           # ... on one named source, matched against the routed set
+# ---------------------------------------------------------------------------------------------
+
+# ---- 0. THE BUDGET IS ARGV ------------------------------------------------------------------
+# `--plan` is the portal's contract with this file: the runner needs the deadline BEFORE it
+# starts anything, and the only honest source of that number is the arithmetic below, which is
+# built from this file's own literals. So the plan path runs the same discovery and the same
+# formula and then exits — no sink probe, no lock, no route.
+PLAN_ONLY=0
+if [ "${1:-}" = "--plan" ]; then PLAN_ONLY=1; shift; fi
+MB_PER_LINK="${1:-}"
+SECS="${2:-}"
+SRC_WANT="${3:-}"
+HOST="${HOST:-speed.cloudflare.com}"
+RUN_DIR="${RUN_DIR:-/var/run/p5}"
+XCTL="${XCTL:-/usr/sbin/p5-reconciler}"
+BASE_PINGS=5                    # baseline sample size. Experiment design, reported in output;
+                                # not a verdict threshold. The MID rule compares full samples.
+PING_W=1                        # rtt()'s own -W, named so the bound below can be arithmetic
+                                # over this file's literals rather than a second guess at them.
+SINK_MAX=15                     # the sink probe's own --max-time, below.
+
+say() { echo "$@"; }
+
+uint() {   # a canonical decimal >= 1, or nothing
+    case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$1" -ge 1 ] 2>/dev/null || return 1
+    printf '%s' "$(($1))"
+}
+MB_PER_LINK=$(uint "$MB_PER_LINK") || {
+    say "usage: p5-e1-probe [--plan] <MiB-per-source> <seconds> [src]"
+    say "REFUSING: there is no default budget. Both numbers are declarations --"
+    say "the portal reads them from /etc/p5/portal/e1_budget, which an operator writes."
+    exit 7; }
+SECS=$(uint "$SECS") || {
+    say "usage: p5-e1-probe [--plan] <MiB-per-source> <seconds> [src]"
+    say "REFUSING: <seconds> must be a whole number of seconds >= 1."
+    exit 7; }
+
+# ---- 1. WHICH BOX IS THIS -------------------------------------------------------------------
+# ${SERVER_PC_IP} is the SERVER from Mo's PC and the USB TETHER GATEWAY from the client, so a script
+# that does not name its own box can run load on the wrong machine. This refuses rather than
+# guesses.
+# THE HOSTNAME LINE IS GONE (U230). The model is what this check is ABOUT and it is a product
+# name; the hostname is the operator's own naming of their box and the artifact leaves the box.
+# The vendor's own identity file, named through the SAME variable the portal library uses for
+# it (deploy/p5/portal/lib/portal-lib.sh, P5_SYSINFO_MODEL) and with the same default, so the
+# harness can hand this probe a NOT-THE-CLIENT box without writing to the host's /tmp.
+P5_SYSINFO_MODEL="${P5_SYSINFO_MODEL:-/tmp/sysinfo/model}"
+MODEL=$(cat "$P5_SYSINFO_MODEL" 2>/dev/null)
+say "### identity"
+say "model:    ${MODEL:-unknown}"
+case "$MODEL" in
+  *MT6000*|*Flint*)
+    say "verdict:  CLIENT (Flint 2) -- proceeding" ;;
+  *)
+    say "verdict:  NOT THE CLIENT -- REFUSING."
+    say ""
+    say "This probe generates saturating upload load. It is only ever run on the CLIENT, which is"
+    say "physically reachable and recoverable. The server (GL-MT2500 Brume 2) has no console and no"
+    say "recovery button; nothing that generates load runs there."
+    exit 2 ;;
+esac
+
+# ---- 2. WHAT IS AVAILABLE -------------------------------------------------------------------
+for t in curl ip awk; do
+  command -v "$t" >/dev/null 2>&1 || { say "MISSING TOOL: $t -- refusing"; exit 3; }
+done
+HAVE_TC=0; command -v tc >/dev/null 2>&1 && HAVE_TC=1
+HAVE_SS=0; command -v ss >/dev/null 2>&1 && HAVE_SS=1
+[ "$HAVE_SS" = 0 ] && command -v netstat >/dev/null 2>&1 && HAVE_SS=2
+
+# ---- 3. WAN SOURCES -------------------------------------------------------------------------
+# N-generic: whatever carries a default route is a source. No hardcoded list, no assumed count.
+ROUTED=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' \
+         | awk '!seen[$0]++')
+[ -n "$ROUTED" ] || { say "no default-route sources found -- refusing"; exit 4; }
+# A NAMED SOURCE IS MATCHED, NEVER ACCEPTED (U230). The old form took `$*` and handed whatever
+# it was straight to curl --interface. The set matched against is this box's ROUTED devices --
+# the same set `p5-reconciler _sources` reports with state `routed`, because that state IS
+# "the device carries a default route" (deploy/p5/lib/xctl-probe.sh, gl_sources' state rules).
+# Deriving it here from the same listing costs this file no new external.
+if [ -n "$SRC_WANT" ]; then
+  SRCS=""
+  for _r in $ROUTED; do [ "$_r" = "$SRC_WANT" ] && SRCS="$_r"; done
+  [ -n "$SRCS" ] || {
+    # shellcheck disable=SC2116,SC2086
+    # $ROUTED is newline-separated; the unquoted echo is what collapses it to one line for
+    # this message, which is the whole reason it is there.
+    say "'$SRC_WANT' is not one of this box's routed sources ($(echo $ROUTED)) -- refusing"
+    exit 4; }
+else
+  SRCS="$ROUTED"
+fi
+
+N=$(echo "$SRCS" | wc -w)
+# THE DEADMAN BOUND, and every term is a literal this file carries and prints. Per source: the
+# load's own --max-time, the baseline pings, the two extra ping waits a sample can spend
+# (the loaded sample plus the trailing one), and one second of sampling slack; plus the sink
+# probe's --max-time once, before the loop. The runner arms with EXACTLY this number and bar
+# E1-B recomputes it from these same literals -- so a change to SINK_MAX or BASE_PINGS moves
+# the bound instead of silently invalidating it.
+BOUND_S=$(( N * (SECS + BASE_PINGS * PING_W + 2 * PING_W + 1) + SINK_MAX ))
+say ""
+say "### plan"
+# shellcheck disable=SC2116,SC2086
+# Same collapse as above: $SRCS is newline-separated and this line is one line of prose.
+say "sources:  $(echo $SRCS)"
+say "budget:   ${MB_PER_LINK} MiB uploaded per source, ${N} source(s) = $((MB_PER_LINK * N)) MiB total"
+say "duration: up to ~$((SECS + BASE_PINGS))s per source (load + baseline pings)"
+say "bound_s:  $BOUND_S   # ${N}x(${SECS}+${BASE_PINGS}x${PING_W}+2x${PING_W}+1)+${SINK_MAX}"
+say "changes:  ONE /32 host route at a time, removed on exit; INT/TERM/HUP abort and clean up"
+say ""
+# --plan STOPS HERE, and this is the line that makes it true: no sink probe, no lock, no route.
+[ "$PLAN_ONLY" = 1 ] && exit 0
+
+# ---- 4. SINK --------------------------------------------------------------------------------
+SINK=$(curl -s -o /dev/null --max-time "$SINK_MAX" -w '%{remote_ip}' "https://$HOST/__down?bytes=100" 2>/dev/null)
+case "$SINK" in
+  *.*|*:*) : ;;
+  *) say "sink resolve failed (no internet?) -- refusing"; exit 5 ;;
+esac
+say "sink:     $SINK"
+
+# ---- 5. ONE COPY AT A TIME ------------------------------------------------------------------
+# $RUN_DIR, NOT /tmp (U230). Two reasons, and the second is the one that matters: /tmp is the
+# vendor's, and this product's volatile state has ONE root -- /var/run/p5, tmpfs, cleared by a
+# reboot, declared as a glob in p5/contract/paths so the clean predicate can see a leftover.
+LOCK="$RUN_DIR/e1probe.lock"
+mkdir -p "$RUN_DIR" 2>/dev/null
+if ! mkdir "$LOCK" 2>/dev/null; then
+  say "another e1-probe holds $LOCK (pid $(cat "$LOCK/pid" 2>/dev/null || echo unknown)) -- refusing."
+  say "Two copies would fight over the same /32 and capture each other's pin as 'prior'."
+  say "If that copy is dead (kill -9 / power loss), heal by hand:"
+  say "  rm -rf $LOCK"
+  say "  ip route del $SINK/32   # removes any leftover pin; harmless if none exists"
+  exit 6
+fi
+echo $$ > "$LOCK/pid"
+
+# ---- 6. CLEANUP, ARMED BEFORE THE FIRST ROUTE CHANGE ----------------------------------------
+# PRIOR is captured with an exact destination match against the plain table listing, because
+# `ip route show <prefix>` selector support differs between busybox ip and iproute2 and an
+# unsupported selector would return empty -- silently skipping the restore.
+PRIOR=$(ip route show 2>/dev/null | awk -v s="$SINK" '$1==s')
+# EACH PRIOR LINE IS PREFIXED `prior:` (U230) so p5-portal-restore can find them in the artifact
+# after a kill -9 killed the traps below. This is the one line that may carry a gateway address:
+# a rollback replays these words verbatim, and it cannot replay what it cannot read.
+[ -n "$PRIOR" ] && {
+    say "pre-existing route(s) to the sink captured, will be restored on exit:"
+    printf '%s\n' "$PRIOR" | while read -r _p; do [ -n "$_p" ] && say "prior:    $_p"; done; }
+LOADPID=""
+CLEANED=""
+cleanup() {
+  [ -n "$CLEANED" ] && return
+  CLEANED=1
+  [ -n "$LOADPID" ] && kill "$LOADPID" 2>/dev/null   # never leave the load running past the script
+  ip route del "$SINK/32" 2>/dev/null
+  if [ -n "$PRIOR" ]; then
+    printf '%s\n' "$PRIOR" | while read -r RT; do
+      # shellcheck disable=SC2086
+      # RT is a whole `ip route` ARGUMENT VECTOR read back from the kernel's own listing.
+      # Quoting it would pass the entire line as one argument and the restore would fail.
+      [ -n "$RT" ] && ip route add $RT 2>/dev/null
+    done
+    NOW=$(ip route show 2>/dev/null | awk -v s="$SINK" '$1==s')
+    if [ "$NOW" = "$PRIOR" ]; then
+      say "[cleanup] restored the pre-existing $SINK route(s)"
+    else
+      say "[cleanup] WARNING: route restore mismatch -- fix by hand before trusting routing to $SINK"
+      say "  wanted: $PRIOR"
+      say "  have:   ${NOW:-none}"
+    fi
+  fi
+  rm -f "$RUN_DIR/e1probe.$$" 2>/dev/null
+  rm -rf "$LOCK" 2>/dev/null
+}
+on_sig() {
+  say ""
+  say "[signal] aborting the probe -- cleaning up"
+  cleanup
+  trap - EXIT
+  exit 1
+}
+trap cleanup EXIT
+trap on_sig INT TERM HUP
+
+# ---- 7. SAMPLERS ----------------------------------------------------------------------------
+# TCP Send-Q on sockets bound to this source. REPORTED ONLY -- for TCP, Send-Q counts unacked
+# in-flight bytes plus queued bytes, so it is non-zero on any healthy upload wherever the
+# bottleneck is. It cannot separate edge from mid and is excluded from the verdict.
+sendq() {
+  if [ "$HAVE_SS" = 1 ]; then
+    ss -tan 2>/dev/null | awk -v a="$1" '$0 ~ a {s+=$3} END{print s+0}'
+  elif [ "$HAVE_SS" = 2 ]; then
+    netstat -tan 2>/dev/null | awk -v a="$1" '$0 ~ a {s+=$3} END{print s+0}'
+  else echo 0; fi
+}
+# qdisc backlog on the source, in bytes. tc prints "backlog 132Kb 88p" with K=1024, M=1024^2;
+# the unit suffix must be honoured or a 132Kb backlog reads as 132 bytes.
+backlog() {
+  [ "$HAVE_TC" = 1 ] || { echo 0; return; }
+  tc -s qdisc show dev "$1" 2>/dev/null | awk '
+    /backlog/ { for(i=1;i<=NF;i++) if($i=="backlog") {
+        v=$(i+1); m=1
+        if (v ~ /K/) m=1024; else if (v ~ /M/) m=1048576; else if (v ~ /G/) m=1073741824
+        gsub(/[^0-9.]/,"",v); s += v*m } }
+    END{printf "%d\n", s+0}'
+}
+rtt() { ping -c 1 -W 1 "$1" 2>/dev/null | awk -F'[=/ ]+' '/time=/{print $(NF-1); exit}'; }
+# min/max/count of a whitespace-separated list of numbers
+stats() { echo "$@" | awk 'NF==0{print "na na 0"; exit} {mn=$1;mx=$1;for(i=1;i<=NF;i++){if($i+0<mn+0)mn=$i;if($i+0>mx+0)mx=$i}; print mn, mx, NF}'; }
+
+# ---- 7b. THE UDP DISCRIMINATOR, BRACKETING THE RUN -------------------------------------------
+# THE LOAD IS TCP AND THE DATAPATH IS UDP, and the header above says so as a CAVEAT. These two
+# samples are what turns that caveat into evidence in the same file: `p5-reconciler _stats` is the
+# datapath's own read-only counter block (U225/U226), so a reader can see what the shipped UDP
+# feeder was doing on either side of the load rather than inferring it from a TCP verdict. It is
+# a READ -- the reconciler's `_stats` verb takes no argument and changes nothing -- and its
+# absence is printed rather than faked.
+stats_sample() {   # $1 = the label
+    say ""
+    say "### stats $1"
+    if [ -x "$XCTL" ] || command -v "$XCTL" >/dev/null 2>&1; then
+        "$XCTL" _stats 2>/dev/null || say "(the reconciler answered no stats)"
+    else
+        say "(no reconciler at $XCTL -- the UDP side of this run is unmeasured)"
+    fi
+}
+stats_sample before
+
+# ---- 8. PROBE EACH SOURCE -------------------------------------------------------------------
+for IF in $SRCS; do
+  say ""
+  say "=============================================================="
+  say "### source $IF"
+
+  # Never load a tunnel, even when named explicitly -- that measures engarde, not the source,
+  # and puts the load on the path the SERVER terminates.
+  case "$IF" in
+    wg*|*wgclient*|tun*|engarde*)
+      say "REFUSED: $IF is a tunnel interface. E1 characterises WAN sources; loading the tunnel"
+      say "measures engarde and lands the load on the server path."
+      continue ;;
+  esac
+
+  ADDR=$(ip -4 addr show dev "$IF" 2>/dev/null | awk '/inet /{split($2,a,"/"); print a[1]; exit}')
+  # MASKED (U230): whether the source has an IPv4 is the fact the next line needs; WHICH one
+  # it has is the operator's network, and this artifact is copied off the box.
+  if [ -n "$ADDR" ]; then say "addr:     present"; else say "addr:     none"; fi
+  [ -n "$ADDR" ] || { say "no IPv4 on $IF -- skipped"; continue; }
+
+  # Record the instrument: which qdisc sits on this source. A qdisc that reports no backlog
+  # (e.g. noqueue on some wifi drivers) blinds the EDGE limb, and that must be in the record.
+  if [ "$HAVE_TC" = 1 ]; then
+    QD=$(tc qdisc show dev "$IF" 2>/dev/null | head -1)
+    say "qdisc:    ${QD:-none reported}"
+  else
+    QD=""
+    say "qdisc:    unmeasurable (tc absent)"
+  fi
+  BL_BLIND=0
+  [ "$HAVE_TC" = 0 ] && BL_BLIND=1
+  case "$QD" in *noqueue*) BL_BLIND=1 ;; esac
+
+  # A /32 with `dev` alone works for a point-to-point tunnel and NOT for an ethernet WAN: the
+  # destination is off-link so there is no next hop, every packet is dropped, and curl exits at
+  # once. The first run did exactly that -- one sample per source and three INCONCLUSIVEs. Use
+  # the gateway this source already carries for its own default route. Parsed from the plain
+  # `ip route show default` listing because `default dev $IF` selector support differs between
+  # busybox ip and iproute2, and an unsupported selector would silently fall back to the broken
+  # dev-only pin.
+  GW=$(ip route show default 2>/dev/null | awk -v d="$IF" '
+    { v=""; f=0
+      for(i=1;i<=NF;i++){ if($i=="via") v=$(i+1); if($i=="dev" && $(i+1)==d) f=1 }
+      if (f && v!="") { print v; exit } }')
+  if [ -n "$GW" ]; then
+    ip route replace "$SINK/32" via "$GW" dev "$IF" 2>/dev/null \
+      || { say "could not pin the sink to $IF via $GW -- skipped"; continue; }
+    say "pinned:   $SINK/32 dev $IF (via gateway)"
+  else
+    ip route replace "$SINK/32" dev "$IF" 2>/dev/null \
+      || { say "could not pin the sink to $IF -- skipped"; continue; }
+    say "pinned:   $SINK/32 dev $IF (no gateway -- point-to-point assumed)"
+  fi
+
+  # Baseline RTT distribution on the idle link -- BASE_PINGS samples, not one, because the MID
+  # rule is an ordering test between the idle and loaded samples, not a ratio.
+  BLIST=""
+  i=0
+  while [ "$i" -lt "$BASE_PINGS" ]; do
+    R=$(rtt "$SINK"); [ -n "$R" ] && BLIST="$BLIST $R"
+    i=$((i + 1))
+  done
+  # shellcheck disable=SC2046,SC2086
+  # stats() takes a LIST of numbers and prints three fields; both splits are the interface.
+  set -- $(stats $BLIST); BMIN=$1; BMAX=$2; BCNT=$3
+  B_SQ=$(sendq "$ADDR"); B_BL=$(backlog "$IF")
+  say "baseline: rtt ${BMIN}-${BMAX}ms (${BCNT}/${BASE_PINGS} answered) sendq=${B_SQ}B backlog=${B_BL}B"
+
+  say "loading ${MB_PER_LINK}MiB ..."
+  head -c $((MB_PER_LINK * 1048576)) /dev/zero 2>/dev/null \
+    | curl -s --max-time "$SECS" --interface "$IF" -X POST --data-binary @- \
+           --resolve "$HOST:443:$SINK" -o /dev/null \
+           -w '%{size_upload} %{speed_upload} %{http_code}' \
+           "https://$HOST/__up" > "$RUN_DIR/e1probe.$$" 2>/dev/null &
+  LOADPID=$!
+
+  MAXSQ=0; MAXBL=0; SAMPLES=0; SQ_HITS=0; BL_HITS=0; LLIST=""; LNA=0; STRADDLED=0
+  while kill -0 "$LOADPID" 2>/dev/null; do
+    S=$(sendq "$ADDR"); L=$(backlog "$IF"); R=$(rtt "$SINK")
+    # A SAMPLE IS EVIDENCE ONLY IF THE LOAD WAS UP FOR ALL OF IT. The loop condition was true
+    # when this iteration began, but sendq/backlog/rtt take real time -- `rtt` waits up to
+    # PING_W for an answer -- and the upload can finish inside them. Such a sample measures an
+    # IDLE link while being counted as loaded, and because the MID rule is a min/max separation
+    # (not an average) ONE of them is enough to turn a correct MID into INCONCLUSIVE: the idle
+    # rtt lands in LLIST, LMIN falls to the baseline, and `lmin > bmax` goes false. It is a
+    # false negative that blames the link for the instrument's own timing. Drop the sample
+    # BEFORE any counter is touched, so SAMPLES, SQ_HITS, BL_HITS and LLIST stay consistent
+    # with each other, and REPORT the drop below rather than hiding it.
+    if ! kill -0 "$LOADPID" 2>/dev/null; then
+      STRADDLED=$((STRADDLED + 1))
+      say "  sample $((SAMPLES + 1)): DISCARDED -- the load ended while this sample was being taken"
+      break
+    fi
+    SAMPLES=$((SAMPLES + 1))
+    [ "${S:-0}" -gt "$MAXSQ" ] && MAXSQ=$S
+    [ "${S:-0}" -gt 0 ] && SQ_HITS=$((SQ_HITS + 1))
+    [ "${L:-0}" -gt "$MAXBL" ] && MAXBL=$L
+    [ "${L:-0}" -gt 0 ] && BL_HITS=$((BL_HITS + 1))
+    if [ -n "$R" ]; then LLIST="$LLIST $R"; else LNA=$((LNA + 1)); fi
+    say "  sample $SAMPLES: sendq=${S}B backlog=${L}B rtt=${R:-na}ms"
+    sleep 1
+  done
+  wait "$LOADPID" 2>/dev/null
+  LOADPID=""
+  # shellcheck disable=SC2046,SC2086
+  set -- $(stats $LLIST); LMIN=$1; LMAX=$2; LCNT=$3
+
+  UPBYTES=$(awk '{printf "%d", $1+0; exit}' "$RUN_DIR/e1probe.$$" 2>/dev/null); UPBYTES=${UPBYTES:-0}
+  UPBPS=$(awk '{printf "%d", $2+0; exit}' "$RUN_DIR/e1probe.$$" 2>/dev/null); UPBPS=${UPBPS:-0}
+  UPCODE=$(awk '{print $3; exit}' "$RUN_DIR/e1probe.$$" 2>/dev/null)
+  rm -f "$RUN_DIR/e1probe.$$" 2>/dev/null
+
+  say ""
+  say "  uploaded     : ${UPBYTES}B of $((MB_PER_LINK * 1048576))B budget at ${UPBPS}B/s  http=${UPCODE:-none}"
+  say "  peak sendq   : ${MAXSQ}B   (non-zero on ${SQ_HITS}/${SAMPLES} samples; REPORT ONLY --"
+  say "                 TCP Send-Q counts in-flight bytes, so it cannot separate edge from mid)"
+  say "  peak backlog : ${MAXBL}B   (non-zero on ${BL_HITS}/${SAMPLES} samples)"
+  say "  rtt idle     : ${BMIN}-${BMAX}ms (${BCNT}/${BASE_PINGS} answered)"
+  say "  rtt loaded   : ${LMIN}-${LMAX}ms (${LCNT} answered, ${LNA} lost of ${SAMPLES})"
+  # Rule 9: a discarded sample is a quantity this run threw away, so it is named in the summary
+  # and not only in the running log. ${SAMPLES} above is the count that the verdict rests on.
+  if [ "$STRADDLED" -gt 0 ]; then
+    say "  discarded    : ${STRADDLED} sample straddled the end of the load (measured an idle link"
+    say "                 while the load was nominally up); not counted in the ${SAMPLES} above"
+  fi
+
+  # If nothing was uploaded the link was never loaded, so there is NO verdict to give.
+  # Printing INCONCLUSIVE there blames the physics for a broken instrument; name the real cause.
+  if [ "$UPBYTES" -eq 0 ]; then
+    say "  VERDICT $IF  : NO LOAD -- probe failure (0 bytes left the box), not a property of the link."
+    continue
+  fi
+
+  # The discriminator, stated so the raw numbers above can be re-judged independently.
+  #   EDGE = standing local queue: backlog non-zero on a MAJORITY of samples. "Standing" means
+  #          present more often than absent -- a definition, not a tuned threshold.
+  #   MID  = complete separation: every answered loaded ping slower than every answered idle
+  #          ping (needs at least as many loaded samples as the idle baseline had), AND the
+  #          separation margin (loaded min - idle max) exceeds the idle jitter this link itself
+  #          showed (idle max - idle min) -- a queueing delay smaller than the link's own idle
+  #          jitter cannot be distinguished from jitter. Both comparands are measured on this
+  #          run; no tuned constant. Plus NO standing local queue and a live backlog limb to
+  #          attest the queue is not local.
+  STANDINGQ=0
+  [ $((BL_HITS * 2)) -gt "$SAMPLES" ] && STANDINGQ=1
+  SEP=0
+  if [ "$BCNT" -gt 0 ] && [ "$LCNT" -ge "$BCNT" ]; then
+    SEP=$(awk -v lmin="$LMIN" -v bmax="$BMAX" -v bmin="$BMIN" \
+      'BEGIN{print (lmin+0 > bmax+0 && (lmin - bmax) > (bmax - bmin)) ? 1 : 0}')
+  fi
+
+  if [ "$STANDINGQ" = 1 ]; then
+    say "  VERDICT $IF  : EDGE -- standing queue in the local qdisc (backlog on ${BL_HITS}/${SAMPLES} samples, peak ${MAXBL}B)"
+  elif [ "$SEP" = 1 ] && [ "$BL_BLIND" = 0 ]; then
+    say "  VERDICT $IF  : MID -- every loaded rtt (min ${LMIN}ms) above every idle rtt (max ${BMAX}ms)"
+    say "                 by more than the idle jitter (${BMIN}-${BMAX}ms), with no standing local"
+    say "                 queue: the queue is out in the carrier's network."
+    [ "$BL_HITS" -gt 0 ] && say "                 (local backlog did appear on ${BL_HITS}/${SAMPLES} samples -- MID rests on it not standing)"
+  elif [ "$SEP" = 1 ] && [ "$BL_BLIND" = 1 ]; then
+    say "  VERDICT $IF  : NO VERDICT -- rtt separated under load, but the local-queue limb is BLIND"
+    say "                 (${QD:-tc absent}), so a local queue cannot be ruled out. Fix the instrument"
+    say "                 (a backlog-reporting qdisc on $IF) before concluding MID."
+  elif [ "$LCNT" -eq 0 ] || [ "$BCNT" -eq 0 ]; then
+    say "  VERDICT $IF  : NO VERDICT -- the RTT limb is dead (idle ${BCNT} answered, loaded ${LCNT})."
+    say "                 Without RTT there is no MID signal; only a standing local queue could have"
+    say "                 concluded anything, and none was seen."
+  else
+    say "  VERDICT $IF  : INCONCLUSIVE -- load was carried, instruments were live, but no standing"
+    say "                 local queue and no rtt separation. The link may not have saturated;"
+    say "                 re-run with a larger budget (MiB per source / seconds) before concluding."
+  fi
+  [ "$BL_BLIND" = 1 ] && say "  NOTE: backlog limb blind on $IF (${QD:-tc absent}) -- EDGE detection rested on nothing local"
+  [ "$HAVE_SS" = 0 ] && say "  NOTE: ss and netstat both absent, sendq unmeasured (report-only field)"
+  say "  CAVEAT: TCP load probes queue LOCATION, which is transport-invariant; the shipped UDP"
+  say "          datapath will experience an edge as ENOBUFS rather than TCP socket blocking."
+done
+
+stats_sample after
+
+say ""
+say "### END"

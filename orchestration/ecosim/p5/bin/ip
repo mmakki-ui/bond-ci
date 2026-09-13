@@ -1,0 +1,140 @@
+#!/bin/sh
+# fake ip. Default routes are a LADDER of N routed sources, so the harness can
+# drive any N -- not a 1-WAN/2-WAN toggle. The devices and their ORDER mirror the
+# four WANs the client box actually declares (docs/INTENT.md OBJ-A/OBJ-H, and the
+# ubus shim's netifd fixture, which is where the metrics 1/2/3/4 come from):
+#     N>=1  eth1   (network.wan,       ubus metric 1)
+#     N>=2  usb0   (network.tethering, ubus metric 2)  -- the metered one
+#     N>=3  eth0   (network.secondwan, ubus metric 3)  -- DARK unless routed here
+#     N>=4  wwan0  (network.wwan,      ubus metric 4)
+# The route metrics below (10/20/30/40) are only the ROUTE-PARSE fallback's view;
+# whenever ubus answers, netifd's metric wins (metric precedence, OBJ-H). Both
+# orderings agree, which is the point.
+#
+# KNOBS ($ECOSIM_STATE):
+#   nwan=<N>     number of ROUTED sources, 1..4. Default 2 (the legacy world).
+#   onewan=1     legacy alias for nwan=1 (speed's arity guard must refuse).
+#   blackhole=1  ARMS GL's VPN kill-switch route the way iproute2 prints it:
+#                `blackhole default metric 254` -- FIRST field `blackhole`, and
+#                NO `dev`. Source discovery must never read it as a WAN.
+#   unclaimed=<dev>  a default route on a device ubus declares no interface for
+#                (the NEVER-SHRINK case).
+#
+# U230 ADDS THE ROUTE-WRITE HALF, and it is INERT until something calls it: before
+# this unit `ip route replace|add|del` fell into the `route *` arm, printed the
+# default ladder and exited 0, so a host route could be written and REMOVED with
+# nothing on the box able to tell. Nothing in the product issued those verbs (one
+# grep over deploy/ orchestration/ p5/ = 0 hits) until the E1 probe, which pins one
+# /32 to steer its load. So the three verbs now:
+#   * RECORD their argv to $S/ledger as `IP route <verb> ...`, next to the LOG and
+#     TC lines, so a bar can assert the ORDER of a kill against a route removal --
+#     which is the E1 heal race and cannot be seen in two separate files;
+#   * keep a PIN TABLE in $S/e1_pins so `ip route show` answers what was actually
+#     written. A shim that accepted a route and then denied it existed would make
+#     the probe's own restore-verification and the runner's residue read vacuous.
+#   e1_gw=1     the default ladder carries `via 198.51.100.254` (the ethernet WAN case: a /32
+#               with `dev` alone is off-link and every packet is dropped). OFF by
+#               default so every pre-U230 bar reads the same listing it always did.
+#   e1_addr=1   `ip -4 addr show dev <d>` answers with a fixture inet. OFF by
+#               default, same reason: `*) : ;;` is what every other bar saw.
+S="$ECOSIM_STATE"
+N=$(cat "$S/nwan" 2>/dev/null)
+case "$N" in ''|*[!0-9]*) N=2 ;; esac
+[ "$(cat "$S/onewan" 2>/dev/null)" = 1 ] && N=1
+GW1=""
+[ "$(cat "$S/e1_gw" 2>/dev/null)" = 1 ] && GW1="via 198.51.100.254 "
+case "$1 $2" in
+  "route replace"|"route add"|"route del")
+    echo "IP $*" >> "$S/ledger"
+    # THE KERNEL DROPS THE /32. iproute2 lists a host route as `<addr> via ... dev
+    # ...`, with no prefix -- which is why the probe captures PRIOR with `$1==<addr>`
+    # and not `$1==<addr>/32`. A shim that echoed back the prefix it was handed
+    # would make every one of those matches pass for the wrong reason.
+    _dst=${3%/32}
+    _pins="$S/e1_pins"
+    if [ "$2" = del ]; then
+        if [ -f "$_pins" ]; then
+            grep -v "^$_dst " "$_pins" > "$_pins.new" 2>/dev/null
+            mv "$_pins.new" "$_pins" 2>/dev/null
+        fi
+    else
+        [ -f "$_pins" ] && { grep -v "^$_dst " "$_pins" > "$_pins.new" 2>/dev/null; mv "$_pins.new" "$_pins" 2>/dev/null; }
+        shift 3
+        echo "$_dst $*" >> "$_pins"
+    fi
+    ;;
+  "route show"|"route "*)
+    [ "$N" -ge 1 ] && echo "default ${GW1}dev eth1 metric 10"
+    [ "$N" -ge 2 ] && echo "default ${GW1}dev usb0 metric 20"
+    [ "$N" -ge 3 ] && echo "default ${GW1}dev eth0 metric 30"
+    [ "$N" -ge 4 ] && echo "default ${GW1}dev wwan0 metric 40"
+    [ "$(cat "$S/blackhole" 2>/dev/null)" = 1 ] && echo "blackhole default metric 254"
+    U=$(cat "$S/unclaimed" 2>/dev/null)
+    [ -n "$U" ] && echo "default dev $U metric 40"
+    # THE PINS ARE NOT PART OF THE DEFAULT LISTING. `ip route show default` is what
+    # source discovery reads; a host route answering there would invent a WAN.
+    [ "${3:-}" = default ] || cat "$S/e1_pins" 2>/dev/null
+    ;;
+  "-4 addr"|"addr show"|"-4 address")
+    [ "$(cat "$S/e1_addr" 2>/dev/null)" = 1 ] || exit 0
+    _d=""; _prev=""
+    for _a in "$@"; do [ "$_prev" = dev ] && _d="$_a"; _prev="$_a"; done
+    [ -n "$_d" ] || exit 0
+    case "$_d" in
+      eth1)  echo "    inet 198.51.100.11/24 brd 198.51.100.255 scope global $_d" ;;
+      usb0)  echo "    inet 198.51.100.12/24 brd 198.51.100.255 scope global $_d" ;;
+      eth0)  echo "    inet 198.51.100.13/24 brd 198.51.100.255 scope global $_d" ;;
+      wwan0) echo "    inet 198.51.100.14/24 brd 198.51.100.255 scope global $_d" ;;
+      *)     exit 0 ;;
+    esac
+    ;;
+  "link show"*)
+    # ANSWERED, not waved through. This shim used to fall to the `*) : ;;` arm and
+    # `exit 0`, so `ip link show <anything>` reported SUCCESS for a device that does
+    # not exist. That made shape-install's tunnel_if capability unfalsifiable through
+    # the shim, and it is why bash and busybox DISAGREED on that bar: under bash the
+    # blanket-success shim won on PATH, under ash the real `ip` applet ran and said
+    # no. A shim that succeeds for every command it does not understand cannot
+    # falsify anything behind it.
+    #
+    # The world this shim serves: the N routed WAN devices of the ladder above, plus
+    # any device the harness DECLARES ($S/netdev.<dev>) -- which is how the logical wg
+    # tunnel becomes visible. Anything else is absent, and absence exits 1 the way
+    # iproute2 does. No device list is invented here: it is the same ladder, read from
+    # the same $N.
+    _q=$3
+    [ -n "$_q" ] || { echo "Usage: ip link show DEV" >&2; exit 1; }
+    _known=""
+    [ "$N" -ge 1 ] && _known="$_known eth1"
+    [ "$N" -ge 2 ] && _known="$_known usb0"
+    [ "$N" -ge 3 ] && _known="$_known eth0"
+    [ "$N" -ge 4 ] && _known="$_known wwan0"
+    for _d in $_known; do
+        [ "$_d" = "$_q" ] || continue
+        echo "1: $_q: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP"
+        exit 0
+    done
+    if [ -e "$S/netdev.$_q" ]; then
+        echo "1: $_q: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 state UNKNOWN"
+        exit 0
+    fi
+    echo "Device \"$_q\" does not exist." >&2
+    exit 1
+    ;;
+  "link set"*)
+    # MTU changes are RECORDED (E4/U22): cake's overhead accounting is
+    # MTU-sensitive, so the tc shim stamps the qdisc with the MTU it was
+    # attached against, and SH-4 asserts the resulting effect. Previously a
+    # no-op, which made the ordering unobservable.
+    _dev=""; _mtu=""; _prev=""
+    for _a in "$@"; do
+        [ "$_prev" = set ] && _dev="$_a"
+        [ "$_prev" = mtu ] && _mtu="$_a"
+        _prev="$_a"
+    done
+    [ -n "$_dev" ] && [ -n "$_mtu" ] && echo "$_mtu" > "$S/mtu.$_dev"
+    ;;
+  "rule "*)    : ;;
+  *) : ;;
+esac
+exit 0

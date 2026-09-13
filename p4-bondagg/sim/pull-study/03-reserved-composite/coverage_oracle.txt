@@ -1,0 +1,113 @@
+﻿######################################################################################################################
+# U11 DISCRIMINATING EXPERIMENT FOR B3   load=0.65  seeds=24  T=9.0s  rig=mid
+# A: oracle-paired coverage ratio   B: shed-vs-late decomposition of Dc loss
+# physics/mixes/seeds = highn_battery.SCENARIOS(), unmodified
+######################################################################################################################
+======================================================================================================================
+PART A -- ORACLE-PAIRED COVERAGE   coverage = (loss_pull - loss_X)/(loss_pull - loss_oracle)
+         PAIRED PER SEED.  oracle = admission on the TRUE instantaneous stage-2 cap.
+======================================================================================================================
+  mix                                          N   pull%   orcl%  headrm | coverage(Dc) med [min..max]
+  N2-het  cellA + eth                          2   12.79    3.10    9.69 |  1.220 [ 1.207.. 1.231]  n=24
+  N3-het  cellA + cellB + eth                  3   16.84    4.54   12.30 |  1.094 [ 1.084.. 1.106]  n=24
+  N4-het  cellA + cellB + wifi + eth           4   13.20    4.11    9.09 |  1.115 [ 1.106.. 1.122]  n=24
+  N5-het  cellA + cellB + cellC + wifi + eth   5   15.55    5.29   10.26 |  1.199 [ 1.191.. 1.216]  n=24
+  N4-teth cellA + cellB + cellC + eth  (teth   4   19.43    6.08   13.36 |  1.050 [ 1.042.. 1.060]  n=24
+  N5-corr cellA+cellB+cellC (CORRELATED stal   5   16.94    5.56   11.39 |  1.112 [ 1.105.. 1.119]  n=24
+
+  NOTE ON SCALE: coverage > 1 is EXPECTED and is not an error.  The oracle is a pure
+  ADMISSION-CONTROL upper bound (mirror=False, no duplication), so the denominator is the
+  loss that ideal admission control alone could remove.  Dc also duplicates, so it can and
+  does remove more than that.  The ratio is a NORMALISER against a per-mix physics-derived
+  yardstick -- read its TREND ACROSS N, not its distance from 1.
+
+  per-mix coverage medians by scheduler (Dc vs the mechanism-removed controls)
+  mix                                          N        Dc      ewma       Dpp
+  N2-het  cellA + eth                          2     1.220     0.782     1.146
+  N3-het  cellA + cellB + eth                  3     1.094     0.838     0.711
+  N4-het  cellA + cellB + wifi + eth           4     1.115     0.837     1.109
+  N5-het  cellA + cellB + cellC + wifi + eth   5     1.199     0.790     1.113
+  N4-teth cellA + cellB + cellC + eth  (teth   4     1.050     0.782     0.735
+  N5-corr cellA+cellB+cellC (CORRELATED stal   5     1.112     0.738     1.064
+
+  per-seed coverage spread AT THE REFERENCE CELL (si=0, N=2) -- the epsilon source
+    Dc  median=1.2198  min=1.2069  max=1.2309  (median-min) = EPSILON = 0.0129
+    per-seed: 1.207 1.208 1.211 1.213 1.213 1.214 1.215 1.217 1.217 1.217 1.219 1.220 1.220 1.222 1.222 1.224 1.224 1.225 1.227 1.227 1.227 1.230 1.230 1.231
+
+  PROPOSED BAR  coverage(mix) >= coverage(N=2) - epsilon = 1.2069
+  mix                                          N        Dc   verd |      ewma   verd |       Dpp   verd
+  N2-het  cellA + eth                          2     1.220   PASS |     0.782   FAIL |     1.146   FAIL
+  N3-het  cellA + cellB + eth                  3     1.094   FAIL |     0.838   FAIL |     0.711   FAIL
+  N4-het  cellA + cellB + wifi + eth           4     1.115   FAIL |     0.837   FAIL |     1.109   FAIL
+  N5-het  cellA + cellB + cellC + wifi + eth   5     1.199   FAIL |     0.790   FAIL |     1.113   FAIL
+  N4-teth cellA + cellB + cellC + eth  (teth   4     1.050   FAIL |     0.782   FAIL |     0.735   FAIL
+  N5-corr cellA+cellB+cellC (CORRELATED stal   5     1.112   FAIL |     0.738   FAIL |     1.064   FAIL
+  GATE VALIDATION: the proposed bar FAILS on ewma 6/6 cells, on Dpp 6/6 cells
+    (a bar that both mechanism-removed controls also PASS is theatre -> do not ship)
+    Dc fails 5/6 cells under the proposed bar.
+======================================================================================================================
+PART A3 -- THE ADOPTED BAR, EVALUATED LITERALLY:  med(loss_X - loss_oracle) <= 0
+           (highn_battery B3 loss half, exact form)  -- ewma and Dpp are the controls
+======================================================================================================================
+  mix                                          N |                     Dc                   ewma                    Dpp
+  N2-het  cellA + eth                          2 |  -2.134 PASS  0/24 worse  +2.112 FAIL 24/24 worse  -1.421 PASS  0/24 worse
+  N3-het  cellA + cellB + eth                  3 |  -1.153 PASS  0/24 worse  +1.993 FAIL 24/24 worse  +3.551 FAIL 24/24 worse
+  N4-het  cellA + cellB + wifi + eth           4 |  -1.049 PASS  0/24 worse  +1.482 FAIL 24/24 worse  -0.994 PASS  0/24 worse
+  N5-het  cellA + cellB + cellC + wifi + eth   5 |  -2.044 PASS  0/24 worse  +2.150 FAIL 24/24 worse  -1.154 PASS  0/24 worse
+  N4-teth cellA + cellB + cellC + eth  (teth   4 |  -0.671 PASS  0/24 worse  +2.921 FAIL 24/24 worse  +3.539 FAIL 24/24 worse
+  N5-corr cellA+cellB+cellC (CORRELATED stal   5 |  -1.273 PASS  0/24 worse  +2.987 FAIL 24/24 worse  -0.733 PASS  0/24 worse
+  ADOPTED-BAR FAILURES:  Dc 0/6   ewma 6/6   Dpp 2/6
+  The bar is only meaningful if the mechanism-removed controls FAIL it.
+======================================================================================================================
+PART B -- SHED-VS-LATE DECOMPOSITION of Dc loss at load=0.65 (summed over 24 seeds)
+   shed.shut = no steady host meter open in the TTL window  -> capacity arithmetic (intent)
+   shed.OPEN = a steady host WAS open and the copy still was not admitted -> FAULT
+   nom_late  = frame ARRIVED, reorder ring discarded it late -> mechanism defect (ii)
+======================================================================================================================
+  mix                              N  offered    lost |     nevpl shed.shut shed.OPEN  dup_lost  nom_late  spN.lost  spN.late  stN.lost  stN.late
+  N2-het  cellA + eth              2  1362288   13077 |         0         0         0        96      4069         0         0      2136      6776
+                                                      |      0.0%      0.0%      0.0%      0.7%     31.1%      0.0%      0.0%     16.3%     51.8%   (% of LOST)
+                                   nominated=303240  copies admitted(res_tx)=297936  aged=0  armed=21600/21600 ticks  steady-meter-open(last-eval)=19104/21600  (any-eval)=21600/21600
+                                   shed.OPEN upper bound (any-eval reading) = 0  (0.0% of LOST)
+                                   INSTRUMENT SELF-CHECK: reconstructed late=10845  sim-reported late=10845  -> OK   (0/24 runs disagree)
+  N3-het  cellA + cellB + eth      3  1642392   55697 |         0       672         0         0     26243         0         0      3816     24966
+                                                      |      0.0%      1.2%      0.0%      0.0%     47.1%      0.0%      0.0%      6.9%     44.8%   (% of LOST)
+                                   nominated=569184  copies admitted(res_tx)=406992  aged=1512  armed=21600/21600 ticks  steady-meter-open(last-eval)=11112/21600  (any-eval)=21600/21600
+                                   shed.OPEN upper bound (any-eval reading) = 672  (1.2% of LOST)
+                                   INSTRUMENT SELF-CHECK: reconstructed late=51209  sim-reported late=51209  -> OK   (0/24 runs disagree)
+  N4-het  cellA + cellB + wifi +   4  2215320   68000 |         0         0         0       192     13412         0         0      2760     51636
+                                                      |      0.0%      0.0%      0.0%      0.3%     19.7%      0.0%      0.0%      4.1%     75.9%   (% of LOST)
+                                   nominated=555264  copies admitted(res_tx)=517656  aged=0  armed=21600/21600 ticks  steady-meter-open(last-eval)=18072/21600  (any-eval)=21600/21600
+                                   shed.OPEN upper bound (any-eval reading) = 0  (0.0% of LOST)
+                                   INSTRUMENT SELF-CHECK: reconstructed late=65048  sim-reported late=65048  -> OK   (0/24 runs disagree)
+  N5-het  cellA + cellB + cellC    5  2431752   78753 |         0         0         0       432     27795         0         0      5640     44886
+                                                      |      0.0%      0.0%      0.0%      0.5%     35.3%      0.0%      0.0%      7.2%     57.0%   (% of LOST)
+                                   nominated=780696  copies admitted(res_tx)=636120  aged=0  armed=21600/21600 ticks  steady-meter-open(last-eval)=13200/21600  (any-eval)=21600/21600
+                                   shed.OPEN upper bound (any-eval reading) = 0  (0.0% of LOST)
+                                   INSTRUMENT SELF-CHECK: reconstructed late=72681  sim-reported late=72681  -> OK   (0/24 runs disagree)
+  N4-teth cellA + cellB + cellC    4  1858848  100316 |       456     11088         0        72     53461         0         0      4128     31111
+                                                      |      0.5%     11.1%      0.0%      0.1%     53.3%      0.0%      0.0%      4.1%     31.0%   (% of LOST)
+                                   nominated=804600  copies admitted(res_tx)=427968  aged=32064  armed=21552/21600 ticks  steady-meter-open(last-eval)=5832/21600  (any-eval)=21552/21600
+                                   shed.OPEN upper bound (any-eval reading) = 11088  (11.1% of LOST)
+                                   INSTRUMENT SELF-CHECK: reconstructed late=84572  sim-reported late=84572  -> OK   (0/24 runs disagree)
+  N5-corr cellA+cellB+cellC (COR   5  2431752  103967 |         0     16512         0       432     36969         0         0      5688     44366
+                                                      |      0.0%     15.9%      0.0%      0.4%     35.6%      0.0%      0.0%      5.5%     42.7%   (% of LOST)
+                                   nominated=812664  copies admitted(res_tx)=668112  aged=16512  armed=21600/21600 ticks  steady-meter-open(last-eval)=13680/21600  (any-eval)=21600/21600
+                                   shed.OPEN upper bound (any-eval reading) = 16512  (15.9% of LOST)
+                                   INSTRUMENT SELF-CHECK: reconstructed late=81335  sim-reported late=81335  -> OK   (0/24 runs disagree)
+
+  DECOMPOSITION VALIDITY: 0/144 runs where the reconstruction disagreed with the simulator's own late counter.
+======================================================================================================================
+PART B2 -- IS LATE-DISCARD SPECIFIC TO Dc?  late/lost per scheduler at load=0.65
+   (`late` is the simulator's own counter: frames that ARRIVED and the reorder ring dropped)
+======================================================================================================================
+  mix                                          N |           pull         oracle             Dc           ewma            Dpp
+  N2-het  cellA + eth                          2 | 174324   50.1%  42156   95.2%  13077   82.9%  70959   53.2%  22883   79.7%
+  N3-het  cellA + cellB + eth                  3 | 276688   53.0%  74665   96.0%  55697   91.9% 107278   64.5% 132819   81.1%
+  N4-het  cellA + cellB + wifi + eth           4 | 292378   55.6%  91030   96.7%  68000   95.7% 123960   68.5%  68964   94.6%
+  N5-het  cellA + cellB + cellC + wifi + eth   5 | 378000   56.5% 128730   96.1%  78753   92.3% 180903   65.2% 100736   92.7%
+  N4-teth cellA + cellB + cellC + eth  (teth   4 | 361197   54.4% 112767   95.6% 100316   84.3% 166905   61.2% 178529   79.3%
+  N5-corr cellA+cellB+cellC (CORRELATED stal   5 | 412012   62.0% 135006   96.1% 103967   78.2% 207398   59.6% 117053   89.3%
+  (each cell: total LOST frames over 24 seeds, and what % of them were late-discards)
+======================================================================================================================
+elapsed 126.7s
