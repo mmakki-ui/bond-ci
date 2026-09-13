@@ -1,0 +1,14 @@
+====================================================================================================
+PREDICTION iv: ack compression batched 80ms. rig=MID-drop seeds=24
+====================================================================================================
+
+--- ack_comp_ms = 0 (baseline, no compression) ---
+  B (rto=350, floor ON)        gp=  86051 loss=  5.3%  p50= 209 p95= 335 p99= 388  tdrop=  620 qdrops=    0 late= 2472  c_lost=    0 c_probe=    0
+  C (probe=4, floor ON)        gp=  76016 loss= 16.3%  p50= 422 p95= 593 p99= 626  tdrop=  599 qdrops= 8165 late= 1273  c_lost= 3320 c_probe=    0
+
+--- ack_comp_ms = 80 (batched) ---
+  B (rto=350, floor ON)        gp=  59212 loss= 34.8%  p50= 485 p95= 589 p99= 610  tdrop=  694 qdrops=23460 late= 1334  c_lost=    0 c_probe=    0
+  B (rto=None, floor OFF)      gp=  54251 loss= 40.3%  p50= 487 p95= 590 p99= 610  tdrop=  149 qdrops=29304 late=  601  c_lost=    0 c_probe=    0
+  C (probe=4, floor ON)        gp=  46633 loss= 48.7%  p50= 500 p95= 607 p99= 618  tdrop=  264 qdrops=36439 late=  378  c_lost= 3226 c_probe=    0
+
+elapsed 277s

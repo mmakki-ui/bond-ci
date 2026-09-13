@@ -1,0 +1,133 @@
+#!/bin/sh
+# /usr/sbin/p5-watchdog — P5 supervisory watchdog (procd START=96, respawn).
+# STRICTLY supervisory (ADR-001 rule 3): it enforces hard invariants, picks up
+# enabled-but-absent services, and PUBLISHES one sensor fact. It is NOT a
+# controller — it can never PREFER a state. Anti-controller guarantees:
+#   (1) no policy writes: it only "start what should run" / "converge to what
+#       the DAG declares"; it never writes mode/auto/thresholds.
+#   (2) table-free: no magnitudes, EWMA, or learned state (except the tput
+#       delta window, which is a SENSOR with a single writer and zero readers
+#       of ecod internals).
+#   (3) one-actor-per-loop: it acts only on invariants no other loop owns.
+#   (4) per-check cooldown + actions/hour cap; FAIL-STATIC — once the cap is
+#       hit it degrades to today's no-watchdog behaviour and never flaps (I10).
+#   (5) serialized via the executor lock (all remedies go through bond-xctl).
+#   (6) kill-switch flag file: /etc/p5/watchdog.off disables it entirely.
+# Proven I11: watchdog_tick is a NO-OP in every invariant-clean state.
+#
+# BUSYBOX-SAFE POSIX sh.
+
+BOND_DIR="${BOND_DIR:-/etc/p5}"
+RUN_DIR="${RUN_DIR:-/var/run/p5}"
+XCTL="${XCTL:-/usr/sbin/p5-reconciler}"
+# ONE FEEDER (U141): the engarde init script is gone from this file. It was only
+# ever declared here, never invoked -- every remedy goes through $XCTL (rule 5) --
+# so a declared-but-unread path was a stale hook, and node_sig() below no longer
+# has a second feeder to sign.
+AGG_SVC="${AGG_SVC:-/etc/init.d/p5-datapath}"
+WG_DEV="${WG_DEV:-wgclient1}"
+CYCLE="${CYCLE:-10}"
+CAP_PER_HR="${CAP_PER_HR:-12}"          # actions/hour ceiling (fail-static)
+COOLDOWN="${COOLDOWN:-30}"              # min seconds between remedies
+TPROBE_WIN="${TPROBE_WIN:-3}"          # consecutive degraded samples to flag
+MAXCYCLES="${MAXCYCLES:-0}"            # >0 = exit after N cycles (harness)
+LOGGER="${LOGGER:-logger}"
+log() { "$LOGGER" -t bond-watchdog "$*"; }
+
+mkrun() { [ -d "$RUN_DIR" ] || mkdir -p "$RUN_DIR" 2>/dev/null; }
+svc_enabled() { "$1" enabled 2>/dev/null; }
+svc_running() {
+    if command -v ubus >/dev/null 2>&1; then
+        ubus call service list 2>/dev/null | grep -q "\"$1\"" && return 0
+    fi
+    pgrep -f "/usr/sbin/$1" >/dev/null 2>&1
+}
+susp() {
+    [ -f "$RUN_DIR/suspended" ] && { echo suspended; return; }
+    [ -f "$RUN_DIR/suspended-degraded" ] && { echo suspended_degraded; return; }
+    echo none
+}
+ep_now() { wg show "$WG_DEV" endpoints 2>/dev/null | awk '{print $2}' | head -1; }
+# cheap observed-state signature: susp | endpoint | is THE feeder running. A
+# reconcile that leaves this unchanged did nothing (I11 no-op) and must NOT
+# consume the cap. The engarde limb is gone with the feeder (U141): a field that
+# can only ever be empty is not a signature, it is dead weight.
+node_sig() {
+    printf '%s:%s:%s' "$(susp)" "$(ep_now)" "$(svc_running p5-datapath && echo a)"
+}
+
+# ---- actions/hour cap: rolling counter file (fail-static, I10) -------------
+acted_recently() {   # true if we are inside the cooldown or over the hourly cap
+    NOW=$(date +%s 2>/dev/null || echo 0)
+    LAST=$(cat "$RUN_DIR/wd_last" 2>/dev/null || echo 0)
+    [ $((NOW - LAST)) -lt "$COOLDOWN" ] && return 0
+    # prune the timestamp ring to the last hour, count entries
+    RING="$RUN_DIR/wd_ring"; : > "$RING.tmp"
+    if [ -r "$RING" ]; then
+        while read -r t; do [ $((NOW - t)) -lt 3600 ] && echo "$t" >> "$RING.tmp"; done < "$RING"
+    fi
+    mv "$RING.tmp" "$RING" 2>/dev/null
+    # LOW: `grep -c` ALREADY prints 0 on no-match (exit 1). The old `|| echo 0` then
+    # printed a SECOND 0 -> "0\n0" -> the `-ge` integer test errored. Capture once and
+    # default an empty (missing-file) read to 0.
+    RINGN=$(grep -c . "$RING" 2>/dev/null); [ "${RINGN:-0}" -ge "$CAP_PER_HR" ] && return 0
+    return 1
+}
+record_action() {
+    NOW=$(date +%s 2>/dev/null || echo 0)
+    echo "$NOW" > "$RUN_DIR/wd_last"; echo "$NOW" >> "$RUN_DIR/wd_ring"
+}
+
+# ---- W5 sensor: passive goodput via `wg show transfer` deltas (D1) ---------
+# reads kernel byte counters (closest to hardware), injects ZERO load, and is
+# gated on active traffic being present (an idle link has nothing to detect).
+# PUBLISH ONLY: writes /var/run/p5/tput; ecod consumes it as a 3rd trigger.
+tput_sample() {
+    RX=$(wg show "$WG_DEV" transfer 2>/dev/null | awk '{r+=$2} END{print r+0}')
+    NOW=$(date +%s 2>/dev/null || echo 0)
+    PRX=$(cat "$RUN_DIR/wd_rx" 2>/dev/null || echo "$RX"); PT=$(cat "$RUN_DIR/wd_rxt" 2>/dev/null || echo "$NOW")
+    echo "$RX" > "$RUN_DIR/wd_rx"; echo "$NOW" > "$RUN_DIR/wd_rxt"
+    DT=$((NOW - PT)); [ "$DT" -le 0 ] && return
+    DB=$((RX - PRX))
+    # active-traffic gate: only judge when bytes are actually moving
+    if [ "$DB" -lt 65536 ]; then echo "idle" > "$RUN_DIR/tput"; echo 0 > "$RUN_DIR/wd_degr"; return; fi
+    RATE=$((DB / DT))                                   # bytes/s
+    FLOOR=$(cat "$BOND_DIR/tput_floor" 2>/dev/null || echo 131072)   # 1 Mbit/s default
+    D=$(cat "$RUN_DIR/wd_degr" 2>/dev/null || echo 0)
+    if [ "$RATE" -lt "$FLOOR" ]; then D=$((D+1)); else D=0; fi
+    echo "$D" > "$RUN_DIR/wd_degr"
+    if [ "$D" -ge "$TPROBE_WIN" ]; then echo "degraded rate=${RATE}Bps floor=${FLOOR}" > "$RUN_DIR/tput"
+    else echo "ok rate=${RATE}Bps" > "$RUN_DIR/tput"; fi
+}
+
+tick() {
+    [ -f "$BOND_DIR/watchdog.off" ] && return 0          # (6) kill-switch
+    mkrun
+    # RECONCILER watchdog: a capped periodic reconcile (THE delta detector) + W5.
+    # W1-W4 (and ALL their raw side effects: the uncapped `|| $AGG_SVC start`
+    # black-hole ignition, the raw feeder start, the raw stops) collapse into deltas
+    # a single reconcile notices -- W1 liveness pickup, W2 dead-state re-pin, W4
+    # coherence; W3 single-feeder is now structural (U141: there is exactly one
+    # feeder, so two can never be up), not an ordering property of an edge.
+    # Suspended = backed-off recovery (only a trigger, e.g. wg ifup,
+    # re-attempts). Fail-static past cooldown/cap (I10). This is the anti-controller
+    # guarantee: the watchdog can only "converge to what the DAG declares" + publish
+    # a sensor -- never a raw side effect, never a state preference. == bond_model.py
+    # watchdog_tick (skip suspended; no-op when clean; consume budget only on a delta).
+    if [ "$(susp)" = none ] && ! acted_recently; then
+        B="$(node_sig)"
+        "$XCTL" reconcile >/dev/null 2>&1                 # idempotent: a clean state is a NO-OP (I11)
+        [ "$(node_sig)" != "$B" ] && { record_action; log "reconcile converged a delta"; }
+    fi
+    # W5 sensor duty (publish only) — always last, never gated
+    tput_sample
+}
+
+# procd runs this as a loop; MAXCYCLES>0 lets the harness run N ticks.
+n=0
+while :; do
+    tick
+    n=$((n+1))
+    [ "$MAXCYCLES" -gt 0 ] && [ "$n" -ge "$MAXCYCLES" ] && exit 0
+    sleep "$CYCLE"
+done
