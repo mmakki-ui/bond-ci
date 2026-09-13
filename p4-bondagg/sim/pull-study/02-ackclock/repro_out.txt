@@ -1,0 +1,27 @@
+=== REPRO core, seeds=24 ===
+[EDGE]
+  pull     gp= 90182 loss= 0.7 p50=  21 p95= 242 p99= 261 depth=  487 tdrop=    0 late=  613
+  push     gp= 89436 loss= 1.6 p50=  40 p95= 291 p99= 311 depth=  706 tdrop=    0 late= 1299
+  oracle   gp= 90374 loss= 0.5 p50=  12 p95= 242 p99= 261 depth=  487 tdrop=    0 late=  437
+  A ewma   gp= 89570 loss= 1.4 p50=  42 p95= 311 p99= 331 depth=  487 tdrop=    0 late= 1176
+  B ack    gp= 89167 loss= 1.9 p50=  31 p95= 251 p99= 261 depth=  487 tdrop=    0 late= 1534
+[MID-drop]
+  pull     gp= 78916 loss=13.1 p50=  87 p95= 215 p99= 240 depth= 1672 tdrop= 4997 late= 5974
+  push     gp= 87010 loss= 4.2 p50= 101 p95= 326 p99= 354 depth= 1961 tdrop= 1367 late= 2162
+  oracle   gp= 88166 loss= 3.0 p50= 102 p95= 301 p99= 326 depth= 1506 tdrop=   40 late= 2426
+  A ewma   gp= 86985 loss= 4.3 p50= 102 p95= 327 p99= 356 depth= 1959 tdrop= 1367 late= 2496
+  B ack    gp= 86051 loss= 5.3 p50= 209 p95= 335 p99= 388 depth= 2101 tdrop=  620 late= 2472
+[MID-shape]
+  pull     gp= 79007 loss=13.0 p50=  86 p95= 214 p99= 240 depth= 1735 tdrop= 4635 late= 6252
+  push     gp= 88007 loss= 3.1 p50= 108 p95= 289 p99= 310 depth= 1887 tdrop=    0 late= 2612
+  oracle   gp= 88191 loss= 2.9 p50= 101 p95= 290 p99= 312 depth= 1172 tdrop=    0 late= 2444
+  A ewma   gp= 88045 loss= 3.1 p50= 107 p95= 291 p99= 313 depth= 1885 tdrop=    0 late= 2578
+  B ack    gp= 86193 loss= 5.1 p50= 210 p95= 325 p99= 378 depth= 2020 tdrop=    2 late= 2936
+
+=== VALIDATION vs attack1_midnet.TwoStageSim (same defs, pull/push/oracle) ===
+  EDGE  pull    NEW gp= 90182 loss= 0.7 | OLD gp= 90182 loss= 0.7  MATCH
+  EDGE  push    NEW gp= 89436 loss= 1.6 | OLD gp= 89436 loss= 1.6  MATCH
+  EDGE  oracle  NEW gp= 90374 loss= 0.5 | OLD gp= 90374 loss= 0.5  MATCH
+  MID   pull    NEW gp= 78916 loss=13.1 | OLD gp= 78916 loss=13.1  MATCH
+  MID   push    NEW gp= 87010 loss= 4.2 | OLD gp= 87010 loss= 4.2  MATCH
+  MID   oracle  NEW gp= 88166 loss= 3.0 | OLD gp= 88166 loss= 3.0  MATCH

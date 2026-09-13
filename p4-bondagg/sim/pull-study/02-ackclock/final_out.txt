@@ -1,0 +1,104 @@
+##############################################################################
+# ACK-CLOCK STUDY  seeds=24  B={'w_ms': 50, 'rto_ms': 350, 'mirror': True}
+##############################################################################
+
+=== 1. CORE: EDGE vs MID-network bottleneck ===
+  [EDGE  (spotty cap on local socket)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             90182    0.7    21   242   261    487      0    613
+    push             89436    1.6    40   291   311    706      0   1299
+    oracle           90374    0.5    12   242   261    487      0    437
+    A ewma           89570    1.4    42   311   331    487      0   1176
+    B ack            89167    1.9    31   251   261    487      0   1534
+    B ack+lat        84067    7.5    71   271   281    474      0   5969
+
+  [MID-drop  (spotty cap downstream, hard 400ms dropouts)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             78916   13.1    87   215   240   1672   4997   5974
+    push             87010    4.2   101   326   354   1961   1367   2162
+    oracle           88166    3.0   102   301   326   1506     40   2426
+    A ewma           86985    4.3   102   327   356   1959   1367   2496
+    B ack            86051    5.3   209   335   388   2101    620   2472
+    B ack+lat        84912    6.5   225   350   403   2014    620   3282
+
+  [MID-shape (downstream throttle to 4Mb, NO outage -- purest hidden cap)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             79007   13.0    86   214   240   1735   4635   6252
+    push             88007    3.1   108   289   310   1887      0   2612
+    oracle           88191    2.9   101   290   312   1172      0   2444
+    A ewma           88045    3.1   107   291   313   1885      0   2578
+    B ack            86193    5.1   210   325   378   2020      2   2936
+    B ack+lat        85284    6.1   226   342   397   1939      2   3570
+
+=== 2. EDGE stall-severity (does B keep pull's lag-free stall win vs push?) ===
+  edge-none     push gp= 89577 loss= 1.4 p95= 161  |  B gp= 89744 loss= 1.2 p95= 152  (+0% gp vs push)
+  edge-mild     push gp= 89463 loss= 1.5 p95= 201  |  B gp= 89371 loss= 1.6 p95= 191  (-0% gp vs push)
+  edge-medium   push gp= 89436 loss= 1.6 p95= 291  |  B gp= 89167 loss= 1.9 p95= 251  (-0% gp vs push)
+  edge-severe   push gp= 86880 loss= 4.4 p95= 461  |  B gp= 88709 loss= 2.4 p95= 291  (+2% gp vs push)
+
+=== 3. REGRESSION rigs (anti-overfitting) ===
+  [rapid-flap [edge] (9x 220ms dropouts)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             89688    1.3    41   211   258   1725      0   1067
+    push             88846    2.2    72   261   328   1831      0   1841
+    oracle           89983    1.0    41   202   251   1726      0    796
+    A ewma           88405    2.7    82   288   358   1792      0   2247
+    B ack            88904    2.1    62   231   261   1267      0   1788
+    B ack+lat        85306    6.1   101   261   291   1744      0   4830
+
+  [asym-long-stall [edge] (single 1.5s outage)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             89646    1.3   122   421   584   2340      0    729
+    push             88350    2.8   141   422   571   1828      0   1835
+    oracle           89857    1.1   122   414   591   2420      0    576
+    A ewma           88541    2.5   131   424   571   1812      0   1622
+    B ack            88906    2.1   122   421   584   2340      0   1378
+    B ack+lat        85363    6.0   151   474   601   2340      0   4151
+
+  [rapid-flap [mid] (9x 220ms dropouts)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             77186   15.0    91   224   243   1920   6762   5798
+    push             86123    5.2   131   275   333   1982   2318   2027
+    oracle           88273    2.8   118   276   303   2168     66   2302
+    A ewma           86154    5.2   132   276   333   1976   2318   2281
+    B ack            83493    8.1   324   501   605   2179   1187   2350
+    B ack+lat        82751    8.9   337   509   610   2100   1192   2853
+
+  [asym-long-stall [mid] (single 1.5s outage)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             75779   16.6    92   227   248   1673   6701   7153
+    push             86303    5.0   159   308   391   2051   2286   1893
+    oracle           88326    2.8   184   441   598   2335      0   1937
+    A ewma           86335    5.0   161   312   393   2050   2286   2017
+    B ack            84505    7.0   322   495   551   2018    741   2616
+    B ack+lat        84022    7.5   326   508   591   2125    741   2904
+
+  [soft-partial-dip [edge] (throttle to 1.8Mb, no outage)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             90130    0.8    32   281   301   1121      0    661
+    push             89062    2.0    92   322   351   1554     29   1643
+    oracle           90456    0.4    22   281   291    409      0    361
+    A ewma           89280    1.7    82   331   351   1179      0   1442
+    B ack            88893    2.2    62   282   301   1177      0   1536
+    B ack+lat        84277    7.2    92   311   321   1083      6   5580
+
+  [correlated N=3 [mid] (2 tethers drop together + eth)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull             89155   19.8   100   230   246   2184   7314  12774
+    push            101412    8.8   109   235   363   2149   4242   4721
+    oracle          106161    4.6   101   303   367   2802     40   4596
+    A ewma          101352    8.9   110   236   363   2147   4258   5116
+    B ack            96715   13.0   445   585   618   2340    851   5301
+    B ack+lat        95950   13.7   448   591   619   2360    852   5817
+
+  [correlated N=3 [edge] (2 tethers drop together + eth)]
+    scheduler           gp  loss%   p50   p95   p99  depth  tdrop   late
+    pull            109929    1.2    12   261   311    682      0   1191
+    push            107539    3.3    62   361   391    910      0   3388
+    oracle          110321    0.8    12   251   291    680      0    830
+    A ewma          107967    2.9    62   381   512   2639      0   2911
+    B ack           108431    2.5    42   281   321    682      0   2568
+    B ack+lat       102356    8.0    62   311   341    637      0   7859
+
+
+(section 1-3 elapsed 1259s)
