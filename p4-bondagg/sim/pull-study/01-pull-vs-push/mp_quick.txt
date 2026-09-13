@@ -1,0 +1,111 @@
+
+############################################################################################
+# MASTERPIECE DATAPATH  --  consolidated model validation battery  seeds=8
+#   pull (work-conserving) + thin delivered-rate cap + opportunistic eth-mirror
+#   physics = nsched_model (unmodified).  medians over seeds.  push = eif_real.
+############################################################################################
+
+============================================================================================
+TEST 1  EDGE vs MID-NETWORK bottleneck  (does the thin cap RESCUE mid
+        without hurting edge?)   two-stage series-queue rig, seeds=8
+============================================================================================
+
+  -- EDGE: spotty cap on the LOCAL socket (pull's assumption holds) --
+  EDGE (single-stage-equiv)        gp   loss%    p50    p95   capfr    tshr
+    pull                        84353     7.1     71    299       0   0.14
+    pull+cap                    84353     7.1     71    299       0   0.14
+    push(eif_real)              83611     8.0    112    343       0   0.14
+    oracle                      84827     6.6     68    301       0   0.14
+
+  -- MID: local drains fast, spotty cap hidden DOWNSTREAM (dropouts) --
+  MID hard-dropouts                gp   loss%    p50    p95   capfr    tshr
+    pull                        76317    16.0    387    510       0   0.00
+    pull+cap                    83430     8.2     88    237     783   0.14
+    push(eif_real)              85703     5.7    113    364       0   0.14
+    oracle                      87216     4.0    103    318       0   0.14
+
+  -- MID: carrier SHAPING (throttle to 4Mb, NEVER a full outage) --
+  MID shaping                      gp   loss%    p50    p95   capfr    tshr
+    pull                        76317    16.0    387    510       0   0.00
+    pull+cap                    83301     8.3     80    241     783   0.14
+    push(eif_real)              86814     4.4    111    329       0   0.14
+    oracle                      87017     4.2     87    305       0   0.14
+
+
+============================================================================================
+TEST 2  ABLATION  N=2 edge (spotty tether + steady eth), offer=85%, seeds=8
+        pull-only -> +cap -> +cap+mirror.  push(eif_real) reference.
+============================================================================================
+  variant                 gp  loss%  util%   p50   p95   p99  tdrop  capfr  mirTX mirRec
+  push(eif_real)       78802   13.4   75.3   174   340   387   1150      0      0      0
+  pull-only            87244    4.1   83.4   180   420   506      0      0      0      0
+  pull+cap             87244    4.1   83.4   180   420   506      0      0      0      0
+  pull+cap+mirror      87244    4.1   83.4   180   420   506      0      0      0      0
+  --> vs push(eif_real): pull-only +10.7% gp, pull+cap +10.7%, +mirror +10.7% gp
+  --> mirror effect (edge): p95 420 -> 420, loss 4.1% -> 4.1%, mirTX=0/seed
+      (pull+cap+mirror == pull+cap: the opportunistic mirror NEVER FIRES under
+       pull -- eth runs at its gate target, no idle room to duplicate into.)
+
+============================================================================================
+TEST 3  REGRESSION  pull+cap+mirror MUST beat push(eif_real) on gp AND loss
+        seeds=8.  Scenarios the regen/gate were NOT tuned on.
+============================================================================================
+  scenario             variant               gp  loss%    p95  capfr  mirTX
+  rapid-flap 150ms     push(eif_real)     78997   13.1    347
+                       pull+cap+mir       87182    4.1    440      0      0  <= WIN
+  asym long-stall      push(eif_real)     75401   17.1    360
+                       pull+cap+mir       86198    5.2    536      0      0  <= WIN
+  soft partial dip     push(eif_real)     75478   17.0    342
+                       pull+cap+mir       87324    4.0    434    209      0  <= WIN
+  corr-both N=3        push(eif_real)     79397   27.6    376
+                       pull+cap+mir      101348    7.6    483      0      0  <= WIN
+
+============================================================================================
+TEST 4  PARSIMONY GUARDS  (assert each piece only spends when it should)
+============================================================================================
+  GUARD A (cap DORMANT at edge, LOAD-BEARING at mid):   ~900 post-warm ticks/run
+    what matters = far-gate BINDS (denies a frame the local gate would admit):
+    EDGE rig: far-gate-bind ticks/seed=0  (detector-latched=41)
+              edge gp cap-on=87244 vs cap-off=87244  loss 4.1% vs 4.1% (cap must NOT hurt edge)
+    MID  rig: far-gate-bind ticks/seed=783  (detector-latched=814)
+    => PASS  (no-edge-harm=True  mid-concentrated(>=10x)=True)
+
+  GUARD B (does the OPPORTUNISTIC mirror ever get idle eth room under pull?):
+    offer                   mirTX      dgp     dp95   dloss%  verdict
+    idle 0.70x                  0       +0       +0     +0.0     PASS
+    moderate 0.85x              0       +0       +0     +0.0     PASS
+    saturated 1.05x             0       +0       +0     +0.0     PASS
+    FORCED (permissive, overfill eth) @0.85x: mirTX=14277 dgp=-4591 dp95=+177  <= net-NEGATIVE
+    => opportunistic mirror NEVER FIRES under pull (total mirTX=0); guard trivially holds
+
+============================================================================================
+TEST 5  N-GENERIC  full stack (pull+cap+mirror) vs push at N=2 and N=3
+============================================================================================
+  variant                 gp  loss%  util%   p50   p95   p99  tdrop  capfr  mirTX mirRec
+  N=2:
+    push(eif_real)   gp=  78802 loss= 13.4% p95=340
+    pull+cap+mir N2    87244    4.1   83.4   180   420   506      0      0      0      0
+    --> +10.7% gp vs push, loss 4.1% vs 13.4%
+  N=3:
+    push(eif_real)   gp=  82813 loss= 24.5% p95=350
+    pull+cap+mir N3   102274    6.7   81.8   206   372   439      0    114      0      0
+    --> +23.5% gp vs push, loss 6.7% vs 24.5%
+
+############################################################################################
+# PER-PIECE GO / NO-GO
+############################################################################################
+PIECE 1  PULL (aggregation primary):
+  N=2 full-stack +10.7% gp vs push; N=3 +23.5% gp vs push (test 5).
+  EDGE: pull loss=7.1% vs push 8.0% (test1).  => GO if positive.
+PIECE 2  THIN CAP (mid-network guard):
+  MID drop: pull=16.0% loss -> pull+cap=8.2% (push=5.7%).
+  MID shape: pull=16.0% -> pull+cap=8.3% (push=4.4%).
+  EDGE cap fires/seed=0 vs MID 783 (test4 GuardA=True). => GO if rescues mid & dormant edge.
+PIECE 3  OPPORTUNISTIC MIRROR (p95 tail):  ** NO-GO -- DROP under pull **
+  Opportunistic mirror total fires across all offers = 0 (it NEVER fires):
+  eth runs AT its gate target whenever the tether is loaded enough to make
+  at-risk frames, so idle eth room to duplicate into never exists.  Forcing
+  it (overfill eth) is net-negative: dgp=-4591 (test4 GuardB).
+  The hedge_free win was a PUSH-stack property; it does not transfer to pull.
+
+(Full interpretation + GO/NO-GO writeup is in the returned analysis.)

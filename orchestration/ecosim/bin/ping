@@ -1,0 +1,12 @@
+#!/bin/sh
+RAW=0
+for a in "$@"; do [ "$a" = "-I" ] && RAW=1; done
+set -- $(cat "$STUBDIR/cur_health" 2>/dev/null)
+if [ "$RAW" = 1 ]; then
+    [ "$1" = "OK" ] || exit 1
+    echo "64 bytes from x: seq=0 ttl=54 time=${2:-20}.0 ms"
+else
+    [ "${3:-OK}" = "OK" ] || exit 1
+    echo "64 bytes from x: seq=0 ttl=54 time=${4:-141}.0 ms"
+fi
+exit 0

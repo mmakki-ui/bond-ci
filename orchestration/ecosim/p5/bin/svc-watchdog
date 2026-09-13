@@ -1,0 +1,11 @@
+#!/bin/sh
+# fake /etc/init.d/bond-watchdog
+S="$ECOSIM_STATE"; N=bond-watchdog
+case "$1" in
+  enable)  echo 1 > "$S/enabled.$N" ;;
+  disable) echo 0 > "$S/enabled.$N" ;;
+  start|restart) echo 1 > "$S/running.$N"; echo "SVC $N $1" >> "$S/ledger" ;;
+  stop)    echo 0 > "$S/running.$N" ;;
+  enabled) [ "$(cat "$S/enabled.$N" 2>/dev/null)" = 1 ] || exit 1 ;;
+esac
+exit 0

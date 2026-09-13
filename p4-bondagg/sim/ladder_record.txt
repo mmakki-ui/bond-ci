@@ -1,0 +1,213 @@
+# ladder_record.txt -- U39. The measured record of what `ladder` actually does.
+#
+# 69 runs: 60 on `dev` (github.com/mmakki-ui/bond, private) and 9 of this branch
+# on the public CI mirror (mmakki-ui/bond-ci, branch u39-ladder-triage).
+#
+# THE POPULATION IS A RULE, NOT A WINDOW  (round 3 fix round)
+# ==========================================================
+# Round 3 recorded "14 consecutive runs on dev" and made the job FATAL on them.
+# That window was a CHOICE and it flattered the data: `gh run list -R
+# mmakki-ui/bond -b dev -L 200` lists 67 emulator-gate runs against the SAME two
+# objects (`p4-bondagg/daemon` tree f9eb0608, `pathsim.py` blob 22b78825), back
+# to 2026-08-25T21:18Z. Fifty-three qualifying runs were left out. On the full
+# population S5.loss is 67/69, not 14/14, and it reddened the fatal job on a
+# clean tree (mirror run 33336749301). The window was the defect.
+#
+# A run is IN this record iff, mechanically:
+#   * its `p4-bondagg/daemon` tree is f9eb0608, and
+#   * its `pathsim.py` bars are structurally identical to the frozen base
+#     (checked every CI run by ladder_equiv_check.py checks (0)/(1)/(2)), and
+#   * its `ladder` job printed all ten stage lines and all ten stage verdicts.
+# Nothing else decides. In particular a run is never excluded for failing a bar:
+# every run that has ever failed anything is here, including BOTH S5.loss
+# failures. Appending only a failing run -- or only green ones -- is the
+# laundering the rule exists to stop.
+#
+# EXCLUDED, with the reason, rather than by omission:
+#   7 dev runs (33310251465, 33314186403, 33314304673, 33314347178, 33314420039,
+#     33314476804, 33314948749) -- ladder job printed ZERO stage lines. The
+#     private repo's Actions minutes ran out at 11:58Z on 2026-08-30 and those
+#     jobs died with no steps.
+#   the dilution branches u39-dilution-control / u39-dilution-probe -- their bars
+#     differ from the frozen base, which IS the dilution being tested.
+#   every other unit's feature branch -- sampled with `gh api
+#     repos/mmakki-ui/bond-ci/git/trees/<tree>?recursive=1`: p4-bondagg/daemon is
+#     cc13438b / ee0b9b13 / 292491aa there, not f9eb0608. Different subject.
+#
+# TWO pathsim sources appear here and they are NOT assumed equivalent. The dev
+# runs ran 22b78825, which IS the frozen base ladder_equiv_check.py compares
+# against -- structurally (30/0), by outcome (690/0) and by stage verdict
+# (690/0) on every CI run. The mirror runs ran d0d517ce, d9e435d1 or fa1023c6;
+# `diff` of the LF-normalized files puts the last two ONE COMMENT LINE from
+# d0d517ce (a ROADMAP task id).
+#
+# `origin/dev`'s daemon tree has since moved to cc13438b. `git diff f9eb0608
+# cc13438b` is U7's pull core: five NEW files plus a 6-line main.go hunk adding
+# an AGG_MODE=pull-client case. The client/server dispatch this harness uses is
+# untouched. That is a measured claim about a diff, not about a run: re-measure
+# after the merge.
+#
+# EVERY value below is READ OUT OF A CI LOG. None is a local re-run: there is no
+# Go toolchain on the dev PC, so pathsim cannot be executed here at all. The raw
+# stage lines are in ladder_ci_runs.json, and that transcription is now MEASURED
+# rather than asserted -- each run's stage lines and stage verdicts were compared
+# byte-for-byte against the job log they came from, and for the 9 mirror runs the
+# replay reproduces all 360 logged `BAR` lines exactly (the dev logs predate the
+# BAR-line refactor, so only their 600 stage lines and 600 verdicts are
+# comparable).
+#
+# THIS FILE IS A RENDERING, NOT A SOURCE.
+# ======================================
+# Round 2 hand-wrote these columns and nothing checked them, so a fabricated pass
+# count was invisible: moving S3.thr to UNGATED with a made-up "9/14" passed the
+# whole self-test. Every column here is DERIVED --
+#   `ladder_replay.measure(pathsim.py, ladder_ci_runs.json)` replays each recorded
+#   run through pathsim's real verdict()/bars source and recomputes the threshold
+#   text, the pass count, the envelope and the hold-out audit --
+# and `ladder_equiv_check.py` asserts this file reproduces that derivation exactly,
+# fatally, on every CI run. Editing a number here without the runs backing it is a
+# CI failure. Regenerate, do not hand-patch:
+#     python p4-bondagg/sim/ladder_equiv_check.py --emit-record
+#
+# Regenerate the RUNS (ladder_ci_runs.json) after ANY change to pathsim.py's bars
+# or to p4-bondagg/daemon, and say in the commit what changed and why.
+# Reproduce a row:  gh api repos/<repo>/actions/jobs/<ladder job id>/logs
+#
+# COLUMNS -- pipe-delimited, and the delimiter is load-bearing: round 2 split on
+# whitespace, which is ambiguous for `tail900 >= 1871.5 of 1900` and `K in {8,12}`.
+#   bar | threshold | pass/den | envelope | hold-outs
+#   threshold : BYTE-EQUAL to the `bar=` text pathsim prints. ladder_gate.py
+#               compares the two on every run -- that is what makes a diluted
+#               threshold (`delivered >= 1800` -> `>= 1`) fail the job instead of
+#               being printed next to this envelope as though nothing happened.
+#   pass/den  : the CLASS is derived from this and checked against it. den/den
+#               GATED, 0/den KNOWN HONEST FAIL, anything between UNGATED.
+#   envelope  : `min <x> max <y>` (numeric bars) or `tokens {a,b}`. Source of the
+#               fatal DRIFT band [min-(max-min), max+(max-min)] -- derived from
+#               MEASURED VALUES, so it survives a diluted threshold. `min == max`
+#               means the record established no spread and NO band exists; those
+#               four bars (S1.loss, S1.share, S4.loss, S4.tail) are named
+#               non-coverage, carried by their threshold alone.
+#   hold-outs : the band's own false-positive audit, and the column exists
+#               because round 3 asserted it in prose and overstated it. For each
+#               recorded value, build the band from the OTHERS and ask whether the
+#               held-out value falls inside.
+#                 holdouts    -- hold-outs that HAD a band to test against
+#                 informative -- of those, the ones that actually MOVED the band
+#                                (unique min or unique max). Any other hold-out is
+#                                inside by construction and tests nothing.
+#                 excluded    -- hold-outs the band rejects: a measured false
+#                                positive of the fatal DRIFT check.
+#                 skipped     -- no band derivable from the others; not a pass.
+#               `informative 0` means the bar's band has never been tested at all,
+#               however large its `holdouts` number looks. S6.k and S7.k read
+#               `informative 0` here. On the 14-run record S5.loss did too -- and
+#               S5.loss is the bar that then reddened the fatal job.
+#
+# WHAT THE SMALL WINDOW HID. Six bars' 14-run maxima were exceeded once the
+# population was collected: S5.loss 0.10 -> 1.70, S6.loss 1.70 -> 2.60,
+# S7.loss 3.83 -> 4.43, S8.loss 4.23 -> 4.63, S2.loss 8.43 -> 9.43,
+# S3.peerloss 33 -> 39. An observed max is a DESCRIPTION, never a bound. That is
+# the standing argument against widening any UNGATED bar to its observed max
+# (U39a), and it is now an argument from 69 runs rather than from 14.
+#
+# PROSPECTIVE RUNS ARE HELD OUT. Runs made after this record was written are a
+# test of it, not an input to it. If one reds, the response is to re-derive over
+# EVERY qualifying run -- never to append the failing run alone, and never to
+# widen a threshold.
+#
+# runs (newest first, `run repo branch head pathsim`):
+#   33338337247  mmakki-ui/bond-ci u39-ladder-triage  a82931d d0d517ce
+#   33338319745  mmakki-ui/bond-ci u39-ladder-triage  a82931d d0d517ce
+#   33338303023  mmakki-ui/bond-ci u39-ladder-triage  a82931d d0d517ce
+#   33337559817  mmakki-ui/bond-ci u39-ladder-triage  a82931d d0d517ce
+#   33336749301  mmakki-ui/bond-ci u39-ladder-triage  16ece69 d0d517ce
+#   33323192348  mmakki-ui/bond-ci u39-ladder-triage  38326de fa1023c6
+#   33322251226  mmakki-ui/bond-ci u39-ladder-triage  1b36c29 d9e435d1
+#   33321817968  mmakki-ui/bond-ci u39-ladder-triage  798c498 d9e435d1
+#   33321544571  mmakki-ui/bond-ci u39-ladder-triage  e0b1f61 d9e435d1
+#   33310068067  mmakki-ui/bond    dev                27cf15a 22b78825
+#   33309728418  mmakki-ui/bond    dev                3b89c4f 22b78825
+#   33309669280  mmakki-ui/bond    dev                69115df 22b78825
+#   33309050419  mmakki-ui/bond    dev                8d81ae9 22b78825
+#   33308803251  mmakki-ui/bond    dev                923a8f1 22b78825
+#   33308480590  mmakki-ui/bond    dev                7dc0e94 22b78825
+#   33305695310  mmakki-ui/bond    dev                86de13a 22b78825
+#   33302777656  mmakki-ui/bond    dev                caffd67 22b78825
+#   33302704133  mmakki-ui/bond    dev                fada2c8 22b78825
+#   33301987287  mmakki-ui/bond    dev                fb3ca70 22b78825
+#   33301888459  mmakki-ui/bond    dev                f7a80b8 22b78825
+#   33301200754  mmakki-ui/bond    dev                52a76d3 22b78825
+#   33300668372  mmakki-ui/bond    dev                0f83da8 22b78825
+#   33287188647  mmakki-ui/bond    dev                69ce810 22b78825
+#   33287159544  mmakki-ui/bond    dev                0460aec 22b78825
+#   33285570020  mmakki-ui/bond    dev                9027896 22b78825
+#   33283532298  mmakki-ui/bond    dev                e8bbe18 22b78825
+#   33282681448  mmakki-ui/bond    dev                2c052b4 22b78825
+#   33282558225  mmakki-ui/bond    dev                aa2f6f5 22b78825
+#   33282518336  mmakki-ui/bond    dev                6cb8727 22b78825
+#   33281870456  mmakki-ui/bond    dev                94b0e8e 22b78825
+#   33281705810  mmakki-ui/bond    dev                9391543 22b78825
+#   33279959208  mmakki-ui/bond    dev                3bb47a0 22b78825
+#   33279760580  mmakki-ui/bond    dev                b989659 22b78825
+#   33278049400  mmakki-ui/bond    dev                06dd050 22b78825
+#   33277390139  mmakki-ui/bond    dev                bd8f857 22b78825
+#   33277318280  mmakki-ui/bond    dev                2d862a7 22b78825
+#   33277100625  mmakki-ui/bond    dev                a14b16c 22b78825
+#   33276461734  mmakki-ui/bond    dev                beae12a 22b78825
+#   33276067187  mmakki-ui/bond    dev                a915feb 22b78825
+#   33275831178  mmakki-ui/bond    dev                71e36d1 22b78825
+#   33275228594  mmakki-ui/bond    dev                fcdf770 22b78825
+#   33273272294  mmakki-ui/bond    dev                d20e5ec 22b78825
+#   33273227358  mmakki-ui/bond    dev                b422e97 22b78825
+#   33271843411  mmakki-ui/bond    dev                696ae1c 22b78825
+#   33271527529  mmakki-ui/bond    dev                fa37e1c 22b78825
+#   33269859327  mmakki-ui/bond    dev                ca04302 22b78825
+#   33269564544  mmakki-ui/bond    dev                2ab7110 22b78825
+#   33269497825  mmakki-ui/bond    dev                dc9d5ba 22b78825
+#   33269271464  mmakki-ui/bond    dev                00dda49 22b78825
+#   33269165363  mmakki-ui/bond    dev                31fa306 22b78825
+#   33269037347  mmakki-ui/bond    dev                37ed318 22b78825
+#   33268650280  mmakki-ui/bond    dev                65944d1 22b78825
+#   33249864813  mmakki-ui/bond    dev                2c33138 22b78825
+#   33240596626  mmakki-ui/bond    dev                7d476fc 22b78825
+#   33062489911  mmakki-ui/bond    dev                d94adb7 22b78825
+#   33056034653  mmakki-ui/bond    dev                674526d 22b78825
+#   33028285498  mmakki-ui/bond    dev                b30aa58 22b78825
+#   33018059070  mmakki-ui/bond    dev                16c7694 22b78825
+#   32965616937  mmakki-ui/bond    dev                11e7101 22b78825
+#   32963047537  mmakki-ui/bond    dev                881c2b2 22b78825
+#   32908946522  mmakki-ui/bond    dev                2325635 22b78825
+#   32908907975  mmakki-ui/bond    dev                50d1c7e 22b78825
+#   32908224895  mmakki-ui/bond    dev                8bae2b7 22b78825
+#   32906931139  mmakki-ui/bond    dev                d803a50 22b78825
+#   32903083811  mmakki-ui/bond    dev                a9faa5a 22b78825
+#   32901790736  mmakki-ui/bond    dev                d27efb8 22b78825
+#   32901583160  mmakki-ui/bond    dev                de84cac 22b78825
+#   32900906940  mmakki-ui/bond    dev                ee5bee8 22b78825
+#   32900319457  mmakki-ui/bond    dev                9f1074c 22b78825
+
+bar         | threshold                 | pass/den | envelope            | hold-outs
+------------|---------------------------|----------|---------------------|-------------------------------------------
+S1.loss     | loss <= 0.50%             |    69/69 | min 0 max 0         | holdouts none
+S1.share    | p1share < 8.0%            |    69/69 | min 0 max 0         | holdouts none
+S2.loss     | loss <= 6.00%             |    28/69 | min 2.64 max 9.43   | holdouts 69 informative 2 excluded 0 skipped 0
+S2.share    | p1share > 25.0%           |    69/69 | min 31.4 max 40     | holdouts 69 informative 2 excluded 0 skipped 0
+S2.tail     | tail900 >= 1871.5 of 1900 |     0/69 | min 1662 max 1849   | holdouts 69 informative 2 excluded 0 skipped 0
+S2b.deliv   | delivered >= 1800         |    69/69 | min 2334 max 2640   | holdouts 69 informative 2 excluded 0 skipped 0
+S2b.loss    | loss <= 50.00%            |    69/69 | min 22.35 max 31.35 | holdouts 69 informative 2 excluded 0 skipped 0
+S3.loss     | loss <= 55.00%            |    69/69 | min 34.3 max 40.23  | holdouts 69 informative 2 excluded 0 skipped 0
+S3.peerloss | median_peerloss <= 3.0%   |     0/69 | min 17 max 39       | holdouts 69 informative 2 excluded 0 skipped 0
+S3.rate     | p0rate <= 1000 kb         |    48/69 | min 641 max 1475    | holdouts 69 informative 1 excluded 0 skipped 0
+S3.thr      | late_thr >= 1.50 Mb       |    69/69 | min 1.56 max 1.96   | holdouts 69 informative 2 excluded 0 skipped 0
+S4.loss     | loss <= 12.00%            |    69/69 | min 6.2 max 6.2     | holdouts none
+S4.tail     | tail >= 392 of 400        |    69/69 | min 400 max 400     | holdouts none
+S5.loss     | loss <= 1.00%             |    67/69 | min 0 max 1.7       | holdouts 69 informative 1 excluded 0 skipped 0
+S6.k        | K == 20                   |    63/69 | min 12 max 20       | holdouts 69 informative 0 excluded 0 skipped 0
+S6.loss     | loss <= 0.80%             |    28/69 | min 0.3 max 2.6     | holdouts 69 informative 2 excluded 0 skipped 0
+S7.k        | K in {8,12}               |    69/69 | min 8 max 12        | holdouts 69 informative 0 excluded 0 skipped 0
+S7.loss     | loss <= 3.50%             |    59/69 | min 2.07 max 4.43   | holdouts 69 informative 2 excluded 0 skipped 0
+S8.loss     | loss <= 4.00%             |    58/69 | min 1.97 max 4.63   | holdouts 69 informative 2 excluded 0 skipped 0
+S9.loss     | loss <= 45.00%            |    69/69 | min 20.18 max 29.36 | holdouts 69 informative 2 excluded 0 skipped 0
+*.order     | inorder == True           |  690/690 | tokens {True}       | holdouts none
+*.dup       | dup == 0                  |  690/690 | min 0 max 0         | holdouts none

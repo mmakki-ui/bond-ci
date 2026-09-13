@@ -1,0 +1,8 @@
+#!/bin/sh
+# fake pgrep: reflects the init.d shim running state. `pgrep -f /usr/sbin/X`.
+S="$ECOSIM_STATE"
+for a in "$@"; do case "$a" in
+    */engarde-client) [ "$(cat "$S/running.engarde-client" 2>/dev/null)" = 1 ] && { echo 1234; exit 0; } ;;
+    */bond-agg)       [ "$(cat "$S/running.bond-agg" 2>/dev/null)" = 1 ] && { echo 1235; exit 0; } ;;
+esac; done
+exit 1
