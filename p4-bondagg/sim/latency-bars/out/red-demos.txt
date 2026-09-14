@@ -1,0 +1,192 @@
+# GATE-LEVEL RED DEMONSTRATIONS (U14) -- can the GATE itself fail?
+#
+# out/mutations.md proves each BAR can go red. This file proves the GATE can, on
+# every route a bar or the instrument could be neutered. Captured 2026-08-31 by
+# out/reddemo.sh against the COMMITTED tree; the tree is restored between demos
+# and both pins are re-verified at the end (last block of this file).
+#
+#   DEMO D  the instrument was EDITED and not re-measured    -> exit 2, refuses to run
+#   DEMO B  SPD-2b DILUTED, hash pin dutifully re-measured   -> exit 1, MARGIN PIN + MUST_FAIL not hit
+#   DEMO C  SPD-6b HOLLOWED (always true) + hash re-measured -> exit 1, MARGIN PIN + mutation matrix
+#   DEMO E  THE VERIFY ATTACK: FOUR gated bars diluted at
+#           once, hash pin re-measured                       -> exit 1, MARGIN PIN, 3 MOVED + 1 UNPINNED + 1 ABSENT
+#   DEMO F  granularity inflated AT THE SOURCE (DT 0.010 ->
+#           0.030), r1 sec 8 guard limb 2                    -> exit 2, _gran_guard, before any physics runs
+#   DEMO A  the SYSTEM UNDER TEST regresses (speed key ->
+#           hungriest in expF_marginal.py, NOT pinned)       -> exit 1, MARGIN PIN 13 moved + MUST_FAIL + 6 NEW + mutation
+#
+# TWO THINGS ABOUT THIS FILE THAT WERE WRONG IN ITS PREVIOUS VERSION, both found
+# by independent verify and both fixed at the cause:
+#
+# 1. THE EXIT CODES ARE REAL NOW. reddemo.sh used to run the gate as
+#      "$PY" "$G" > out.txt 2>&1 || true ; echo "rc=$?"
+#    which prints the exit status of `true`, i.e. 0, on every demo regardless of
+#    what the gate did. Every rc line in the previous capture was 0 and the file
+#    evidenced no exit code at all. Fixed in reddemo.sh:run_gate (set +e, capture
+#    $? on the next line). The rc lines below are the gate's own exit codes.
+#
+# 2. IT MEASURED A SUPERSEDED INSTRUMENT. The previous capture's DEMO D printed
+#    `expected c469e3e399dcc9a5` while the committed pin was `7e716e41bd639d52`:
+#    it had been taken against an older latency_battery.py and never re-captured.
+#    This capture is against the tree it is committed with --
+#      latency_battery.py sha256 18977c65a09d9355...
+#      ratchet.py         sha256 543c068778e2e0aa...
+#    and the RESTORED block at the end of this file prints both, so the claim is
+#    checkable from inside the file rather than asserted in this header.
+#
+# DEMO E is the one that matters. That exact four-bar edit set, with the hash pin
+# re-measured exactly as DEMO B and DEMO C prescribe, produced EXIT 0 / GATE PASS
+# with all four mutation rows "-> ok" on the pre-fix tree. It is the fourth
+# weakened-green gate in this project. It is exit 1 here.
+
+############ DEMO D -- the instrument was EDITED and not re-measured
+rc=2  (expect 2 -- hash pin)
+   4. Rig sizes are N in {1,2,3}. The wire ceiling is 256.
+   5. The model tick is 10 ms; the shipped ring ticks at PingIval = 100 ms
+      (daemon/main.go). Every HOLD bar is scored 10x finer than the daemon
+      resolves. r1 sec 8 asks for equality; it does not hold.
+====================================================================================================
+
+!! latency gate: latency_battery.py changed (sha256 9587d1d6326606fa, expected 18977c65a09d9355).
+  This file is the INSTRUMENT, not the system under test. Loosening a
+  bar in it is invisible to every other check here. If the change is
+  intended: re-run the geometry study, re-measure the baseline, re-run
+  the mutation matrix, and update PIN/GATED/MUST_FAIL/MUTATIONS in the
+  SAME commit, saying what moved and why.
+
+############ DEMO B -- SPD-2b DILUTED and the hash pin dutifully re-measured
+rc=1  (expect 1 -- margin pin + MUST_FAIL not hit)
+MARGIN PIN -- every check line's measured margin against the recorded
+baseline. A widened tolerance IS a moved margin: this is what the hash pin
+and the mutation matrix between them do NOT bound.
+----------------------------------------------------------------------------------------------------
+  31 check lines, 31 pinned, 1 moved, 0 unpinned, 0 pinned-but-absent
+    MOVED      SPD-2b    paired p95 <= p95(max)                               pinned -7 -> measured 93  (delta +100)
+
+GATE FAIL -- the measured margins do not match the recorded ones.
+  A bar was WIDENED (its margin grew), the system under test MOVED, or a
+  check line was added/renamed/removed. From here those are
+  indistinguishable, so all of them are loud. Re-baseline with
+  `python .github/scripts/latency_gate.py --remargin` in the SAME commit
+  that says which margin moved and why. Regenerating it to go green is
+  exactly the move this pin exists to stop.
+GATE FAIL -- 1 MUST_FAIL baseline entry(ies) did NOT fail:
+    NOT HIT    SPD-2b    paired p95 <= p95(max)
+  Either the datapath genuinely improved (re-baseline and say so) or a bar
+  was diluted. From here the two are indistinguishable, so both are loud.
+
+----------------------------------------------------------------------------------------------------
+RUN 2 of 2 -- MUTATION MATRIX, SEEDS=2. FOUR defects, each of which must
+turn a named set of bars RED. Each is a real design error from this project
+
+############ DEMO C -- SPD-6b HOLLOWED (always true) + hash pin re-measured
+rc=1  (expect 1 -- margin pin + mutation)
+MARGIN PIN -- every check line's measured margin against the recorded
+baseline. A widened tolerance IS a moved margin: this is what the hash pin
+and the mutation matrix between them do NOT bound.
+----------------------------------------------------------------------------------------------------
+  31 check lines, 31 pinned, 1 moved, 0 unpinned, 0 pinned-but-absent
+    MOVED      SPD-6b    share RETURNS to the fits-load value after the step  pinned 0 -> measured 1  (delta +1)
+
+GATE FAIL -- the measured margins do not match the recorded ones.
+  A bar was WIDENED (its margin grew), the system under test MOVED, or a
+  check line was added/renamed/removed. From here those are
+RUN 2 of 2 -- MUTATION MATRIX, SEEDS=2. FOUR defects, each of which must
+turn a named set of bars RED. Each is a real design error from this project
+record. A hash pin stops the battery being EDITED; this stops it being
+HOLLOW; the MARGIN PIN above is what bounds how far it can be DILUTED.
+NOT run here: rank-mid-meter and warmup-max (they redden only bars that
+already fail on the clean tree) and hold-quantile (minutes per scenario).
+----------------------------------------------------------------------------------------------------
+  hold-gran        expects RED: HOLD-1d, HOLD-2b, SPD-3a                 -> ok
+  rank-hungriest   expects RED: SPD-1a, SPD-1b, SPD-2c, SPD-6a, SPD-6b, SPD-6c -> NOT RED: SPD-6b
+  rank-static      expects RED: SPD-2a                                   -> ok
+  ratchet-x3       expects RED: HOLD-4a, HOLD-4b, HOLD-4c                -> ok
+
+  BARS WITH NO DEMONSTRATED FAILURE MODE -- reported, deliberately NOT gated:
+    (no red demo) HOLD-1a
+
+############ DEMO E -- THE VERIFY ATTACK: FOUR gated bars diluted at once,
+############           hash pin re-measured exactly as DEMO B/C prescribe.
+############ This exact edit set exited 0 / GATE PASS before the fix, with all
+############ four mutation rows '-> ok'. It is the fourth weakened-green gate
+############ in this project and it is what MARGIN_PIN exists to stop.
+rc=1  (expect 1 -- margin pin, four MOVED rows)
+MARGIN PIN -- every check line's measured margin against the recorded
+baseline. A widened tolerance IS a moved margin: this is what the hash pin
+and the mutation matrix between them do NOT bound.
+----------------------------------------------------------------------------------------------------
+  31 check lines, 30 pinned, 3 moved, 1 unpinned, 1 pinned-but-absent
+    MOVED      HOLD-1d   edge late(ratchet) <= late(343) + one event burst    pinned 503 -> measured 3106  (delta +2603)
+    MOVED      HOLD-2b   mid late(ratchet) <= late(343) + one event burst     pinned 1607 -> measured 3583  (delta +1976)
+    MOVED      HOLD-4a   zero observations => hold == gran                    pinned 1 -> measured 5  (delta +4)
+    UNPINNED   SPD-3a    paired gp >= 0.60 * gp(max) [measured ratio]         measured 39.9272191
+    ABSENT     SPD-3a    paired gp >= 0.99 * gp(max) [measured ratio]         pinned 0.927219142
+
+GATE FAIL -- the measured margins do not match the recorded ones.
+  A bar was WIDENED (its margin grew), the system under test MOVED, or a
+  check line was added/renamed/removed. From here those are
+  indistinguishable, so all of them are loud. Re-baseline with
+  `python .github/scripts/latency_gate.py --remargin` in the SAME commit
+-- and the mutation matrix, which passed this attack before the fix:
+----------------------------------------------------------------------------------------------------
+  hold-gran        expects RED: HOLD-1d, HOLD-2b, SPD-3a                 -> ok
+  rank-hungriest   expects RED: SPD-1a, SPD-1b, SPD-2c, SPD-6a, SPD-6b, SPD-6c -> ok
+  rank-static      expects RED: SPD-2a                                   -> ok
+  ratchet-x3       expects RED: HOLD-4a, HOLD-4b, HOLD-4c                -> ok
+
+
+############ DEMO F -- GRANULARITY INFLATED AT THE SOURCE (r1 sec 8 limb 2)
+############ HOLD-4 alone cannot see this: raise nsched_model.DT and GRAN, TOL,
+############ the ratchet floor and every HOLD-4 expectation move TOGETHER.
+rc=2  (expect 2 -- _gran_guard trips before any physics runs)
+GRAN GUARD FAILED: gran=30.0000 ms > 10 ms.
+  r1 sec 8 pre-registers "gran is asserted <=10ms in model" as the second
+  limb of the granularity-inflation guard, precisely because HOLD-4 alone
+  cannot see inflation at the source: raise DT and the ratchet floor, TOL
+  and every HOLD-4 expectation move together and all three still pass.
+  10 ms is `nsched_model.py:62 DT = 0.010`, the tick the whole battery and
+  every published margin were measured at -- not a tuning knob.
+
+--
+    GRAN GUARD FAILED: gran=30.0000 ms > 10 ms.
+
+############ DEMO A -- the SYSTEM UNDER TEST regresses (speed key -> hungriest)
+rc=1  (expect 1 -- margin pin + MUST_FAIL + NEW fails + mutation)
+MARGIN PIN -- every check line's measured margin against the recorded
+baseline. A widened tolerance IS a moved margin: this is what the hash pin
+and the mutation matrix between them do NOT bound.
+----------------------------------------------------------------------------------------------------
+  31 check lines, 31 pinned, 13 moved, 0 unpinned, 0 pinned-but-absent
+    MOVED      SPD-1a    spotty-class share == 0 (structural)                 pinned 0 -> measured -0.137187715  (delta -0.137187715)
+    MOVED      SPD-1b    out-of-order arrivals == 0 (structural)              pinned 0 -> measured -24458  (delta -24458)
+    MOVED      SPD-1c    paired p95 <= p95(N=1 eth control) + 2*gran          pinned 20 -> measured 17  (delta -3)
+BAR FAILURES BY CLASS  (12 reported by the battery)
+----------------------------------------------------------------------------------------------------
+  NOT GATED [geometry-unstable] -- reported only:
+    (reported) SPD-5c    load=0.65 paired late-discard <= late(Dc)
+    (reported) SPD-5c    load=0.85 paired late-discard <= late(Dc)
+    (reported) HOLD-1c   edge p99(ratchet) <= p99(343) + 2*gran
+    (reported) HOLD-2a   mid p50(ratchet) <= p50(343) + 2*gran
+  GATED, in the recorded baseline -- honest known fails, NOT weakened away:
+    (known)    SPD-5a    load=0.65 paired gp >= gp(Dc)
+    (known)    SPD-5a    load=0.85 paired gp >= gp(Dc)
+  Baseline entries that did NOT fail this run:
+    (not hit)  SPD-2b    paired p95 <= p95(max)   [MUST_FAIL]
+
+GATE FAIL -- 1 MUST_FAIL baseline entry(ies) did NOT fail:
+    NOT HIT    SPD-2b    paired p95 <= p95(max)
+  Either the datapath genuinely improved (re-baseline and say so) or a bar
+  was diluted. From here the two are indistinguishable, so both are loud.
+
+GATE FAIL -- 6 NEW gated bar failure(s) beyond the recorded baseline:
+    NEW FAIL   SPD-1a    spotty-class share == 0 (structural)
+    NEW FAIL   SPD-1b    out-of-order arrivals == 0 (structural)
+    NEW FAIL   SPD-2c    spotty-class share == 0 at spill (structural)
+    NEW FAIL   SPD-6a    share rises or holds into the 90k step (no starvation)
+    NEW FAIL   SPD-6b    share RETURNS to the fits-load value after the step
+
+############ RESTORED -- both pins must match the committed values
+    'latency_battery.py': '18977c65a09d935561ef9b5b3bb8b3660d6094137ac2119f481364e897bfcc4d',
+    'ratchet.py': '543c068778e2e0aa9b823502416314e2341da2107fc177de2d7d7aafc1b208b6',
+REDDEMO_RC=0

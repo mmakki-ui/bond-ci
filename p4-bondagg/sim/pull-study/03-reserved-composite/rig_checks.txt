@@ -1,0 +1,259 @@
+################################################################################################################
+# rig_checks.py -- U10  PROBING THE ORACLE   seeds=24  T=9.0s  rig=mid
+# physics/schedulers/archetypes imported UNMODIFIED from reserved_composite.py +
+# ackclock_sim.py (+ nsched_model.py).  No bar is added, changed or re-scored here.
+################################################################################################################
+
+================================================================================================================
+PROBE 1.0  PREMISE CENSUS -- how often is the sort key a TIE?
+================================================================================================================
+  Per-tick count of paths whose LOCAL backlog is exactly 0.0 kb at the moment the
+  draw loop starts (local_ms == 0.0 -> tie -> stable sort falls back to LIST ORDER).
+  sched=Dc, seed=0.  N = number of paths.  frames/tick = total frames the draw loop
+  places per tick -- the tie only decides the ORDER OF THE FIRST FEW, because one
+  offer() makes that path's local_ms non-zero and the tie is gone.
+
+  cell                                           N    ticks   ties>=2    ties=N  medzero frames/tick
+  N4-teth @0.65                                  4      900    100.0%    100.0%        4        96.9
+  N5-het  @0.65                                  5      900    100.0%    100.0%        5       126.8
+  N4-teth @0.95                                  4      900    100.0%    100.0%        4       134.3
+
+================================================================================================================
+PROBE 1a  LITERAL ARCHETYPE-LIST PERMUTATION (confounded: shares the RNG stream)
+================================================================================================================
+----------------------------------------------------------------------------------------------------------------
+  N4-teth @0.65   members(as-is) = cellA cellB cellC eth
+  order                  sched         gp    loss%      p95   sshare   delta vs as-is
+  as-is(spotty-first)    Dc         89668     5.39      204    0.385
+  steady-first           Dc         89640     5.42      204    0.385  dgp=    -28 (-0.03%)  dloss= +0.03 pt  dsshare=+0.000
+  reversed               Dc         89651     5.41      203    0.385  dgp=    -18 (-0.02%)  dloss= +0.02 pt  dsshare=+0.000
+  CTRL other seeds       Dc         89661     5.40      204    0.385  dgp=     -7 (-0.01%)  dloss= +0.01 pt  dsshare=+0.000  <- RNG-only control (seeds 1000+)
+  as-is(spotty-first)    ewma       86273     8.98      232    0.371
+  steady-first           ewma       86267     8.98      232    0.371  dgp=     -6 (-0.01%)  dloss= +0.01 pt  dsshare=+0.000
+  reversed               ewma       86272     8.98      232    0.371  dgp=     -1 (-0.00%)  dloss= +0.00 pt  dsshare=+0.000
+  CTRL other seeds       ewma       86263     8.99      232    0.371  dgp=    -10 (-0.01%)  dloss= +0.01 pt  dsshare=+0.000  <- RNG-only control (seeds 1000+)
+  as-is(spotty-first)    pull       76363    19.43      251    0.444
+  steady-first           pull       76361    19.43      250    0.444  dgp=     -2 (-0.00%)  dloss= +0.00 pt  dsshare=+0.000
+  reversed               pull       76369    19.43      250    0.444  dgp=     +6 (+0.01%)  dloss= -0.01 pt  dsshare=+0.000
+  CTRL other seeds       pull       76385    19.41      251    0.444  dgp=    +21 (+0.03%)  dloss= -0.02 pt  dsshare=+0.000  <- RNG-only control (seeds 1000+)
+
+----------------------------------------------------------------------------------------------------------------
+  N5-het  @0.65   members(as-is) = cellA cellB cellC wifi eth
+  order                  sched         gp    loss%      p95   sshare   delta vs as-is
+  as-is(spotty-first)    Dc        119976     3.24      112    0.285
+  steady-first           Dc        119968     3.25      113    0.285  dgp=     -8 (-0.01%)  dloss= +0.01 pt  dsshare=+0.000
+  reversed               Dc        119981     3.24      114    0.285  dgp=     +5 (+0.00%)  dloss= -0.00 pt  dsshare=+0.000
+  CTRL other seeds       Dc        119991     3.23      113    0.285  dgp=    +15 (+0.01%)  dloss= -0.01 pt  dsshare=+0.000  <- RNG-only control (seeds 1000+)
+  as-is(spotty-first)    ewma      114774     7.44      235    0.277
+  steady-first           ewma      114766     7.44      235    0.277  dgp=     -8 (-0.01%)  dloss= +0.01 pt  dsshare=+0.000
+  reversed               ewma      114757     7.45      235    0.277  dgp=    -17 (-0.01%)  dloss= +0.01 pt  dsshare=+0.000
+  CTRL other seeds       ewma      114783     7.43      235    0.277  dgp=     +9 (+0.01%)  dloss= -0.01 pt  dsshare=+0.000  <- RNG-only control (seeds 1000+)
+  as-is(spotty-first)    pull      104712    15.55      250    0.339
+  steady-first           pull      104741    15.53      250    0.339  dgp=    +29 (+0.03%)  dloss= -0.02 pt  dsshare=+0.000
+  reversed               pull      104744    15.52      250    0.339  dgp=    +32 (+0.03%)  dloss= -0.03 pt  dsshare=+0.000
+  CTRL other seeds       pull      104747    15.52      251    0.339  dgp=    +35 (+0.03%)  dloss= -0.03 pt  dsshare=+0.000  <- RNG-only control (seeds 1000+)
+
+================================================================================================================
+PROBE 1b  TIE-BREAK ONLY (eps=1e-12 ms added to _local_ms; list/rig/RNG bit-identical) -- Dc
+================================================================================================================
+----------------------------------------------------------------------------------------------------------------
+  N4-teth @0.65
+  tie-break rank                        gp    loss%      p95   sshare   PAIRED delta vs unpatched baseline
+  UNPATCHED baseline                 89668     5.39      204    0.385
+  rank=list order [SELF-GATE]        89668     5.39      204    0.385   -> IDENTICAL on 24/24 seeds: probe VALID
+  rank=steady-first                  89668     5.39      204    0.385   dloss med=+0.000 min=+0.000 max=+0.001 pt | dgp med=+0 | dsshare med=+0.0000 | seeds changed=1/24 | med |dassigned|=2 frames
+  rank=reversed                      89669     5.39      203    0.385   dloss med=+0.000 min=-0.001 max=+0.004 pt | dgp med=+0 | dsshare med=+0.0000 | seeds changed=3/24 | med |dassigned|=0 frames
+
+----------------------------------------------------------------------------------------------------------------
+  N5-het  @0.65
+  tie-break rank                        gp    loss%      p95   sshare   PAIRED delta vs unpatched baseline
+  UNPATCHED baseline                119976     3.24      112    0.285
+  rank=list order [SELF-GATE]       119976     3.24      112    0.285   -> IDENTICAL on 24/24 seeds: probe VALID
+  rank=steady-first                 119976     3.24      112    0.285   dloss med=+0.000 min=+0.000 max=+0.002 pt | dgp med=+0 | dsshare med=+0.0000 | seeds changed=2/24 | med |dassigned|=2 frames
+  rank=reversed                     119971     3.24      112    0.285   dloss med=+0.005 min=+0.002 max=+0.011 pt | dgp med=-7 | dsshare med=+0.0000 | seeds changed=24/24 | med |dassigned|=0 frames
+
+  PROBE 1b self-gate: PASS (eps orders exact ties only)
+
+================================================================================================================
+PROBE 1c  POSITIVE CONTROL -- is this instrument able to SEE an ordering effect at all?
+================================================================================================================
+  Same steady-first rank, bias magnitude swept from 1e-12 ms (ties only) to 1.0 ms.
+  All magnitudes are << target_ms=40, so none of them closes a gate; they only
+  reorder the draw.  If the numbers move at 0.1/1.0 ms but not at 1e-12, the probe
+  is SENSITIVE and 1b's null is a real null.  If nothing moves anywhere, 1b is blind
+  and proves nothing -- which is the failure mode this control exists to catch.
+
+----------------------------------------------------------------------------------------------------------------
+  N4-teth   load=0.65   rank = steady-first
+  bias magnitude              gp    loss%      p95   sshare   vs the 1e-12 row
+  1e-12 (ties only)        89668     5.39      204    0.385   dgp=     +0 (+0.00%)  dloss= +0.00 pt  dsshare=+0.000  |dassigned|=0
+  0.001 ms                 89668     5.39      204    0.385   dgp=     +0 (+0.00%)  dloss= +0.00 pt  dsshare=+0.000  |dassigned|=0
+  0.01 ms                  89671     5.39      203    0.385   dgp=     +2 (+0.00%)  dloss= -0.00 pt  dsshare=-0.000  |dassigned|=3
+  0.1 ms                   89662     5.40      205    0.380   dgp=     -7 (-0.01%)  dloss= +0.01 pt  dsshare=-0.005  |dassigned|=923
+  1.0 ms                   89503     5.57      218    0.343   dgp=   -166 (-0.18%)  dloss= +0.17 pt  dsshare=-0.042  |dassigned|=7295
+----------------------------------------------------------------------------------------------------------------
+  N4-teth   load=0.95   rank = steady-first
+  bias magnitude              gp    loss%      p95   sshare   vs the 1e-12 row
+  1e-12 (ties only)       118060    14.77      469    0.424   dgp=     +0 (+0.00%)  dloss= +0.00 pt  dsshare=+0.000  |dassigned|=0
+  0.001 ms                118060    14.77      469    0.424   dgp=     +0 (+0.00%)  dloss= +0.00 pt  dsshare=+0.000  |dassigned|=0
+  0.01 ms                 118083    14.76      469    0.424   dgp=    +23 (+0.02%)  dloss= -0.02 pt  dsshare=-0.001  |dassigned|=148
+  0.1 ms                  118081    14.76      469    0.424   dgp=    +21 (+0.02%)  dloss= -0.02 pt  dsshare=-0.001  |dassigned|=190
+  1.0 ms                  118082    14.76      472    0.417   dgp=    +22 (+0.02%)  dloss= -0.02 pt  dsshare=-0.007  |dassigned|=1697
+
+----------------------------------------------------------------------------------------------------------------
+  N5-het   load=0.65   rank = steady-first
+  bias magnitude              gp    loss%      p95   sshare   vs the 1e-12 row
+  1e-12 (ties only)       119976     3.24      112    0.285   dgp=     +0 (+0.00%)  dloss= +0.00 pt  dsshare=+0.000  |dassigned|=0
+  0.001 ms                119976     3.24      112    0.285   dgp=     +0 (+0.00%)  dloss= +0.00 pt  dsshare=+0.000  |dassigned|=0
+  0.01 ms                 119970     3.25      112    0.285   dgp=     -6 (-0.00%)  dloss= +0.00 pt  dsshare=-0.000  |dassigned|=54
+  0.1 ms                  119980     3.24      116    0.278   dgp=     +4 (+0.00%)  dloss= -0.00 pt  dsshare=-0.007  |dassigned|=1550
+  1.0 ms                  119253     3.82      165    0.228   dgp=   -723 (-0.60%)  dloss= +0.58 pt  dsshare=-0.057  |dassigned|=12972
+----------------------------------------------------------------------------------------------------------------
+  N5-het   load=0.95   rank = steady-first
+  bias magnitude              gp    loss%      p95   sshare   vs the 1e-12 row
+  1e-12 (ties only)       159733    11.86      412    0.318   dgp=     +0 (+0.00%)  dloss= +0.00 pt  dsshare=+0.000  |dassigned|=0
+  0.001 ms                159755    11.85      412    0.318   dgp=    +22 (+0.01%)  dloss= -0.01 pt  dsshare=-0.000  |dassigned|=2
+  0.01 ms                 159754    11.85      412    0.318   dgp=    +21 (+0.01%)  dloss= -0.01 pt  dsshare=-0.000  |dassigned|=2
+  0.1 ms                  159710    11.87      412    0.318   dgp=    -23 (-0.01%)  dloss= +0.01 pt  dsshare=-0.001  |dassigned|=223
+  1.0 ms                  159493    11.99      413    0.310   dgp=   -240 (-0.15%)  dloss= +0.13 pt  dsshare=-0.008  |dassigned|=2517
+
+================================================================================================================
+PROBE 2.0v  VALIDATE THE RANDOMISER ITSELF -- before a single number is scored
+================================================================================================================
+  U10 as committed rotated by phi~U(0,T) and SPLIT a wrapped interval into (a2,T) +
+  (0, b2-T).  Two consequences: the interval COUNT rises (the artifact claimed it did
+  not -- that claim is retracted, see the file header), and a stall lands over t=0.
+  reserved_composite.py:163,170,174,189 and ackclock_sim.py:101,107,112,134,137,547 all
+  read cap_fn(0.0) as the path's NOMINAL cap, so a stall over t=0 sets that path's
+  nominal cap to 0 FOR THE WHOLE RUN.  That is FINDING F1 below; it is a defect in the
+  rig convention, not in the randomiser, and it is not fixed here.
+
+  Four properties, MEASURED on every (source,seed) pair, for the corrected randomiser
+  and -- as a NEGATIVE CONTROL that this validator can fail -- for the defective one.
+
+  admissible-phase measure per source (G = T - sum(stall durations), DERIVED):
+    cellA   3 stalls  sum(dur)=1.200s  G=7.800s  admissible 86.7%  excluded (stall straddling the boundary) 13.3%
+    cellB   2 stalls  sum(dur)=0.800s  G=8.200s  admissible 91.1%  excluded (stall straddling the boundary) 8.9%
+    cellC   3 stalls  sum(dur)=1.050s  G=7.950s  admissible 88.3%  excluded (stall straddling the boundary) 11.7%
+
+  randomiser                           pairs  count!=    dur!=  out-of-win  covers t=0  cap0!=nom
+  CORRECTED (gap-conditioned)             72        0        0           0           0          0
+  DEFECTIVE (wrap-split) [CTRL]           72        8        0           0           8          8
+  max interval overrun past T on the corrected randomiser: 0 s (float only)
+
+  seeds on which the DEFECTIVE randomiser corrupts the rig: [0, 10, 11, 12, 16, 18, 20, 22]  (8/24)
+  seeds on which the CORRECTED randomiser corrupts the rig: []  (0/24)
+
+  cap_fn(0.0) per path (the vector every consumer snapshots as NOMINAL):
+    canonical                      : [29000.0, 22000.0, 17000.0, 88097.65181769476]
+    nominal reference (no dropouts) : [29000.0, 22000.0, 17000.0, 88097.65181769476]
+    seed 11 corrected               : [29000.0, 22000.0, 17000.0, 88097.65181769476]
+    seed 11 defective  [CTRL]       : [0.0, 22000.0, 17000.0, 88097.65181769476]
+    seed 0  corrected               : [29000.0, 22000.0, 17000.0, 88097.65181769476]
+    seed 0  defective  [CTRL]       : [29000.0, 0.0, 17000.0, 88097.65181769476]
+    seed 10 corrected               : [29000.0, 22000.0, 17000.0, 88097.65181769476]
+    seed 10 defective  [CTRL]       : [29000.0, 22000.0, 0.0, 88097.65181769476]
+
+  PROBE 2.0v GATE: corrected randomiser CLEAN on 72/72 pairs and 24/24 seeds -- PROBE 2 numbers are VALID   |   negative control FIRES (validator is not blind)
+
+================================================================================================================
+PROBE 2.0  what the canonical stall schedules actually are
+================================================================================================================
+  NAMED CAVEAT -- the canonical arm sits on a TICK LATTICE and the randomised arm
+  does not.  DT is 0.01 s (nsched_model) and every canonical stall edge below is a
+  whole number of ticks (5 of the 16 are 1 ulp under, which the a <= t < b test
+  in cap_trace treats identically).  So "canonical" is a knife-edge configuration
+  and EVERY phase sample is off it -- a 1e-9 s slide flips boundary-tick membership.
+  MEASURED, not waved away: de-alignment alone (phi=1e-9) accounts for +8% of the
+  reported Dc move, -25% of the ewma move and -1% of pull -- for ewma it pushes
+  the OPPOSITE way, so that move is if anything understated.  It does NOT touch the
+  spread ratio this probe exists to report: jitter-only spread at fixed OFF-tick
+  geometries is 0.12-0.18 pt against 0.14-0.18 pt canonical, so the denominator
+  is not lattice-narrowed and the honest ratios are 12.7-18.4x against the 11-17x
+  printed below.  The printed number is the conservative one.
+
+  DROPS_A = [(2.6, 3.0), (5.1, 5.5), (7.6, 8.0)]   (cellA)
+  DROPS_B = [(3.8, 4.2), (6.3, 6.7)]   (cellB)
+  DROPS_C = [(2.2, 2.5500000000000003), (4.9, 5.25), (7.1, 7.449999999999999)]   (cellC)
+  Every seed shares these EXACT wall-clock windows.  Pairwise overlap over T=9.0s.
+  The "phase-random" column is MEASURED over the 24 seeds of the corrected randomiser,
+  not assumed -- gap-conditioning makes the analytic dx*dy/T only an approximation.
+  pair                  canonical   phase-random        dx*dy/T
+  cellA  x cellB          0.000 s       0.115 s       0.107 s   (phase-random range 0.000..0.667)
+  cellA  x cellC          0.150 s       0.180 s       0.140 s   (phase-random range 0.000..0.800)
+  cellB  x cellC          0.000 s       0.107 s       0.093 s   (phase-random range 0.000..0.450)
+
+================================================================================================================
+PROBE 2a  B3 CELL  N4-teth @0.65 -- canonical vs per-seed phase-randomised stalls
+================================================================================================================
+  stalls           sched         gp    loss%      p95   sshare   loss over seeds (min..max)
+  canonical        Dc         89668     5.39      204    0.385     5.28 ..   5.46  (spread  0.18 pt)
+  phase-random     Dc         89316     5.77      176    0.388     4.80 ..   6.79  (spread  1.99 pt)
+        -> phase-random moves Dc   : dgp=    -352 (-0.39%)   dloss= +0.37 pt
+  canonical        ewma       86273     8.98      232    0.371     8.92 ..   9.06  (spread  0.14 pt)
+  phase-random     ewma       85273    10.03      225    0.374     8.90 ..  11.06  (spread  2.17 pt)
+        -> phase-random moves ewma : dgp=   -1000 (-1.16%)   dloss= +1.06 pt
+  canonical        pull       76363    19.43      251    0.444    19.35 ..  19.51  (spread  0.16 pt)
+  phase-random     pull       74411    21.49      251    0.444    20.24 ..  22.98  (spread  2.74 pt)
+        -> phase-random moves pull : dgp=   -1952 (-2.56%)   dloss= +2.06 pt
+
+  B3(loss) bar (Dc loss <= 2%) : canonical 5.39% -> FAIL   |   phase-random 5.77% -> FAIL
+  B3(gp)   bar (Dc gp >= ewma gp): canonical PASS   |   phase-random PASS
+  Dc-vs-ewma paired loss advantage @0.65 (the load-bearing claim "Dc loss ~ half ewma"):
+    canonical     Dc  5.39%  ewma  8.98%   ratio 0.60   paired Dc-ewma med=-3.58 pt, Dc better on 24/24 seeds
+    phase-random  Dc  5.77%  ewma 10.03%   ratio 0.57   paired Dc-ewma med=-4.47 pt, Dc better on 24/24 seeds
+
+  WHAT "24/24 SEEDS" IS.  The canonical battery holds stall GEOMETRY fixed and varies
+  only jitter/arrivals across seeds.  Both axes are measured here on the SAME cell, so
+  the ratio below is how much wider the unsampled axis is than the sampled one.
+  sched  jitter-only spread    geometry spread      ratio
+  Dc                0.18 pt            1.99 pt      11.0x
+  ewma              0.14 pt            2.17 pt      15.7x
+  pull              0.16 pt            2.74 pt      16.7x
+  A "24/24 seeds" result is therefore 24 samples of the NARROW axis.  It is not a
+  confidence interval over stall geometry, and no bar margin smaller than the geometry
+  spread above is established by seed count.  Sampling geometry is UNRESOLVED work:
+  this probe randomises PHASE only -- stall COUNT, DURATION and the 2-8-events-at-T=9s
+  population are still the hand-placed ones (U10 review items 3 and 4, still open).
+
+================================================================================================================
+PROBE 2b  B5 NESTED CHAIN -- does "each added source buys gp and cuts loss" survive?
+================================================================================================================
+  identical absolute offer = 0.85 x nominal(N5-het) = 162350 kb/s (highn_battery B5)
+  per-seed columns are NEW: highn_battery scores B5 on medians only.
+----------------------------------------------------------------------------------------------------------------
+  sched=Dc   stalls=canonical
+  config                                       N        gp    loss%     p95     p99   step (median)                     per-seed
+  N2-het  cellA + eth                          2     90252    44.34     460     472
+  N3-het  cellA + cellB + eth                  3    107513    33.69     510     524  dgp= +17261(PASS) dloss=-10.65(PASS)   gp+ 24/24  loss- 24/24
+  N4-het  cellA + cellB + wifi + eth           4    147269     9.18     396     464  dgp= +39756(PASS) dloss=-24.52(PASS)   gp+ 24/24  loss- 24/24
+  N5-het  cellA+cellB+cellC + wifi + eth       5    148546     8.39     258     302  dgp=  +1277(PASS) dloss= -0.79(PASS)   gp+ 24/24  loss- 24/24
+----------------------------------------------------------------------------------------------------------------
+  sched=Dc   stalls=phase-random
+  config                                       N        gp    loss%     p95     p99   step (median)                     per-seed
+  N2-het  cellA + eth                          2     90408    44.24     461     471
+  N3-het  cellA + cellB + eth                  3    106851    34.10     512     524  dgp= +16443(PASS) dloss=-10.14(PASS)   gp+ 24/24  loss- 24/24
+  N4-het  cellA + cellB + wifi + eth           4    144168    11.09     314     368  dgp= +37317(PASS) dloss=-23.01(PASS)   gp+ 24/24  loss- 24/24
+  N5-het  cellA+cellB+cellC + wifi + eth       5    147266     9.18     243     286  dgp=  +3098(PASS) dloss= -1.91(PASS)   gp+ 24/24  loss- 24/24
+----------------------------------------------------------------------------------------------------------------
+  sched=ewma   stalls=canonical
+  config                                       N        gp    loss%     p95     p99   step (median)                     per-seed
+  N2-het  cellA + eth                          2     90412    44.24     460     472
+  N3-het  cellA + cellB + eth                  3    107491    33.71     510     524  dgp= +17079(PASS) dloss=-10.53(PASS)   gp+ 24/24  loss- 24/24
+  N4-het  cellA + cellB + wifi + eth           4    148130     8.64     364     434  dgp= +40639(PASS) dloss=-25.06(PASS)   gp+ 24/24  loss- 24/24
+  N5-het  cellA+cellB+cellC + wifi + eth       5    148218     8.59     257     295  dgp=    +88(PASS) dloss= -0.05(PASS)   gp+ 22/24  loss- 22/24
+----------------------------------------------------------------------------------------------------------------
+  sched=ewma   stalls=phase-random
+  config                                       N        gp    loss%     p95     p99   step (median)                     per-seed
+  N2-het  cellA + eth                          2     90488    44.19     461     471
+  N3-het  cellA + cellB + eth                  3    106892    34.08     510     524  dgp= +16404(PASS) dloss=-10.12(PASS)   gp+ 24/24  loss- 24/24
+  N4-het  cellA + cellB + wifi + eth           4    145028    10.56     295     348  dgp= +38136(PASS) dloss=-23.52(PASS)   gp+ 24/24  loss- 24/24
+  N5-het  cellA+cellB+cellC + wifi + eth       5    145904    10.02     248     279  dgp=   +876(PASS) dloss= -0.54(PASS)   gp+ 18/24  loss- 18/24
+
+  B5 VERDICT (median rule, exactly as highn_battery scores it):
+    Dc    canonical     : MONOTONIC (all steps pass)
+    Dc    phase-random  : MONOTONIC (all steps pass)
+    ewma  canonical     : MONOTONIC (all steps pass)
+    ewma  phase-random  : MONOTONIC (all steps pass)
+
+elapsed 253.7s

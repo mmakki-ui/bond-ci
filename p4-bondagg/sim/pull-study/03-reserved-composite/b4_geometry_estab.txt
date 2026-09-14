@@ -1,0 +1,7 @@
+N2-het  cellA + eth   GEOM=48 rotations x SEEDS=6 jitter seeds x 3 loads = 864 runs
+  load=0.65  B6a med(ratchet-force): min -192.5  median -59.0  max +56.0  | violations 10/48
+            B6b med(force-clamp80): min -3515.5  median -3394.2  max -3301.5  | violations 0/48
+  load=0.85  B6a med(ratchet-force): min -1799.5  median -1419.5  max -1096.0  | violations 0/48
+            B6b med(force-clamp80): min -7217.0  median -6742.5  max -5714.0  | violations 0/48
+  load=0.95  B6a med(ratchet-force): min -2354.5  median -1955.8  max -1664.5  | violations 0/48
+            B6b med(force-clamp80): min -8542.0  median -7708.0  max -6377.0  | violations 0/48

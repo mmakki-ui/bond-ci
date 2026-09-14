@@ -1,0 +1,170 @@
+#!/bin/sh
+# fake ubus. TWO surfaces:
+#
+#  1. `call service list` -> the RUNNING feeders (driven by the init.d shims via
+#     $ECOSIM_STATE/running.*). This is the P5 liveness oracle (replaces pgrep,
+#     divergence D5). UNCHANGED -- run.sh depends on it.
+#
+#  2. `list` + `call network.interface.<name> status` -> a netifd FIXTURE for
+#     GL source discovery (OBJ-A). Modelled on the CLIENT as documented in
+#     docs/INTENT.md OBJ-A/OBJ-H:
+#         wan       eth1  up/available  metric 1   -> ROUTED
+#         tethering usb0  up/available  metric 2   -> ROUTED (the metered one)
+#         secondwan       up/available  metric 3   -> NOT routed  == the DARK
+#                                                     source route-parsing
+#                                                     cannot see
+#         wwan            available:FALSE metric 4 -> no internal modem
+#     plus non-WAN interfaces that must NEVER leak into the source set:
+#         loopback(lo) lan(br-lan) guest(br-guest) wgclient1  wan6(eth1, no metric)
+#
+#  PROVENANCE, read this before trusting a field:
+#   - MEASURED (INTENT OBJ-A/OBJ-H): the four interface NAMES, their metrics
+#     1/2/3/4, that only two are routed, that `wwan` is available:false, that
+#     `wan`->eth1 and `tethering`->usb0, and network.wgclient1_blackhole.metric=254.
+#   - FIXTURE, NOT measured: secondwan's l3_device (`eth0` here) and its
+#     up/available state; the presence of `guest`; the exact JSON field set of
+#     a netifd status reply. INTENT names `available`, `up`, `l3_device` and
+#     `metric` as the fields discovery uses -- those are the only ones the code
+#     reads. Anything else below is scenery.
+#
+# KNOBS ($ECOSIM_STATE):
+#   onewan=1        drop usb0's default route (ip shim) -> tethering goes DARK
+#   secondwan_up=0  secondwan connects no more -> `idle` instead of `up`
+#   blackhole=1     ADVERSARIAL: also DECLARE GL's kill-switch blackhole as a
+#                   network.interface object (metric 254, no l3_device). It must
+#                   still never be read as a source.
+#   noubusmetric.<if>=1  the ubus status OMITS `metric` for that interface, so
+#                   the uci -> route metric fallback chain is under test (the uci
+#                   answer itself comes from ucimetric.<if>, served by the uci shim).
+S="$ECOSIM_STATE"
+
+# ---- surface 1: feeder liveness (unchanged) --------------------------------
+if [ "$1 $2" = "call service" ] && [ "$3" = list ]; then
+    echo "{"
+    for svc in engarde-client p5-datapath p5-ecod p5-watchdog; do
+        [ "$(cat "$S/running.$svc" 2>/dev/null)" = 1 ] && echo "  \"$svc\": { \"instances\": {} },"
+    done
+    echo "}"
+    exit 0
+fi
+
+get() { cat "$S/$1" 2>/dev/null; }
+# metric field: emitted by ubus UNLESS this interface is under uci-fallback test
+mfield() {  # $1=iface $2=metric
+    [ "$(get "noubusmetric.$1")" = 1 ] && return 0
+    printf '\t"metric": %s,\n' "$2"
+}
+
+# ---- surface 2: the netifd namespace ---------------------------------------
+if [ "$1" = list ]; then
+    echo network.interface
+    for i in loopback lan guest wan wan6 secondwan tethering wwan wgclient1; do
+        echo "network.interface.$i"
+    done
+    [ "$(get blackhole)" = 1 ] && echo network.interface.wgclient1_blackhole
+    echo network.device
+    echo service
+    echo "hotplug.carrier"
+    echo "hotplug.iface"
+    echo "hotplug.net"
+    echo "hotplug.ntp"
+    echo "hotplug.usb"
+    exit 0
+fi
+
+# ---- surface 2: per-interface status ---------------------------------------
+if [ "$1" = call ]; then
+    case "$2" in
+      network.interface.*) IF=${2#network.interface.} ;;
+      *) exit 0 ;;
+    esac
+    [ "$3" = status ] || exit 0
+    case "$IF" in
+      wan)
+        # PRETTY-printed, and deliberately carrying a NESTED object whose keys
+        # collide with the ones discovery reads ("up", "metric", "l3_device").
+        # A depth-blind parser grabs the nested values and mis-ranks every
+        # source; _json_top must return ONLY the depth-1 members.
+        echo '{'
+        echo '	"up": true,'
+        echo '	"available": true,'
+        echo '	"autostart": true,'
+        echo '	"proto": "dhcp",'
+        echo '	"device": "eth1",'
+        echo '	"l3_device": "eth1",'
+        mfield wan 1
+        echo '	"route": ['
+        echo '		{'
+        echo '			"target": "0.0.0.0",'
+        echo '			"mask": 0,'
+        echo '			"nexthop": "192.168.0.1",'
+        echo '			"up": false,'
+        echo '			"metric": 9999,'
+        echo '			"l3_device": "NESTED-MUST-NOT-LEAK"'
+        echo '		}'
+        echo '	],'
+        echo '	"data": {}'
+        echo '}'
+        ;;
+      tethering)
+        # COMPACT (single line) -- the same parser has to handle both shapes.
+        printf '{"up": true, "available": true, "proto": "dhcp", "device": "usb0", "l3_device": "usb0"'
+        [ "$(get noubusmetric.tethering)" = 1 ] || printf ', "metric": 2'
+        printf ', "route": [{"target": "0.0.0.0", "metric": 7777}]}\n'
+        ;;
+      secondwan)
+        # THE DARK SOURCE: configured + connected, but carries NO default
+        # route, so `ip route show default` cannot see it at all.
+        _u=true; [ "$(get secondwan_up)" = 0 ] && _u=false
+        echo '{'
+        echo "	\"up\": $_u,"
+        echo '	"available": true,'
+        echo '	"proto": "dhcp",'
+        echo '	"device": "eth0",'
+        echo '	"l3_device": "eth0",'
+        mfield secondwan 3
+        echo '	"route": []'
+        echo '}'
+        ;;
+      wwan)
+        # No internal modem on this box (INTENT OBJ-H): available:false.
+        echo '{'
+        echo '	"up": false,'
+        echo '	"available": false,'
+        echo '	"autostart": true,'
+        echo '	"proto": "qmi",'
+        echo '	"device": "wwan0",'
+        echo '	"l3_device": "wwan0",'
+        mfield wwan 4
+        echo '	"uptime": 0'
+        echo '}'
+        ;;
+      wan6)
+        # shares eth1; no metric of its own; disabled.
+        echo '{ "up": false, "available": true, "proto": "dhcpv6", "device": "eth1", "l3_device": "eth1" }'
+        ;;
+      lan)
+        echo '{ "up": true, "available": true, "proto": "static", "device": "br-lan", "l3_device": "br-lan" }'
+        ;;
+      guest)
+        # up, has an address, NO metric -> not an uplink. This is the one that
+        # proves the uplink test is not "the name looks like a WAN".
+        echo '{ "up": true, "available": true, "proto": "static", "device": "br-guest", "l3_device": "br-guest" }'
+        ;;
+      loopback)
+        echo '{ "up": true, "available": true, "proto": "static", "device": "lo", "l3_device": "lo" }'
+        ;;
+      wgclient1)
+        echo '{ "up": true, "available": true, "proto": "wireguard", "device": "wgclient1", "l3_device": "wgclient1" }'
+        ;;
+      wgclient1_blackhole)
+        # ADVERSARIAL: GL's VPN kill-switch, declared as an INTERFACE (the worst
+        # case -- it is really a route section). metric 254 would pass the
+        # uplink test, so the ONLY thing keeping it out is the empty l3_device.
+        echo '{ "up": true, "available": true, "proto": "none", "metric": 254 }'
+        ;;
+      *) ;;
+    esac
+    exit 0
+fi
+exit 0

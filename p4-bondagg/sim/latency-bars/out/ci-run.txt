@@ -1,0 +1,411 @@
+# CI RUN OF THE latency-bars JOB -- the runner's own log, not this PC's.
+# run  https://github.com/mmakki-ui/bond-ci/actions/runs/33342988301
+# job  99341856758  conclusion=success  (commit 04378a7, the fix round)
+# Run-level: latency-bars success, rig-paired success, go / go-server / model /
+# eif-model / crossbuild / manifest / recon-model / recon-ecosim success;
+# ladder failure = the known standing red owned by U39.
+#
+# WHY THIS FILE EXISTS AND WHAT IT SETTLES. The margin pin (MARGIN_PIN) was
+# measured on Mo's Windows PC and pins 31 floats to 9 significant digits. Whether
+# those reproduce bit-for-bit on a Linux runner was an open question and could
+# not be answered from this PC. Measured here:
+#
+#     31 check lines, 31 pinned, 0 moved, 0 unpinned, 0 pinned-but-absent
+#
+# So the pin is portable across the two platforms this project uses. Repo state
+# is not runner state; this is the gated environment's own answer.
+
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	﻿2026-08-30T23:53:25.0989957Z Current runner version: '2.336.0'
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1009304Z ##[group]Runner Image Provisioner
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1010032Z Hosted Compute Agent
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1010588Z Version: 20260819.586
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1011113Z Commit: 3cc4a88dfa507ef76119ad1bb3eccc6378bb2b76
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1011711Z Build Date: 2026-08-18T23:20:18Z
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1012308Z Worker ID: {0397279f-772d-44e9-833d-700e12d458f4}
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1012901Z Azure Region: centralus
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1013619Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1014792Z ##[group]Operating System
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1015307Z Ubuntu
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1015852Z 24.04.4
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1016303Z LTS
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1016736Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1017227Z ##[group]Runner Image
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1017730Z Image: ubuntu-24.04
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1018223Z Version: 20260823.283.1
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1019263Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260823.283/images/ubuntu/Ubuntu2404-Readme.md
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1021087Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260823.283
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1022511Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1024144Z ##[group]GITHUB_TOKEN Permissions
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1026583Z Contents: read
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1027424Z Metadata: read
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1028030Z Packages: read
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1028740Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1030903Z Secret source: Actions
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1032010Z Prepare workflow directory
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1338401Z Prepare all required actions
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.1378842Z Getting action download info
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.3457003Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.5047739Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6342246Z Complete job name: latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6890047Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6897283Z ##[group]Run actions/checkout@v4
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6897954Z with:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6898455Z   repository: mmakki-ui/bond-ci
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6901865Z   token: ***
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6902301Z   ssh-strict: true
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6902768Z   ssh-user: git
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6903692Z   persist-credentials: true
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6904424Z   clean: true
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6904891Z   sparse-checkout-cone-mode: true
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6905500Z   fetch-depth: 1
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6905969Z   fetch-tags: false
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6906414Z   show-progress: true
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6906869Z   lfs: false
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6907423Z   submodules: false
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6907877Z   set-safe-directory: true
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6908395Z   allow-unsafe-pr-checkout: false
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6909115Z env:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6909547Z   SEEDS: 6
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6909964Z   T: 9.0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6910395Z   PYTHONHASHSEED: 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.6910848Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7752353Z Syncing repository: mmakki-ui/bond-ci
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7754378Z ##[group]Getting Git version info
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7755098Z Working directory is '/home/runner/work/bond-ci/bond-ci'
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7756103Z [command]/usr/bin/git version
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7816402Z git version 2.55.0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7832391Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7843901Z Temporarily overriding HOME='/home/runner/work/_temp/4abd6650-affd-46eb-8b6b-d44e37502b96' before making global git config changes
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7845929Z Adding repository directory to the temporary git global config as a safe directory
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7847709Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/bond-ci/bond-ci
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7892842Z Deleting the contents of '/home/runner/work/bond-ci/bond-ci'
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7894817Z ##[group]Initializing the repository
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7899348Z [command]/usr/bin/git init /home/runner/work/bond-ci/bond-ci
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7982519Z hint: Using 'master' as the name for the initial branch. This default branch name
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7984015Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7985239Z hint: to use in all of your new repositories, which will suppress this warning,
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7986294Z hint: call:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7986887Z hint:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7987643Z hint: 	git config --global init.defaultBranch <name>
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7988543Z hint:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7989351Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7990645Z hint: 'development'. The just-created branch can be renamed via this command:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7991633Z hint:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7992244Z hint: 	git branch -m <name>
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7992899Z hint:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7993848Z hint: Disable this message with "git config set advice.defaultBranchName false"
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.7998386Z Initialized empty Git repository in /home/runner/work/bond-ci/bond-ci/.git/
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8007456Z [command]/usr/bin/git remote add origin https://github.com/mmakki-ui/bond-ci
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8043026Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8044500Z ##[group]Disabling automatic garbage collection
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8045816Z [command]/usr/bin/git config --local gc.auto 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8069029Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8070455Z ##[group]Setting up auth
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8074775Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8098893Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8393424Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8417494Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8583096Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8607621Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8763847Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8789323Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8790511Z ##[group]Fetching the repository
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:25.8798338Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +524ebed75787e60dfdaa19dbb68d175dfd56d436:refs/remotes/origin/u14-latency-bars
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.4933107Z From https://github.com/mmakki-ui/bond-ci
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.4934983Z  * [new ref]         524ebed75787e60dfdaa19dbb68d175dfd56d436 -> origin/u14-latency-bars
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.4946563Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.4947880Z ##[group]Determining the checkout info
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.4949346Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.4954109Z [command]/usr/bin/git sparse-checkout disable
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5027728Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5063957Z ##[group]Checking out the ref
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5068040Z [command]/usr/bin/git checkout --progress --force -B u14-latency-bars refs/remotes/origin/u14-latency-bars
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5296314Z Switched to a new branch 'u14-latency-bars'
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5300061Z branch 'u14-latency-bars' set up to track 'origin/u14-latency-bars'.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5305702Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5337092Z [command]/usr/bin/git log -1 --format=%H
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5355584Z 524ebed75787e60dfdaa19dbb68d175dfd56d436
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5621767Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5626337Z ##[group]Run actions/setup-python@v5
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5627071Z with:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5627595Z   python-version: 3.12
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5628182Z   check-latest: false
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5636289Z   token: ***
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5636880Z   update-environment: true
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5637597Z   allow-prereleases: false
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5638256Z   freethreaded: false
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5638809Z env:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5639333Z   SEEDS: 6
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5639817Z   T: 9.0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5640352Z   PYTHONHASHSEED: 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.5640913Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.6731374Z ##[group]Installed versions
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7632116Z (node:2024) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7635473Z (Use `node --trace-deprecation ...` to show where the warning was created)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7637634Z Successfully set up CPython (3.12.14)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7646383Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7818148Z ##[group]Run python .github/scripts/latency_gate.py
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7819761Z ^[[36;1mpython .github/scripts/latency_gate.py^[[0m
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7867169Z shell: /usr/bin/bash -e {0}
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7869005Z env:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7870651Z   SEEDS: 6
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7872203Z   T: 9.0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7874116Z   PYTHONHASHSEED: 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7876052Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7878605Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7881029Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7883102Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7885324Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7887485Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.7889308Z ##[endgroup]
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9740842Z ====================================================================================================
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9743484Z OBJ-D LATENCY GATE -- SPD-1..6 / HOLD-1..4   (U14)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9745054Z ====================================================================================================
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9746749Z   battery : p4-bondagg/sim/latency-bars/latency_battery.py
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9748817Z   ratchet : p4-bondagg/sim/latency-bars/ratchet.py  (the derived hold, implemented here for the first time)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9751118Z   physics : p4-bondagg/sim/nsched_model.py + pull-study/03-reserved-composite
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9752880Z   config  : SEEDS=6 T=9.0 GEO=canonical PYTHONHASHSEED=0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9754124Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9755419Z   GATED    HOLD-1d, HOLD-2b, HOLD-4a, HOLD-4b, HOLD-4c, SPD-1a, SPD-1b, SPD-2a, SPD-2b, SPD-2c, SPD-3a, SPD-5a, SPD-6a, SPD-6b, SPD-6c
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9758188Z   REPORTED HOLD-1a, HOLD-1b, HOLD-1c, HOLD-2a, HOLD-3a, HOLD-3b, SPD-1c, SPD-1d, SPD-3b, SPD-4a, SPD-4b, SPD-5b, SPD-5c
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9760442Z            -- demoted for ONE of two MEASURED reasons, never for convenience:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9762165Z               (a) the verdict FLIPS across stall geometry (out/geometry.md), so
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9763830Z                   the canonical point does not establish it; or
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9765343Z               (b) NO defect injection can turn it RED (out/mutations.md), so it
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9766925Z                   is not a gate at all. Each carries the reason it cannot fail.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9768133Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9768813Z   ADR-004: no absolute loss or latency threshold is asserted against this
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9770526Z   rig anywhere in this battery. Every gated bar is PAIRED (two scorings of
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9772256Z   the same runs, or two runs on the same seeds), STRUCTURAL (a zero count,
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9774080Z   or one segment of a run against another), or UNIT (the ratchet formula on
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9775671Z   a synthetic trace, with no rig physics in it at all).
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9777230Z   A green run says the ORDERING held. It says nothing about magnitudes, and
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9779011Z   nothing about hardware: the rig has never been compared to a real router.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9780094Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9780805Z   WHAT A GREEN RUN HERE DOES NOT CONSTRAIN -- printed every run, not buried:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9782587Z    1. The system under test is expF_marginal.VSim / expG_mid.GSim, the r2 STUDY
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9784413Z       simulators (draw keys v0/v1/v2, g0/g2/g2m). NOT nsched_model.py's
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9786075Z       scheduler and NOT p4-bondagg/daemon/. This gate constrains a research
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9787664Z       prototype's draw order; it constrains no shipping code.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9789192Z    2. This job has no continue-on-error and SPD-2a is GATED at a measured
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9790793Z       paired margin of 0.046310 (0.000000 on 3 of the 5 geometries).
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9792425Z       Deterministic, so it will not flake -- but it is a knife edge.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9794315Z    3. Every run here is GEO=canonical. The geometry study that produced the
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9796047Z       GATED/REPORTED split is NOT re-run by this job (out/RUNME.sh does it by
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9797818Z       hand), so a bar that becomes geometry-unstable will not be noticed here.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9799330Z    4. Rig sizes are N in {1,2,3}. The wire ceiling is 256.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9800812Z    5. The model tick is 10 ms; the shipped ring ticks at PingIval = 100 ms
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9802438Z       (daemon/main.go). Every HOLD bar is scored 10x finer than the daemon
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9804036Z       resolves. r1 sec 8 asks for equality; it does not hold.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:26.9805442Z ====================================================================================================
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:27.0254707Z   preflight: battery 18977c65a09d | ratchet 543c068778e2 | rig 03-reserved-composite | physics nsched_model.py
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:27.0256571Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:27.0257420Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:27.0259237Z RUN 1 of 2 -- the tree as it stands, SEEDS=6 GEO=canonical
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:53:27.0260841Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6551639Z ====================================================================================================
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6552708Z OBJ-D LATENCY BARS -- SPD-1..6, HOLD-1..4   (U14)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6553438Z ====================================================================================================
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6554178Z   seeds=6 T=9.0s gran=10.0ms rig=edge+mid geo=canonical defect=none
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6554727Z   physics : nsched_model.py
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6555384Z   rig     : pull-study/03-reserved-composite/reserved_composite.py
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6556153Z   gran    : 10.0 ms from nsched_model.py source DT, <=10 ms asserted (r1 sec 8 limb 2)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6556911Z   go tick : 100 ms -- daemon/main.go PingIval, the cadence that calls ring.Tick(now).
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6557661Z             r1 sec 8 also asks for gran == the Go ticker period. MEASURED, and it
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6559758Z             does NOT hold: 10 ms model vs 100 ms shipped ring. Recorded as an
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6560564Z             open finding, not asserted away -- every HOLD bar here is scored at a
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6561893Z             granularity 10x finer than the shipped ring can resolve.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6562350Z   DEFECT  : no injection -- the tree as it stands
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6562798Z   ADR-004: every bar below is PAIRED, STRUCTURAL or UNIT. No absolute
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6563572Z   loss or latency threshold is asserted against this rig anywhere.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6563948Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6564268Z #   SPD-1  S3 edge offer=60000  speed vs the N=1 eth control  nominal_agg=60000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6564950Z   SPD-1a  spotty-class share == 0 (structural)                 PASS  share=0.0000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6565571Z   MARGIN SPD-1a | spotty-class share == 0 (structural) | 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6566044Z   SPD-1b  out-of-order arrivals == 0 (structural)              PASS  late_arrivals=0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6566543Z   MARGIN SPD-1b | out-of-order arrivals == 0 (structural) | 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6567032Z   SPD-1c  paired p95 <= p95(N=1 eth control) + 2*gran          PASS  p95=11 ctl=11 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6567543Z   MARGIN SPD-1c | paired p95 <= p95(N=1 eth control) + 2*gran | 20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6568015Z   SPD-1d  paired gp >= gp(N=1 eth control)                     PASS  gp=59926 ctl=59926
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6568504Z   MARGIN SPD-1d | paired gp >= gp(N=1 eth control) | 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6568755Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6568998Z #   SPD-2  S3 edge offer=90000  speed vs max, identical seeds  nominal_agg=90000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6569617Z   SPD-2a  paired gp >= gp(max)                                 PASS  gp=89888 max=89847
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6570051Z   MARGIN SPD-2a | paired gp >= gp(max) | 0.0463095384
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6570570Z   SPD-2b  paired p95 <= p95(max)                               FAIL  p95=21 max=14
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6570994Z   MARGIN SPD-2b | paired p95 <= p95(max) | -7
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6571539Z   SPD-2c  spotty-class share == 0 at spill (structural)        PASS  share=0.0000 max_share=0.1243
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6572075Z   MARGIN SPD-2c | spotty-class share == 0 at spill (structural) | 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6572301Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6572555Z #   SPD-3  S3 edge offer=140000  speed vs max, saturation  nominal_agg=140000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6573054Z   SPD-3a  paired gp >= 0.99 * gp(max)  [measured ratio]        PASS  ratio=0.9993 bar=0.99
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6573685Z   MARGIN SPD-3a | paired gp >= 0.99 * gp(max)  [measured ratio] | 0.927219142
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6574230Z   SPD-3b  paired p95 <= 1.03 * p95(max)  [measured ratio]      PASS  ratio=1.0276 bar=1.03
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6574728Z   MARGIN SPD-3b | paired p95 <= 1.03 * p95(max)  [measured ratio] | 0.244094488
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6574994Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6575249Z #   SPD-4  S4 edge offer=50000  all-spotty, speed vs max  nominal_agg=50000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6575715Z   SPD-4a  paired gp >= gp(max)                                 PASS  gp=47828 max=47827
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6576141Z   MARGIN SPD-4a | paired gp >= gp(max) | 0.00255872269
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6576601Z   SPD-4b  paired p95 <= p95(max)                               FAIL  p95=334.000 max=334.000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6577039Z   MARGIN SPD-4b | paired p95 <= p95(max) | -3.97903932e-13
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6577265Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6577485Z #   SPD-5  N2 mid cellA+eth  speed-key vs Dc(hungriest)  nominal_agg=107000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6577970Z   SPD-5a  load=0.65 paired gp >= gp(Dc)                        FAIL  gp=69321 Dc=69349
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6578459Z   MARGIN SPD-5a | load=0.65 paired gp >= gp(Dc) | -0.0405865641
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6578940Z   SPD-5b  load=0.65 paired p95 <= p95(Dc)                      PASS  p95=59 Dc=77
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6579374Z   MARGIN SPD-5b | load=0.65 paired p95 <= p95(Dc) | 23.2778204
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6579813Z   SPD-5c  load=0.65 paired late-discard <= late(Dc)            FAIL  late=33 Dc=0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6580281Z   MARGIN SPD-5c | load=0.65 paired late-discard <= late(Dc) | -33
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6580744Z   SPD-5a  load=0.85 paired gp >= gp(Dc)                        FAIL  gp=87212 Dc=87252
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6581286Z   MARGIN SPD-5a | load=0.85 paired gp >= gp(Dc) | -0.0448817296
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6581759Z   SPD-5b  load=0.85 paired p95 <= p95(Dc)                      PASS  p95=373 Dc=436
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6582196Z   MARGIN SPD-5b | load=0.85 paired p95 <= p95(Dc) | 14.4476038
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6582654Z   SPD-5c  load=0.85 paired late-discard <= late(Dc)            FAIL  late=150 Dc=108
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6583336Z   MARGIN SPD-5c | load=0.85 paired late-discard <= late(Dc) | -42
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6583820Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6584046Z #   SPD-6  S3 edge STEP 30k->90k->30k  share follows demand  nominal_agg=90000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6584569Z   SPD-6a  share rises or holds into the 90k step (no starvation) PASS  seg1=0.0000 seg2=0.0000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6585116Z   MARGIN SPD-6a | share rises or holds into the 90k step (no starvation) | 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6585652Z   SPD-6b  share RETURNS to the fits-load value after the step  PASS  seg3=0.0000 seg1=0.0000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6586198Z   MARGIN SPD-6b | share RETURNS to the fits-load value after the step | 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6586725Z   SPD-6c  no residual pinning: seg3 share <= seg2 share        PASS  seg3=0.0000 seg2=0.0000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6587218Z   MARGIN SPD-6c | no residual pinning: seg3 share <= seg2 share | 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6587472Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6587687Z #   HOLD-1 N2 edge cellA+eth load=0.85  ratchet vs fixed-343  nominal_agg=107000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6588320Z   HOLD-1a edge p50(ratchet) <= p50(343) + 2*gran               PASS  p50=12 fixed=12 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6588820Z   MARGIN HOLD-1a | edge p50(ratchet) <= p50(343) + 2*gran | 20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6589309Z   HOLD-1b edge p95(ratchet) <= p95(343) + 2*gran               PASS  p95=242 fixed=232 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6589803Z   MARGIN HOLD-1b | edge p95(ratchet) <= p95(343) + 2*gran | 10
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6590324Z   HOLD-1c edge p99(ratchet) <= p99(343) + 2*gran               FAIL  p99=323 fixed=261 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6590842Z   MARGIN HOLD-1c | edge p99(ratchet) <= p99(343) + 2*gran | -42
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6591382Z   HOLD-1d edge late(ratchet) <= late(343) + one event burst    PASS  late=24 fixed=390 burst=137
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6591917Z   MARGIN HOLD-1d | edge late(ratchet) <= late(343) + one event burst | 503
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6592480Z   HOLD-3a edge p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran PASS  warm_p95=12 overall=242 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6593664Z   MARGIN HOLD-3a | edge p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran | 250
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6594040Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6594262Z #   HOLD-2 N2 mid cellA+eth load=0.85  ratchet vs fixed-343  nominal_agg=107000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6594787Z   HOLD-2a mid p50(ratchet) <= p50(343) + 2*gran                FAIL  p50=152 fixed=129 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6595314Z   MARGIN HOLD-2a | mid p50(ratchet) <= p50(343) + 2*gran | -2.33304608
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6595822Z   HOLD-2b mid late(ratchet) <= late(343) + one event burst     PASS  late=108 fixed=1612 burst=104
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6596324Z   MARGIN HOLD-2b | mid late(ratchet) <= late(343) + one event burst | 1607
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6596926Z   HOLD-3b mid p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran PASS  warm_p95=40 overall=436 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6597501Z   MARGIN HOLD-3b | mid p95 of frames enqueued in [0,1s) <= overall p95 + 2*gran | 415.28712
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6597792Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6597987Z #   HOLD-4 unit derivation of the ratchet   (no rig, no seeds)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6598498Z   HOLD-4a zero observations => hold == gran                    PASS  hold=10.000 gran=10.000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6598985Z   MARGIN HOLD-4a | zero observations => hold == gran | 1
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6599505Z   HOLD-4b injected gap g => hold == g + gran                   PASS  hold=147.000 want=147.000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6599960Z   MARGIN HOLD-4b | injected gap g => hold == g + gran | 0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6600436Z   HOLD-4c membership change => hold == spread(D) + gran        PASS  hold=33.000 want=33.000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6601029Z   MARGIN HOLD-4c | membership change => hold == spread(D) + gran | 1
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6601293Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6601532Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6601978Z 8 BAR FAILURE(S):
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6602332Z   FAIL SPD-2b paired p95 <= p95(max): p95=21 max=14
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6602733Z   FAIL SPD-4b paired p95 <= p95(max): p95=334.000 max=334.000
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6603294Z   FAIL SPD-5a load=0.65 paired gp >= gp(Dc): gp=69321 Dc=69349
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6603954Z   FAIL SPD-5c load=0.65 paired late-discard <= late(Dc): late=33 Dc=0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6604413Z   FAIL SPD-5a load=0.85 paired gp >= gp(Dc): gp=87212 Dc=87252
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6604852Z   FAIL SPD-5c load=0.85 paired late-discard <= late(Dc): late=150 Dc=108
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6605316Z   FAIL HOLD-1c edge p99(ratchet) <= p99(343) + 2*gran: p99=323 fixed=261 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6605856Z   FAIL HOLD-2a mid p50(ratchet) <= p50(343) + 2*gran: p50=152 fixed=129 tol=20
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6606257Z elapsed 42s
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6606372Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6606668Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6607173Z STRUCTURE CHECK -- a battery that died mid-run prints fewer check lines and
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6607566Z would otherwise read as green.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6607907Z   HOLD-1a   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6608309Z   HOLD-1b   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6608609Z   HOLD-1c   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6608953Z   HOLD-1d   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6609239Z   HOLD-2a   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6609554Z   HOLD-2b   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6609880Z   HOLD-3a   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6610183Z   HOLD-3b   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6610482Z   HOLD-4a   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6610788Z   HOLD-4b   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6611096Z   HOLD-4c   got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6611416Z   SPD-1a    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6611751Z   SPD-1b    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6612051Z   SPD-1c    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6612348Z   SPD-1d    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6612654Z   SPD-2a    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6612988Z   SPD-2b    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6613512Z   SPD-2c    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6613835Z   SPD-3a    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6614133Z   SPD-3b    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6614429Z   SPD-4a    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6614786Z   SPD-4b    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6615070Z   SPD-5a    got  2  want  2  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6615388Z   SPD-5b    got  2  want  2  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6615682Z   SPD-5c    got  2  want  2  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6615986Z   SPD-6a    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6616317Z   SPD-6b    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6616612Z   SPD-6c    got  1  want  1  -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6616802Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6617049Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6617574Z MARGIN PIN -- every check line's measured margin against the recorded
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6618059Z baseline. A widened tolerance IS a moved margin: this is what the hash pin
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6618512Z and the mutation matrix between them do NOT bound.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6618965Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6619461Z   31 check lines, 31 pinned, 0 moved, 0 unpinned, 0 pinned-but-absent
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6619951Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6620449Z BAR FAILURES BY CLASS  (8 reported by the battery)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6620955Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6621442Z   NOT GATED [geometry-unstable] -- reported only:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6621823Z     (reported) SPD-4b    paired p95 <= p95(max)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6622232Z     (reported) SPD-5c    load=0.65 paired late-discard <= late(Dc)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6622659Z     (reported) SPD-5c    load=0.85 paired late-discard <= late(Dc)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6623315Z     (reported) HOLD-1c   edge p99(ratchet) <= p99(343) + 2*gran
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6623880Z     (reported) HOLD-2a   mid p50(ratchet) <= p50(343) + 2*gran
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6624335Z   GATED, in the recorded baseline -- honest known fails, NOT weakened away:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6624788Z     (known)    SPD-2b    paired p95 <= p95(max)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6625163Z     (known)    SPD-5a    load=0.65 paired gp >= gp(Dc)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6625556Z     (known)    SPD-5a    load=0.85 paired gp >= gp(Dc)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6625754Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6626016Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6626497Z RUN 2 of 2 -- MUTATION MATRIX, SEEDS=2. FOUR defects, each of which must
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6626974Z turn a named set of bars RED. Each is a real design error from this project
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6627456Z record. A hash pin stops the battery being EDITED; this stops it being
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6628027Z HOLLOW; the MARGIN PIN above is what bounds how far it can be DILUTED.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6628482Z NOT run here: rank-mid-meter and warmup-max (they redden only bars that
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6628961Z already fail on the clean tree) and hold-quantile (minutes per scenario).
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:54:09.6629466Z ----------------------------------------------------------------------------------------------------
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1006136Z   hold-gran        expects RED: HOLD-1d, HOLD-2b, SPD-3a                 -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1007140Z   rank-hungriest   expects RED: SPD-1a, SPD-1b, SPD-2c, SPD-6a, SPD-6b, SPD-6c -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1007808Z   rank-static      expects RED: SPD-2a                                   -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1008406Z   ratchet-x3       expects RED: HOLD-4a, HOLD-4b, HOLD-4c                -> ok
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1008829Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1009086Z   BARS WITH NO DEMONSTRATED FAILURE MODE -- reported, deliberately NOT gated:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1009665Z     (no red demo) HOLD-1a
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1010025Z     (no red demo) HOLD-1b
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1010361Z     (no red demo) HOLD-3a
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1010712Z     (no red demo) HOLD-3b
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1011077Z     (no red demo) SPD-1c
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1011458Z     (no red demo) SPD-1d
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1011655Z 
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1011907Z ====================================================================================================
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1012563Z GATE PASS -- every gated bar held outside the recorded baseline, and every
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1013444Z gated bar was demonstrated RED under its pre-registered defect in this run.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1014218Z Reminder: this says NOTHING about absolute latency, and nothing about hardware.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1148538Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.1149534Z Post job cleanup.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.2152503Z (node:2066) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.2153266Z (Use `node --trace-deprecation ...` to show where the warning was created)
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.2319020Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.2320214Z Post job cleanup.
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3041371Z [command]/usr/bin/git version
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3075944Z git version 2.55.0
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3110313Z Temporarily overriding HOME='/home/runner/work/_temp/7608a889-7ca3-46f1-8872-ca47fe183008' before making global git config changes
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3111285Z Adding repository directory to the temporary git global config as a safe directory
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3116447Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/bond-ci/bond-ci
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3147954Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3177258Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3356701Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3378124Z http.https://github.com/.extraheader
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3386062Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3411334Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3591875Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3617120Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.3933008Z Cleaning up orphan processes
+latency-bars (OBJ-D SPD/HOLD -- PAIRED/STRUCTURAL/UNIT only, no absolute latency)	UNKNOWN STEP	2026-08-30T23:55:03.4142647Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

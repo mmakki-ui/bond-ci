@@ -1,0 +1,14 @@
+#!/bin/sh
+# fake /etc/init.d/p5-datapath
+S="$ECOSIM_STATE"; N=p5-datapath
+case "$1" in
+  enable)  echo 1 > "$S/enabled.$N" ;;
+  disable) echo 0 > "$S/enabled.$N" ;;
+  start)   echo 1 > "$S/running.$N"; echo "SVC $N start" >> "$S/ledger" ;;
+  # restart COUNTS: a restart bounces the EIF speed datapath. F17 asserts a healthy-box
+  # SPEED watchdog tick causes ZERO bond-agg restarts (mirrors svc-engarde's counter).
+  restart) c=$(cat "$S/restarts.$N" 2>/dev/null || echo 0); echo $((c+1)) > "$S/restarts.$N"; echo 1 > "$S/running.$N"; echo "SVC $N restart" >> "$S/ledger" ;;
+  stop)    echo 0 > "$S/running.$N" ;;
+  enabled) [ "$(cat "$S/enabled.$N" 2>/dev/null)" = 1 ] || exit 1 ;;
+esac
+exit 0
