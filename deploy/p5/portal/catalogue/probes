@@ -1,0 +1,48 @@
+# deploy/p5/portal/catalogue/probes — the ENUMERATED read-only probe list.
+#
+# m9-portal-design.md §3b: "Enumerated actions only. The runner exposes a fixed
+# list of named tests. It does NOT accept a command, a path, or a test name
+# interpolated into a shell."
+#
+# So the REQUEST supplies only a NAME, matched against column 1 by exact literal
+# match. The argv comes from THIS FILE and never from the request. That is what
+# keeps the `uci` row safe: its argument vector is fixed here, so no request byte
+# can reach a uci key (injection surface INJ-5).
+#
+# HEAD TOKENS ARE SYMBOLIC AND CLOSED. Column 2's first token must be one of
+# XCTL | UCI | BONDCTL, resolved by the CGI to the configured artifact path. An
+# arbitrary program name in this file is refused at load (bar INJ-5b), so a
+# catalogue edit cannot turn into arbitrary execution. Remaining argv tokens must
+# match ^[A-Za-z0-9._@:/-]+$ -- no shell metacharacters, no spaces, no quotes.
+#
+# READ-ONLY ONLY. Every row is a probe in the design's sense: "safe any time,
+# read-only". The DISRUPTIVE half of §3b (the Layer-2 fault battery against the
+# real artifacts, and E1's saturating edge-vs-mid probe) is deliberately NOT
+# shipped here -- see deploy/p5/portal/README.md "What is deliberately not built".
+# Bar PC-3 asserts every row's head is a read-only verb.
+#
+# fields: name|argv|label
+sources|XCTL _sources|Sources as GL declares them: iface, device, state (routed/up/idle/absent), metric, metered
+node|XCTL node|Lifecycle node: off / engaged / suspended / suspended_degraded
+primary|XCTL _primary|The lowest-metric live source (what `eco` enrols)
+server|XCTL _server|Bond server host, resolved from the live WireGuard peer
+selfcheck|XCTL selfcheck|Artifact self-check
+kmwan|UCI -q get kmwan.global.mode|kmwan's mode -- C3 show-divergence. A load-balance flip starts its tracker and splits traffic underneath the tunnel (INTENT.md OBJ-H hazard 4).
+# ---- U224: the read-only reconciler probes ---------------------------------
+# Every row below is an arm of bond-xctl's dispatch (deploy/p5/bond-xctl, after
+# `_shape)`), bodies at the foot of deploy/p5/lib/xctl-probe.sh. The head stays
+# XCTL, so the CGI's closed head set does not move and PC-3 still holds.
+# LABELS NAME NO INTERFACE (bar NG-1): the source set is whatever the box
+# declares, in whatever number.
+shape|XCTL _shape|Shaping, as the reconciler sees it: `off`, or the tunnel device cake is attached to
+hs|XCTL _hs|Handshake age per peer, in seconds. `never` = no handshake yet. The peer key is not printed
+xfer|XCTL _xfer|Per-peer byte counters plus the BOX's own timestamp -- click twice and the page divides
+ep|XCTL _ep|Endpoint class: direct (the server) / local (a feeder on this box) / other, plus the port. The host is not printed
+qdisc|XCTL _qdisc|Queue state: wanted vs attached, whether P5 owns the controller, whether GL's own SQM holds the device, then `tc -s qdisc show` verbatim
+ifstats|XCTL _ifstats|Per-source link counters from the kernel (bytes, tx drops, carrier, operstate) plus the box timestamp
+reach|XCTL _reach|One bounded ping per routed source out of its own device to its own gateway: rtt, `lost`, or `no_gateway`. The target is not printed
+feeder|XCTL _feeder|The datapath feeder: whether it is live by the reconciler's own predicate, whether it is running the config last written, suspension, and the watchdog's throughput sensor
+armed|XCTL _armed|Armed deadman records -- is an automatic rollback already counting down on this box
+version|XCTL _version|The install stamp: which commit, package and contract version this box is actually running
+# ---- U226: the datapath stats reader ---------------------------------------
+stats|XCTL _stats|Datapath snapshot from the daemon's read-only stats file (M2): age in seconds, then the file verbatim -- per-link bytes and loss, hold, cap and duplication state. Delivery latency percentiles are NOT measured by the daemon and print `absent` rather than a zero. `absent:` means the file is not there (datapath down, AGG_STATS unset, or a pre-U225 binary).

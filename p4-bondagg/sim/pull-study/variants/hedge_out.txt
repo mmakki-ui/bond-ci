@@ -1,0 +1,125 @@
+========================================================================================
+RIG: moderate   (T=14.0s, seeds=24)   steady eth=path0, spotty tether=last path
+========================================================================================
+
+--- offer=1800 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           1799       +0   0.00    36    41    42     0     0     0     0%       0
+auto          1799       +0   0.00    36    41    42     0     0     0     0%       0
+hedge         1799       +0   0.00    36    41    42     0     0     0     0%       0
+hedge_auto    1799       +0   0.00    36    41    42     0     0     0     0%       0
+hedge_free    1799       +0   0.00    36    41    42     0     0     0     0%       0
+  FEC-auto repair: recovered=0 of single-loss-groups=0 (recov_frac=1.00); eth-taildrop off=0 auto=0 hedge=0
+  hedge_free PAIRED vs off: dgp med=+0 kb/s (0/24 seeds >0)
+
+--- offer=2200 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           2169       +0   1.37    76   141   206    30     0     0     9%       0
+auto          2179      +10   0.92    68   130   190    22     0     0    10%       0
+hedge         1664     -505  17.84   245   304   311   480   232   228    54%    1185
+hedge_auto    1532     -637  20.96   236   295   303   544   336   210    51%    1071
+hedge_free    2183      +14   0.72    73    93   145    21     0     0     9%     210
+  FEC-auto repair: recovered=4 of single-loss-groups=4 (recov_frac=1.00); eth-taildrop off=0 auto=0 hedge=0
+  hedge_free PAIRED vs off: dgp med=+14 kb/s (24/24 seeds >0)
+  hedge_free recovery: spotty_failed=9 ideal(mirror arrived)=9 realized(in-ring)=9 late-flushed=0 both-fail=0 | mirror-beat-spotty(latency)=118
+  hedge(faithful) recovery: spotty_total=1573 failed=266 ideal=266 realized=246 late-flush=20 both-fail=0 | teth-share=54% (vs off 9%) -> feedback
+
+--- offer=2600 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           2380       +0   8.39   105   226   270   269     0     2    23%       0
+auto          2271     -109  12.59   122   215   265   417     0    12    24%       0
+hedge         1579     -801  21.82   282   313   331   588   768   283    58%    1289
+hedge_auto    1467     -913  26.94   285   309   322   733   790   241    54%    1144
+hedge_free    2475      +95   4.72    79   144   163   165     0     2    23%     639
+  FEC-auto repair: recovered=11 of single-loss-groups=12 (recov_frac=0.92); eth-taildrop off=0 auto=0 hedge=36
+  hedge_free PAIRED vs off: dgp med=+92 kb/s (24/24 seeds >0)
+  hedge_free recovery: spotty_failed=26 ideal(mirror arrived)=26 realized(in-ring)=25 late-flushed=1 both-fail=0 | mirror-beat-spotty(latency)=298
+  hedge(faithful) recovery: spotty_total=1605 failed=276 ideal=276 realized=252 late-flush=22 both-fail=2 | teth-share=58% (vs off 23%) -> feedback
+
+--- offer=3000 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           2148       +0  27.56   164   273   305   986    40   114    32%       0
+auto          2008     -140  29.90   181   295   342  1038   202   147    33%       0
+hedge         1659     -489  19.19   276   317   385   523  1290   366    58%    1321
+hedge_auto    1492     -656  26.62   282   311   329   726  1334   292    54%    1160
+hedge_free    2316     +168  21.96   125   249   280   879    40   114    32%    1021
+  FEC-auto repair: recovered=16 of single-loss-groups=18 (recov_frac=0.93); eth-taildrop off=0 auto=0 hedge=90
+  hedge_free PAIRED vs off: dgp med=+166 kb/s (24/24 seeds >0)
+  hedge_free recovery: spotty_failed=134 ideal(mirror arrived)=134 realized(in-ring)=116 late-flushed=18 both-fail=0 | mirror-beat-spotty(latency)=233
+  hedge(faithful) recovery: spotty_total=1634 failed=283 ideal=277 realized=260 late-flush=18 both-fail=6 | teth-share=58% (vs off 32%) -> feedback
+========================================================================================
+RIG: severe   (T=14.0s, seeds=24)   steady eth=path0, spotty tether=last path
+========================================================================================
+
+--- offer=2200 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           2101       +0   4.45   121   240   305   114     0     0     9%       0
+auto          2114      +12   3.89   113   241   305   104     0     0     9%       0
+hedge         1686     -415  16.18   210   303   310   432   251   240    31%     686
+hedge_auto    1521     -580  21.82   263   302   308   568   341   232    31%     627
+hedge_free    2133      +32   3.01   108   141   157    88     0     0     9%     202
+  FEC-auto repair: recovered=6 of single-loss-groups=7 (recov_frac=0.88); eth-taildrop off=0 auto=0 hedge=0
+  hedge_free PAIRED vs off: dgp med=+32 kb/s (24/24 seeds >0)
+  hedge_free recovery: spotty_failed=17 ideal(mirror arrived)=17 realized(in-ring)=17 late-flushed=0 both-fail=0 | mirror-beat-spotty(latency)=104
+  hedge(faithful) recovery: spotty_total=910 failed=286 ideal=286 realized=270 late-flush=16 both-fail=0 | teth-share=31% (vs off 9%) -> feedback
+
+--- offer=2600 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           1804       +0  28.92   227   360   436   838    88   147    20%       0
+auto          1741      -63  29.20   231   372   442   812   162   166    21%       0
+hedge         1477     -327  26.49   297   322   423   722   786   354    35%     779
+hedge_auto    1406     -398  29.90   298   313   341   818   795   292    32%     667
+hedge_free    1956     +152  23.02   184   288   300   796    88   147    20%     542
+  FEC-auto repair: recovered=8 of single-loss-groups=10 (recov_frac=0.90); eth-taildrop off=0 auto=0 hedge=18
+  hedge_free PAIRED vs off: dgp med=+144 kb/s (24/24 seeds >0)
+  hedge_free recovery: spotty_failed=159 ideal(mirror arrived)=159 realized(in-ring)=142 late-flushed=16 both-fail=0 | mirror-beat-spotty(latency)=105
+  hedge(faithful) recovery: spotty_total=944 failed=322 ideal=315 realized=278 late-flush=32 both-fail=7 | teth-share=35% (vs off 20%) -> feedback
+
+--- offer=3000 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           1663       +0  36.82   275   424   488  1059   498   246    23%       0
+auto          1617      -46  33.20   262   433   486   907   723   248    23%       0
+hedge         1423     -239  29.89   295   334   455   804  1328   410    34%     761
+hedge_auto    1369     -294  32.14   298   314   393   872  1354   348    32%     654
+hedge_free    1867     +204  29.66   244   301   307  1052   498   246    23%     665
+  FEC-auto repair: recovered=8 of single-loss-groups=9 (recov_frac=0.89); eth-taildrop off=0 auto=0 hedge=48
+  hedge_free PAIRED vs off: dgp med=+188 kb/s (24/24 seeds >0)
+  hedge_free recovery: spotty_failed=232 ideal(mirror arrived)=232 realized(in-ring)=214 late-flushed=19 both-fail=0 | mirror-beat-spotty(latency)=87
+  hedge(faithful) recovery: spotty_total=897 failed=308 ideal=294 realized=266 late-flush=26 both-fail=15 | teth-share=34% (vs off 23%) -> feedback
+========================================================================================
+RIG: n3   (T=14.0s, seeds=24)   steady eth=path0, spotty tether=last path
+========================================================================================
+
+--- offer=2600 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           2518       +0   3.07    54   123   147   119     0     0     0%       0
+auto          2518       +0   3.07    54   123   147   119     0     0     0%       0
+hedge         2518       +0   3.07    54   123   147   119     0     0     0%       0
+hedge_auto    2518       +0   3.07    54   123   147   119     0     0     0%       0
+hedge_free    2518       +0   3.07    54   123   147   119     0     0     0%       0
+  FEC-auto repair: recovered=0 of single-loss-groups=0 (recov_frac=1.00); eth-taildrop off=0 auto=0 hedge=0
+  hedge_free PAIRED vs off: dgp med=+0 kb/s (0/24 seeds >0)
+
+--- offer=3000 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           2847       +0   5.02    61   143   167   260     0     0     0%       0
+auto          2847       +0   5.02    62   144   166   260     0     0     0%       0
+hedge         2858      +11   4.66    61   145   166   246     0     0     2%      65
+hedge_auto    2852       +5   4.87    61   145   166   252     0     0     2%      67
+hedge_free    2851       +3   4.91    61   143   160   252     0     0     0%      16
+  FEC-auto repair: recovered=0 of single-loss-groups=0 (recov_frac=1.00); eth-taildrop off=0 auto=0 hedge=0
+  hedge_free PAIRED vs off: dgp med=+8 kb/s (17/24 seeds >0)
+  hedge_free recovery: spotty_failed=0 ideal(mirror arrived)=0 realized(in-ring)=0 late-flushed=0 both-fail=0 | mirror-beat-spotty(latency)=12
+  hedge(faithful) recovery: spotty_total=86 failed=2 ideal=2 realized=2 late-flush=0 both-fail=0 | teth-share=2% (vs off 0%) -> feedback
+
+--- offer=3600 kb/s  (eth cap 2000; spill onto tether when offer>~eth headroom) ---
+cfg             gp  dgp/off  loss%   p50   p95   p99  late   txd  tail  teth%  bwcost
+off           3396       +0   5.60   118   246   295   369     0    22    11%       0
+auto          3332      -64   7.39   131   247   300   452     0    34    12%       0
+hedge         2283    -1113  28.95   296   310   318  1354   510   206    25%     870
+hedge_auto    2103    -1293  33.31   296   308   314  1520   520   181    23%     757
+hedge_free    3471      +75   3.52   100   137   154   281     0    22    11%     439
+  FEC-auto repair: recovered=6 of single-loss-groups=8 (recov_frac=0.92); eth-taildrop off=6 auto=6 hedge=16
+  hedge_free PAIRED vs off: dgp med=+76 kb/s (24/24 seeds >0)
+  hedge_free recovery: spotty_failed=24 ideal(mirror arrived)=24 realized(in-ring)=23 late-flushed=0 both-fail=0 | mirror-beat-spotty(latency)=231
+  hedge(faithful) recovery: spotty_total=1118 failed=208 ideal=203 realized=168 late-flush=38 both-fail=3 | teth-share=25% (vs off 11%) -> feedback
