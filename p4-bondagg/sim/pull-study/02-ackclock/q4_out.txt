@@ -1,0 +1,41 @@
+##############################################################################
+# SECTION 4: ACK-PATH CAVEATS  seeds=24
+##############################################################################
+
+=== 4a. REVERSE-PATH ACK LOSS (does it jam the window? does the floor fix it?) ===
+  -- EDGE --
+  B ackloss=0.0 NO-floor         gp= 89167 loss=  1.9 p50=  31 p95= 251 p99= 261 depth=  487 tshr=0.20 
+  B ackloss=0.0 floor350         gp= 89167 loss=  1.9 p50=  31 p95= 251 p99= 261 depth=  487 tshr=0.20 
+  B ackloss=0.15 NO-floor        gp=     0 loss=100.0 p50=   0 p95=   0 p99=   0 depth=   76 tshr=0.25 
+  B ackloss=0.15 floor350        gp= 73531 loss= 19.1 p50= 475 p95= 596 p99= 610 depth= 1922 tshr=0.17 
+  B ackloss=0.35 NO-floor        gp=     0 loss=100.0 p50=   0 p95=   0 p99=   0 depth=   75 tshr=0.25 
+  B ackloss=0.35 floor350        gp= 37881 loss= 58.3 p50= 502 p95= 603 p99= 612 depth= 1194 tshr=0.21 
+
+  -- MID-drop --
+  B ackloss=0.0 NO-floor         gp= 79464 loss= 12.5 p50= 361 p95= 606 p99= 637 depth= 2101 tshr=0.08 
+  B ackloss=0.0 floor350         gp= 86051 loss=  5.3 p50= 209 p95= 335 p99= 388 depth= 2101 tshr=0.16 
+  B ackloss=0.15 NO-floor        gp=    52 loss= 99.9 p50= 529 p95= 622 p99= 632 depth=  770 tshr=0.25 
+  B ackloss=0.15 floor350        gp= 61400 loss= 32.4 p50= 504 p95= 608 p99= 618 depth= 1642 tshr=0.16 
+  B ackloss=0.35 NO-floor        gp=     0 loss=100.0 p50=   0 p95=   0 p99=   0 depth=  726 tshr=0.25 
+  B ackloss=0.35 floor350        gp= 34639 loss= 61.9 p50= 513 p95= 611 p99= 619 depth=  992 tshr=0.20 
+
+=== 4b. ACK COMPRESSION (acks batched every N ms -> bursty credit release) ===
+  -- EDGE --
+  B comp=0.0ms floor350          gp= 89167 loss=  1.9 p50=  31 p95= 251 p99= 261 depth=  487 tshr=0.20 
+  B comp=40.0ms floor350         gp= 89071 loss=  2.0 p50=  92 p95= 252 p99= 262 depth=  489 tshr=0.18 
+  B comp=80.0ms floor350         gp= 65137 loss= 28.3 p50= 465 p95= 579 p99= 601 depth= 1797 tshr=0.20 
+
+  -- MID-drop --
+  B comp=0.0ms floor350          gp= 86051 loss=  5.3 p50= 209 p95= 335 p99= 388 depth= 2101 tshr=0.16 
+  B comp=40.0ms floor350         gp= 81682 loss= 10.1 p50= 399 p95= 551 p99= 595 depth= 1921 tshr=0.14 
+  B comp=80.0ms floor350         gp= 59212 loss= 34.8 p50= 485 p95= 589 p99= 610 depth= 1656 tshr=0.16 
+
+=== 4c. RTT-UNFAIRNESS (two EQUAL-cap paths, owd 5ms vs 60ms). tshr=low-RTT share ===
+      fair share = 0.50. does the low-RTT path hog? does per-RTT window sizing fix it?
+  push                           gp= 67924 loss=  0.0 p50=  11 p95=  11 p99=  11 depth=    0 tshr=0.50 (tshr=low-RTT path0 share)
+  oracle                         gp= 67924 loss=  0.0 p50=  11 p95=  11 p99=  11 depth=    0 tshr=0.50 (tshr=low-RTT path0 share)
+  B w=50 (fixed ms)              gp= 61201 loss=  9.9 p50= 261 p95= 461 p99= 513 depth= 1245 tshr=0.62 (tshr=low-RTT path0 share)
+  B w=150 (>=maxRTT)             gp= 67924 loss=  0.0 p50=  11 p95=  11 p99=  11 depth=    0 tshr=0.50 (tshr=low-RTT path0 share)
+  B w_frames=64 (EQUAL frames)   gp= 37603 loss= 44.6 p50= 450 p95= 536 p99= 548 depth=  832 tshr=0.80 (tshr=low-RTT path0 share)
+
+(section 4 elapsed 215s)

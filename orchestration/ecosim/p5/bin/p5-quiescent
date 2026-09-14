@@ -1,0 +1,27 @@
+#!/bin/sh
+# fake /usr/sbin/p5-uninstall --quiescent — the OLD-STACK QUIESCENCE CHECKER as
+# the reconciler sees it (U208). Layer-2 proves the WIRING, not the predicate:
+# that bond-xctl's `old_quiescent` guard actually runs this program, that its
+# non-zero refuses the edge before any action, that the refusal reaches the log
+# by name, and that bondctl's own exit follows. WHAT the real predicate measures
+# — rc.d flags including a single-digit K4, ubus/pgrep worker argv, the tunnel
+# endpoint against the old local socket — is measured in E0 (QG-E1..E7), against
+# real fixtures, because that is where a $P5_ROOT tree exists.
+#
+# KNOB ($ECOSIM_STATE):
+#   old_quiescent=1  quiescent (DEFAULT, so every pre-U208 scenario in this file
+#                    keeps its exact meaning: they all model a box whose switch
+#                    has already happened)
+#   old_quiescent=0  not quiescent -- prints the terms the real verb prints and
+#                    exits 1
+#
+# Arguments are ignored on purpose: the guard invokes it as
+# `"$QUIESCE_CHECK" --quiescent`, and a shim that parsed the flag could pass by
+# never seeing it.
+S="$ECOSIM_STATE"
+if [ "$(cat "$S/old_quiescent" 2>/dev/null || echo 1)" = 1 ]; then
+    exit 0
+fi
+echo "NOT QUIESCENT: flags /etc/rc.d/K4-old-shaper (procd starts it at the next boot)"
+echo "remedy: p5-uninstall --switch-off --role client"
+exit 1

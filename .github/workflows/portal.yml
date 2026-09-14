@@ -1,0 +1,59 @@
+name: portal
+# The M9 portal harness, the same command `bash scripts/ci-local.sh portal` runs.
+# It forks a mutant tree per bar and runs the shipped CGI under hermetic shims, which is why
+# ci-local.sh refuses it off Linux (U79). A GitHub runner is Linux, so it runs here.
+#
+# NOT the arm's only mirror gate, despite U258's row: emulator-gate.yml:1032 already runs
+# `bash orchestration/ecosim/p5/portal/run.sh` in a job literally named `portal` -- which is
+# why ci-local.sh:367 labels this gate "(emulator-gate: portal)". Same trade as e0.yml: this
+# buys a dispatchable ~20s square, and costs a duplicate run on the mirror that cannot be
+# opted out of from here (sync-public-ci.sh:230-273 forces push:['**'] on every workflow).
+on:
+  # RETARGETED BY scripts/sync-public-ci.sh. The SOURCE is workflow_dispatch-only so the
+  # PRIVATE repo (paid Actions minutes) starts nothing; the mirror is public and free, and
+  # carries ONE BRANCH PER UNIT under test, so it fires on all of them. A unit whose branch
+  # triggered no run reads as NO EVIDENCE, which is the state that made five units
+  # unverifiable at once.
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  portal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: portal harness
+        # Same correction as e0.yml, for the same measured reason: `sh ...; rc=$?` is the idiom
+        # busybox.yml:75-78 records as fatal under GitHub's `bash --noprofile --norc -eo
+        # pipefail` -- a failing arm kills the step on that line, so the tail and the FAIL grep
+        # never run and a red job carries NO output. A/B on that shell: failing arm -> rc=1,
+        # silent; passing arm -> the failure header prints with nothing under it.
+        #
+        # The harness forks a mutant tree per bar, which is the shape that hung under Git Bash
+        # (U79), so the timeout is not theoretical. It measured 19s on WSL (264 bars), so 420s
+        # is ~22x headroom; the same bound busybox.yml uses.
+        run: |
+          _rc=0
+          timeout -k 30 420 sh orchestration/ecosim/p5/portal/run.sh > /tmp/portal.log 2>&1 || _rc=$?
+          echo "portal arm exit: $_rc"
+          echo "--- lines naming a failure ---"
+          grep -nE '^FAIL' /tmp/portal.log | head -20 || true
+          echo "--- last 40 lines ---"
+          tail -40 /tmp/portal.log || true
+          case "$_rc" in
+            0) ;;
+            124|137)
+              echo "::error::portal harness HUNG (420s, killed). The LAST BAR ABOVE is where it stopped."
+              exit 1 ;;
+            *)
+              echo "::error::portal harness exited $_rc"
+              exit 1 ;;
+          esac
+      - name: log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-log
+          path: /tmp/portal.log
