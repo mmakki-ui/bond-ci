@@ -1,0 +1,4 @@
+EDGE pull: gp=90182 loss=0.7%  (expect ~90182 / 0.7%)
+MID  pull: gp=78916 loss=13.1%  (expect ~78916 / 13.1%)
+MID  push: gp=87010 loss=4.2%  (expect ~87010 / 4.2%)
+elapsed 844s
